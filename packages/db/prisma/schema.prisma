@@ -32,6 +32,8 @@ model User {
   companyMemberships CompanyMembership[]
   platformAuditLogs PlatformAuditLog[]  @relation("platform_actor")
   companyAuditLogs CompanyAuditLog[]    @relation("company_actor")
+  platformInvites  PlatformInvite[]     @relation("platform_invite_creator")
+  companyInvites   CompanyInvite[]      @relation("company_invite_creator")
 }
 
 model Session {
@@ -41,7 +43,9 @@ model Session {
   ip           String?
   userAgent    String?
   expiresAt    DateTime
+  absoluteExpiresAt DateTime
   createdAt    DateTime @default(now())
+  lastActivityAt DateTime @default(now())
   revokedAt    DateTime?
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -70,6 +74,7 @@ model PlatformRole {
   updatedAt    DateTime                 @updatedAt
   permissions  PlatformRolePermission[]
   users        PlatformUserRole[]
+  invites      PlatformInvite[]
 }
 
 model PlatformPermission {
@@ -110,6 +115,7 @@ model Company {
   locations      Location[]
   modules        ModuleInstallation[]
   auditLogs      CompanyAuditLog[]
+  invites        CompanyInvite[]
 }
 
 model Location {
@@ -149,6 +155,7 @@ model CompanyRole {
   company      Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
   permissions  CompanyRolePermission[]
   members      CompanyMemberRole[]
+  invites      CompanyInvite[]
 
   @@unique([companyId, key])
   @@index([companyId])
@@ -258,4 +265,40 @@ model CompanyAuditLog {
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, createdAt])
+}
+
+model PlatformInvite {
+  id              String    @id @default(uuid())
+  email           String
+  tokenHash       String    @unique
+  roleId          String?
+  expiresAt       DateTime
+  usedAt          DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  createdByUserId String
+  createdByUser   User      @relation("platform_invite_creator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  role            PlatformRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+model CompanyInvite {
+  id              String    @id @default(uuid())
+  companyId       String
+  email           String
+  tokenHash       String    @unique
+  roleId          String?
+  expiresAt       DateTime
+  usedAt          DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  createdByUserId String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role            CompanyRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  createdByUser   User      @relation("company_invite_creator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, email])
+  @@index([createdAt])
 }

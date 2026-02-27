@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import type { Route } from 'next';
 import { apiFetch, handleApiError } from '../../../lib/api';
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const params = useSearchParams();
   const [email, setEmail] = useState('admin@themonocore.com');
   const [password, setPassword] = useState('ChangeMe123!');
   const [error, setError] = useState('');
@@ -23,6 +25,11 @@ export default function LoginPage() {
               method: 'POST',
               body: JSON.stringify({ email, password })
             });
+            const nextPath = params.get('next');
+            if (nextPath) {
+              router.push(nextPath as Route);
+              return;
+            }
             router.push('/app/company');
           } catch (err) {
             handleApiError(err);
@@ -43,5 +50,13 @@ export default function LoginPage() {
         </button>
       </form>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="mx-auto mt-24 max-w-md rounded border border-slate-200 bg-white p-6 shadow-sm">Loading login...</main>}>
+      <LoginContent />
+    </Suspense>
   );
 }

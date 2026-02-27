@@ -6,6 +6,11 @@ const prisma = new PrismaClient();
 const platformPermissions = [
   'platform.users.read',
   'platform.users.invite',
+  'platform:team.invite.create',
+  'platform:team.invite.resend',
+  'platform:team.invite.revoke',
+  'platform:team.role.assign',
+  'platform:sessions.invalidate',
   'platform.roles.manage',
   'platform.tenants.read',
   'platform.tenants.manage',
@@ -17,6 +22,10 @@ const platformPermissions = [
 const companyPermissions = [
   'company.team.read',
   'company.team.invite',
+  'company:team.invite.create',
+  'company:team.invite.resend',
+  'company:team.invite.revoke',
+  'company:team.role.assign',
   'company.roles.manage',
   'company.audit.read',
   'company.settings.manage'

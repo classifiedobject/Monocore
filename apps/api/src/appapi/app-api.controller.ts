@@ -38,11 +38,37 @@ export class AppApiController {
     return this.appApi.listTeam(req.companyId);
   }
 
-  @Post('team/invite')
+  @Get('invites')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.team.invite')
-  inviteMember(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
-    return this.appApi.inviteMember(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  @RequirePermissions('company:team.invite.create')
+  listInvites(@Req() req: Request & { companyId: string }) {
+    return this.appApi.listInvites(req.companyId);
+  }
+
+  @Post('invites')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:team.invite.create')
+  createInvite(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.createInvite(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('invites/:id/resend')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:team.invite.resend')
+  resendInvite(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.resendInvite(req.companyId, id, req.user.id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('invites/:id/revoke')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:team.invite.revoke')
+  revokeInvite(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.revokeInvite(req.companyId, id, req.user.id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('invites/accept')
+  acceptInvite(@Body() body: unknown, @Req() req: Request & { user: { id: string } }) {
+    return this.appApi.acceptInvite(req.user.id, body, req.ip, req.get('user-agent'));
   }
 
   @Get('roles')
@@ -79,7 +105,7 @@ export class AppApiController {
 
   @Post('memberships/:membershipId/roles/:roleId')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.roles.manage')
+  @RequirePermissions('company:team.role.assign')
   assignMemberRole(
     @Param('membershipId') membershipId: string,
     @Param('roleId') roleId: string,
