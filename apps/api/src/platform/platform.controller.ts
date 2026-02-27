@@ -134,6 +134,15 @@ export class PlatformController {
     return this.platform.upsertModule(req.user.id, body);
   }
 
+  @Post('modules/:moduleKey/publish')
+  @RequirePermissions('platform:modules.publish')
+  publishModule(
+    @Param('moduleKey') moduleKey: string,
+    @Req() req: Request & { user: { id: string } }
+  ) {
+    return this.platform.publishModule(req.user.id, moduleKey, req.ip, req.get('user-agent'));
+  }
+
   @Get('settings')
   @RequirePermissions('platform:settings.manage')
   listSettings() {

@@ -123,8 +123,22 @@ export class AppApiController {
 
   @Get('modules')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company:team.read')
+  @RequirePermissions('company:modules.read')
   modules(@Req() req: Request & { companyId: string }) {
     return this.appApi.listInstalledModules(req.companyId);
+  }
+
+  @Get('modules/catalog')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:modules.read')
+  catalog(@Req() req: Request & { companyId: string }) {
+    return this.appApi.listModuleCatalog(req.companyId);
+  }
+
+  @Post('modules/install')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:modules.install')
+  installModule(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.installModule(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 }

@@ -48,9 +48,14 @@ export const moduleSchema = z.object({
   name: z.string().min(2).max(80),
   description: z.string().max(500).optional(),
   version: z.string().min(1).max(50),
-  status: z.enum(['DRAFT', 'PUBLISHED']),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'DEPRECATED']),
   dependencies: z.record(z.any()).default({}),
   pricingMeta: z.record(z.any()).default({})
+});
+
+export const installModuleSchema = z.object({
+  moduleKey: z.string().min(2).max(80),
+  config: z.record(z.any()).default({})
 });
 
 export const languagePackSchema = z.object({
