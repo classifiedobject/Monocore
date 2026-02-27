@@ -6,7 +6,7 @@
     "dev": "next dev -p ${WEB_PORT:-3000}",
     "build": "next build",
     "start": "next start -p ${WEB_PORT:-3000}",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "echo 'web tests placeholder'"
   },
