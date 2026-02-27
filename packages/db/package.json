@@ -1,0 +1,29 @@
+{
+  "name": "@monocore/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "prisma generate --watch",
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo 'db lint placeholder'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'db tests placeholder'",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev --name init",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.4.1",
+    "argon2": "0.41.1"
+  },
+  "devDependencies": {
+    "prisma": "6.4.1",
+    "tsx": "4.19.3"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

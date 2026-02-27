@@ -1,0 +1,261 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ModuleStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum InstallationStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model User {
+  id               String               @id @default(uuid())
+  email            String               @unique
+  fullName         String
+  passwordHash     String
+  locale           String               @default("en")
+  isActive         Boolean              @default(true)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  sessions         Session[]
+  platformAccess   PlatformMembership[]
+  companyMemberships CompanyMembership[]
+  platformAuditLogs PlatformAuditLog[]  @relation("platform_actor")
+  companyAuditLogs CompanyAuditLog[]    @relation("company_actor")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  tokenHash    String   @unique
+  userId       String
+  ip           String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  revokedAt    DateTime?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PlatformMembership {
+  id         String             @id @default(uuid())
+  userId     String
+  invitedById String?
+  isActive   Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles      PlatformUserRole[]
+
+  @@unique([userId])
+}
+
+model PlatformRole {
+  id           String                   @id @default(uuid())
+  key          String                   @unique
+  name         String
+  description  String?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  permissions  PlatformRolePermission[]
+  users        PlatformUserRole[]
+}
+
+model PlatformPermission {
+  id          String                   @id @default(uuid())
+  key         String                   @unique
+  description String?
+  createdAt   DateTime                 @default(now())
+  roles       PlatformRolePermission[]
+}
+
+model PlatformRolePermission {
+  roleId        String
+  permissionId  String
+  role          PlatformRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    PlatformPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model PlatformUserRole {
+  membershipId String
+  roleId       String
+  membership   PlatformMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role         PlatformRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([membershipId, roleId])
+}
+
+model Company {
+  id             String               @id @default(uuid())
+  name           String
+  plan           String               @default("free")
+  locale         String               @default("en")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  memberships    CompanyMembership[]
+  roles          CompanyRole[]
+  locations      Location[]
+  modules        ModuleInstallation[]
+  auditLogs      CompanyAuditLog[]
+}
+
+model Location {
+  id          String   @id @default(uuid())
+  companyId   String
+  name        String
+  createdAt   DateTime @default(now())
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model CompanyMembership {
+  id            String              @id @default(uuid())
+  companyId     String
+  userId        String
+  invitedById   String?
+  status        String              @default("active")
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles         CompanyMemberRole[]
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+model CompanyRole {
+  id           String                  @id @default(uuid())
+  companyId    String
+  key          String
+  name         String
+  description  String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  company      Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  permissions  CompanyRolePermission[]
+  members      CompanyMemberRole[]
+
+  @@unique([companyId, key])
+  @@index([companyId])
+}
+
+model CompanyPermission {
+  id          String                   @id @default(uuid())
+  key         String                   @unique
+  description String?
+  createdAt   DateTime                 @default(now())
+  roles       CompanyRolePermission[]
+}
+
+model CompanyRolePermission {
+  roleId        String
+  permissionId  String
+  role          CompanyRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    CompanyPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model CompanyMemberRole {
+  membershipId String
+  roleId       String
+  membership   CompanyMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role         CompanyRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([membershipId, roleId])
+}
+
+model Module {
+  id            String               @id @default(uuid())
+  key           String               @unique
+  name          String
+  description   String?
+  version       String
+  status        ModuleStatus
+  dependencies  Json                 @default("{}")
+  pricingMeta   Json                 @default("{}")
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  installations ModuleInstallation[]
+}
+
+model ModuleInstallation {
+  id          String              @id @default(uuid())
+  companyId   String
+  moduleKey   String
+  status      InstallationStatus  @default(PENDING)
+  config      Json                @default("{}")
+  installedAt DateTime?
+  createdAt   DateTime            @default(now())
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  module      Module              @relation(fields: [moduleKey], references: [key], onDelete: Cascade)
+
+  @@unique([companyId, moduleKey])
+}
+
+model SiteSetting {
+  id           String   @id @default(uuid())
+  key          String   @unique
+  value        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model LanguagePack {
+  id         String   @id @default(uuid())
+  locale     String
+  namespace  String
+  key        String
+  value      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([locale, namespace, key])
+}
+
+model PlatformAuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("platform_actor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+model CompanyAuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  companyId   String
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("company_actor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+}

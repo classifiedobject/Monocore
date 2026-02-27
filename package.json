@@ -1,0 +1,25 @@
+{
+  "name": "monocore",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.6.3",
+  "scripts": {
+    "bootstrap": "dotenv -e .env -- sh -c 'pnpm compose:up && pnpm db:generate && pnpm db:migrate && pnpm db:seed'",
+    "dev": "dotenv -e .env -- pnpm -r --parallel --filter @monocore/db --filter @monocore/api --filter @monocore/web dev",
+    "dev:all": "pnpm bootstrap && pnpm dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @monocore/db prisma:generate",
+    "db:migrate": "pnpm --filter @monocore/db prisma:migrate:dev",
+    "db:seed": "pnpm --filter @monocore/db seed",
+    "compose:up": "docker compose up -d",
+    "compose:down": "docker compose down"
+  },
+  "devDependencies": {
+    "dotenv-cli": "7.4.4",
+    "@types/node": "22.13.10",
+    "typescript": "5.8.2"
+  }
+}

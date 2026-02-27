@@ -1,0 +1,20 @@
+{
+  "name": "@monocore/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo 'ui lint placeholder'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'ui tests placeholder'"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
