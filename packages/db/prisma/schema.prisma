@@ -19,6 +19,11 @@ enum InstallationStatus {
   PENDING
 }
 
+enum FinanceCategoryType {
+  INCOME
+  EXPENSE
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -37,6 +42,7 @@ model User {
   companyInvites   CompanyInvite[]      @relation("company_invite_creator")
   platformProfile  PlatformUserProfile? @relation("platform_user_profile_user")
   managedPlatformProfiles PlatformUserProfile[] @relation("platform_user_profile_manager")
+  financeEntriesCreated FinanceEntry[]  @relation("finance_entry_creator")
 }
 
 model Session {
@@ -118,6 +124,8 @@ model Company {
   locations      Location[]
   modules        ModuleInstallation[]
   entitlements   CompanyEntitlement[]
+  financeCategories FinanceCategory[]
+  financeEntries FinanceEntry[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -358,4 +366,36 @@ model CompanyInvite {
 
   @@index([companyId, email])
   @@index([createdAt])
+}
+
+model FinanceCategory {
+  id        String              @id @default(uuid())
+  companyId String
+  name      String
+  type      FinanceCategoryType
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entries   FinanceEntry[]
+
+  @@unique([companyId, name])
+  @@index([companyId, type])
+}
+
+model FinanceEntry {
+  id              String    @id @default(uuid())
+  companyId       String
+  categoryId      String
+  amount          Decimal   @db.Decimal(14, 2)
+  date            DateTime
+  description     String?
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category        FinanceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdByUser   User      @relation("finance_entry_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, date])
+  @@index([companyId, categoryId])
 }

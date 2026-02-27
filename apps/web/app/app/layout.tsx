@@ -15,24 +15,34 @@ const baseLinks: Array<{ href: Route; label: string }> = [
 ];
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
-  const [installedCount, setInstalledCount] = useState(0);
+  const [installedModuleKeys, setInstalledModuleKeys] = useState<string[]>([]);
 
   useEffect(() => {
     apiFetch('/app-api/modules')
       .then((rows: unknown) => {
         const items = Array.isArray(rows) ? rows : [];
-        setInstalledCount(items.length);
+        const keys = items
+          .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const row = item as { moduleKey?: string; module?: { key?: string } };
+            return row.moduleKey ?? row.module?.key ?? null;
+          })
+          .filter((key): key is string => typeof key === 'string');
+        setInstalledModuleKeys(keys);
       })
       .catch(handleApiError);
   }, []);
 
   const links = useMemo(() => {
     const list = [...baseLinks];
-    if (installedCount > 0) {
+    if (installedModuleKeys.length > 0) {
       list.push({ href: '/app/modules', label: 'Modules' });
     }
+    if (installedModuleKeys.includes('finance-core')) {
+      list.push({ href: '/app/finance', label: 'Finance' });
+    }
     return list;
-  }, [installedCount]);
+  }, [installedModuleKeys]);
 
   return <Shell title="Customer App" links={links}>{children}</Shell>;
 }

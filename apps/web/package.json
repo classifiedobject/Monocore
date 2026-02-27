@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p ${WEB_PORT:-3000}",
     "lint": "next lint",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "rm -f tsconfig.tsbuildinfo && tsc -p tsconfig.json --noEmit",
     "test": "echo 'web tests placeholder'"
   },
   "dependencies": {
