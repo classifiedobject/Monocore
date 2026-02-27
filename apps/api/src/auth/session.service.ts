@@ -2,15 +2,24 @@ import crypto from 'crypto';
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service.js';
 
-const SESSION_DAYS = 14;
+const INACTIVITY_DAYS = Number(process.env.SESSION_INACTIVITY_DAYS ?? 30);
+const ABSOLUTE_DAYS = Number(process.env.SESSION_ABSOLUTE_DAYS ?? 90);
 
 @Injectable()
 export class SessionService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async create(userId: string, ip?: string, userAgent?: string) {
+  async create(userId: string, ip?: string, userAgent?: string, rotate = true) {
     const rawToken = crypto.randomBytes(48).toString('hex');
     const tokenHash = this.hash(rawToken);
+    const now = Date.now();
+
+    if (rotate) {
+      await this.prisma.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() }
+      });
+    }
 
     await this.prisma.session.create({
       data: {
@@ -18,7 +27,9 @@ export class SessionService {
         tokenHash,
         ip,
         userAgent,
-        expiresAt: new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000)
+        expiresAt: new Date(now + INACTIVITY_DAYS * 24 * 60 * 60 * 1000),
+        absoluteExpiresAt: new Date(now + ABSOLUTE_DAYS * 24 * 60 * 60 * 1000),
+        lastActivityAt: new Date(now)
       }
     });
 
@@ -40,11 +51,32 @@ export class SessionService {
       include: { user: true }
     });
 
-    if (!session || session.revokedAt || session.expiresAt < new Date()) {
+    const now = new Date();
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt < now ||
+      session.absoluteExpiresAt < now
+    ) {
       return null;
     }
 
+    await this.prisma.session.update({
+      where: { id: session.id },
+      data: {
+        lastActivityAt: now,
+        expiresAt: new Date(now.getTime() + INACTIVITY_DAYS * 24 * 60 * 60 * 1000)
+      }
+    });
+
     return session.user;
+  }
+
+  async invalidateAllForUser(userId: string) {
+    await this.prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
   }
 
   private hash(rawToken: string) {

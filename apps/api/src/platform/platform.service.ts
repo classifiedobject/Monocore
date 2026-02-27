@@ -1,13 +1,18 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import crypto from 'crypto';
+import { Injectable, NotFoundException, Inject, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service.js';
-import { roleSchema, permissionSchema, moduleSchema, languagePackSchema, inviteUserSchema } from '@monocore/shared';
+import { roleSchema, permissionSchema, moduleSchema, languagePackSchema, createInviteSchema, acceptInviteSchema } from '@monocore/shared';
 import { AuditService } from '../common/audit.service.js';
+import { SessionService } from '../auth/session.service.js';
+
+const INVITE_TTL_DAYS = 7;
 
 @Injectable()
 export class PlatformService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuditService) private readonly audit: AuditService
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(SessionService) private readonly sessions: SessionService
   ) {}
 
   dashboard() {
@@ -28,44 +33,178 @@ export class PlatformService {
     });
   }
 
-  async invitePlatformUser(actorUserId: string, payload: unknown, ip?: string, userAgent?: string) {
-    const body = inviteUserSchema.parse(payload);
-
-    const user = await this.prisma.user.upsert({
-      where: { email: body.email },
-      create: {
-        email: body.email,
-        fullName: body.email.split('@')[0],
-        passwordHash: 'pending_invite'
-      },
-      update: {}
+  listPlatformInvites() {
+    return this.prisma.platformInvite.findMany({
+      include: { role: true, createdByUser: true },
+      orderBy: { createdAt: 'desc' },
+      take: 100
     });
+  }
+
+  async createPlatformInvite(actorUserId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = createInviteSchema.parse(payload);
+    const rawToken = crypto.randomBytes(40).toString('hex');
+    const tokenHash = this.hashToken(rawToken);
+
+    const invite = await this.prisma.platformInvite.create({
+      data: {
+        email: body.email,
+        tokenHash,
+        roleId: body.roleId ?? null,
+        expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000),
+        createdByUserId: actorUserId
+      }
+    });
+
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.invite.create',
+      entityType: 'platform_invite',
+      entityId: invite.id,
+      metadata: { email: invite.email, roleId: invite.roleId },
+      ip,
+      userAgent
+    });
+
+    return {
+      ...invite,
+      token: rawToken,
+      acceptUrl: `/auth/accept-invite?scope=platform&token=${rawToken}`
+    };
+  }
+
+  async resendPlatformInvite(id: string, actorUserId: string, ip?: string, userAgent?: string) {
+    const existing = await this.prisma.platformInvite.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Invite not found');
+    if (existing.usedAt || existing.revokedAt) throw new BadRequestException('Invite cannot be resent');
+
+    const rawToken = crypto.randomBytes(40).toString('hex');
+    const invite = await this.prisma.platformInvite.update({
+      where: { id },
+      data: {
+        tokenHash: this.hashToken(rawToken),
+        expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000)
+      }
+    });
+
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.invite.resend',
+      entityType: 'platform_invite',
+      entityId: invite.id,
+      metadata: { email: invite.email },
+      ip,
+      userAgent
+    });
+
+    return {
+      ...invite,
+      token: rawToken,
+      acceptUrl: `/auth/accept-invite?scope=platform&token=${rawToken}`
+    };
+  }
+
+  async revokePlatformInvite(id: string, actorUserId: string, ip?: string, userAgent?: string) {
+    const existing = await this.prisma.platformInvite.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Invite not found');
+
+    const invite = await this.prisma.platformInvite.update({
+      where: { id },
+      data: { revokedAt: new Date() }
+    });
+
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.invite.revoke',
+      entityType: 'platform_invite',
+      entityId: invite.id,
+      metadata: { email: invite.email },
+      ip,
+      userAgent
+    });
+
+    return invite;
+  }
+
+  async acceptPlatformInvite(actorUserId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = acceptInviteSchema.parse(payload);
+    const tokenHash = this.hashToken(body.token);
+    const invite = await this.prisma.platformInvite.findUnique({ where: { tokenHash } });
+    if (!invite) throw new NotFoundException('Invite not found');
+    if (invite.usedAt || invite.revokedAt || invite.expiresAt < new Date()) {
+      throw new BadRequestException('Invite is no longer valid');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: actorUserId } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.email.toLowerCase() !== invite.email.toLowerCase()) {
+      throw new ForbiddenException('Invite email does not match authenticated user');
+    }
 
     const membership = await this.prisma.platformMembership.upsert({
-      where: { userId: user.id },
-      create: { userId: user.id, invitedById: actorUserId },
-      update: {}
+      where: { userId: actorUserId },
+      create: { userId: actorUserId, invitedById: invite.createdByUserId, isActive: true },
+      update: { isActive: true }
     });
 
-    for (const roleId of body.roleIds) {
+    if (invite.roleId) {
       await this.prisma.platformUserRole.upsert({
-        where: { membershipId_roleId: { membershipId: membership.id, roleId } },
-        create: { membershipId: membership.id, roleId },
+        where: { membershipId_roleId: { membershipId: membership.id, roleId: invite.roleId } },
+        create: { membershipId: membership.id, roleId: invite.roleId },
         update: {}
       });
     }
 
+    await this.prisma.platformInvite.update({
+      where: { id: invite.id },
+      data: { usedAt: new Date() }
+    });
+
     await this.audit.logPlatform({
       actorUserId,
-      action: 'platform.user.invite',
-      entityType: 'platform_membership',
-      entityId: membership.id,
-      metadata: { email: body.email, roleIds: body.roleIds },
+      action: 'platform.invite.accept',
+      entityType: 'platform_invite',
+      entityId: invite.id,
+      metadata: { email: invite.email, roleId: invite.roleId },
       ip,
       userAgent
     });
 
     return membership;
+  }
+
+  async assignPlatformRole(actorUserId: string, membershipId: string, roleId: string, ip?: string, userAgent?: string) {
+    await this.prisma.platformUserRole.upsert({
+      where: { membershipId_roleId: { membershipId, roleId } },
+      create: { membershipId, roleId },
+      update: {}
+    });
+
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.team.role.assign',
+      entityType: 'platform_membership',
+      entityId: membershipId,
+      metadata: { roleId },
+      ip,
+      userAgent
+    });
+
+    return { success: true };
+  }
+
+  async invalidateUserSessions(actorUserId: string, targetUserId: string, ip?: string, userAgent?: string) {
+    await this.sessions.invalidateAllForUser(targetUserId);
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.sessions.invalidate',
+      entityType: 'user',
+      entityId: targetUserId,
+      metadata: {},
+      ip,
+      userAgent
+    });
+    return { success: true };
   }
 
   listPlatformRoles() {
@@ -255,5 +394,9 @@ export class PlatformService {
     }
 
     return company;
+  }
+
+  private hashToken(rawToken: string) {
+    return crypto.createHash('sha256').update(rawToken).digest('hex');
   }
 }

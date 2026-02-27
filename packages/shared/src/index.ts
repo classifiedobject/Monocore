@@ -23,6 +23,15 @@ export const inviteUserSchema = z.object({
   roleIds: z.array(z.string().uuid()).default([])
 });
 
+export const createInviteSchema = z.object({
+  email: emailSchema,
+  roleId: z.string().uuid().nullable().optional()
+});
+
+export const acceptInviteSchema = z.object({
+  token: z.string().min(20)
+});
+
 export const roleSchema = z.object({
   name: z.string().min(2).max(80),
   key: z.string().min(2).max(80),

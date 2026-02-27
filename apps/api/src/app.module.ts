@@ -6,6 +6,7 @@ import { PrismaService } from './common/prisma.service.js';
 import { SessionService } from './auth/session.service.js';
 import { PlatformController } from './platform/platform.controller.js';
 import { PlatformService } from './platform/platform.service.js';
+import { PlatformInviteAcceptController } from './platform/platform-invite-accept.controller.js';
 import { AppApiController } from './appapi/app-api.controller.js';
 import { AppApiService } from './appapi/app-api.service.js';
 import { AuditService } from './common/audit.service.js';
@@ -23,7 +24,7 @@ import { CompanyRbacGuard } from './common/guards/company-rbac.guard.js';
       }
     ])
   ],
-  controllers: [AuthController, PlatformController, AppApiController],
+  controllers: [AuthController, PlatformController, PlatformInviteAcceptController, AppApiController],
   providers: [
     PrismaService,
     SessionService,

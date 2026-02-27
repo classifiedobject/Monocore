@@ -40,7 +40,11 @@ export async function apiFetch(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
   headers.set('Content-Type', 'application/json');
 
-  if (path.startsWith('/app-api') && !path.startsWith('/app-api/companies')) {
+  if (
+    path.startsWith('/app-api') &&
+    !path.startsWith('/app-api/companies') &&
+    !path.startsWith('/app-api/invites/accept')
+  ) {
     const companyId = activeCompanyId();
     if (!companyId) {
       if (typeof window !== 'undefined') {

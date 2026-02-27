@@ -26,10 +26,44 @@ export class PlatformController {
     return this.platform.listPlatformUsers();
   }
 
-  @Post('team/invite')
-  @RequirePermissions('platform.users.invite')
-  invitePlatformUser(@Body() body: unknown, @Req() req: Request & { user: { id: string } }) {
-    return this.platform.invitePlatformUser(req.user.id, body, req.ip, req.get('user-agent'));
+  @Post('team/:membershipId/roles/:roleId')
+  @RequirePermissions('platform:team.role.assign')
+  assignPlatformRole(
+    @Param('membershipId') membershipId: string,
+    @Param('roleId') roleId: string,
+    @Req() req: Request & { user: { id: string } }
+  ) {
+    return this.platform.assignPlatformRole(req.user.id, membershipId, roleId, req.ip, req.get('user-agent'));
+  }
+
+  @Post('sessions/invalidate/:userId')
+  @RequirePermissions('platform:sessions.invalidate')
+  invalidateUserSessions(@Param('userId') userId: string, @Req() req: Request & { user: { id: string } }) {
+    return this.platform.invalidateUserSessions(req.user.id, userId, req.ip, req.get('user-agent'));
+  }
+
+  @Get('invites')
+  @RequirePermissions('platform:team.invite.create')
+  listInvites() {
+    return this.platform.listPlatformInvites();
+  }
+
+  @Post('invites')
+  @RequirePermissions('platform:team.invite.create')
+  createInvite(@Body() body: unknown, @Req() req: Request & { user: { id: string } }) {
+    return this.platform.createPlatformInvite(req.user.id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('invites/:id/resend')
+  @RequirePermissions('platform:team.invite.resend')
+  resendInvite(@Param('id') id: string, @Req() req: Request & { user: { id: string } }) {
+    return this.platform.resendPlatformInvite(id, req.user.id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('invites/:id/revoke')
+  @RequirePermissions('platform:team.invite.revoke')
+  revokeInvite(@Param('id') id: string, @Req() req: Request & { user: { id: string } }) {
+    return this.platform.revokePlatformInvite(id, req.user.id, req.ip, req.get('user-agent'));
   }
 
   @Get('roles')

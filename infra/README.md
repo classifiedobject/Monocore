@@ -21,6 +21,8 @@ One-shot startup command:
 - `DATABASE_URL`: PostgreSQL connection string.
 - `REDIS_URL`: Redis URL.
 - `SESSION_SECRET`: Session secret seed.
+- `SESSION_INACTIVITY_DAYS`: Sliding inactivity timeout for sessions (default 30).
+- `SESSION_ABSOLUTE_DAYS`: Absolute session lifetime cap (default 90).
 - `API_PORT`: API server port (default 4000).
 - `WEB_PORT`: Web server port (default 3000).
 - `NEXT_PUBLIC_API_URL`: Browser API base URL.
@@ -75,3 +77,4 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 4. Assign roles/permissions (`/app/roles`, `/platform/roles`)
 5. Review audit logs (`/app/audit-logs`)
 6. Platform tenant/module/i18n management (`/platform/tenants`, `/platform/modules`, `/platform/i18n`)
+7. Invite lifecycle (`/platform-api/invites/*`, `/app-api/invites/*`, `/auth/accept-invite`)
