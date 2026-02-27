@@ -4,6 +4,7 @@ import { PrismaService } from '../common/prisma.service.js';
 import { roleSchema, permissionSchema, moduleSchema, languagePackSchema, createInviteSchema, acceptInviteSchema } from '@monocore/shared';
 import { AuditService } from '../common/audit.service.js';
 import { SessionService } from '../auth/session.service.js';
+import { RedisService } from '../redis/redis.service.js';
 
 const INVITE_TTL_DAYS = 7;
 
@@ -12,7 +13,8 @@ export class PlatformService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
-    @Inject(SessionService) private readonly sessions: SessionService
+    @Inject(SessionService) private readonly sessions: SessionService,
+    @Inject(RedisService) private readonly redis: RedisService
   ) {}
 
   dashboard() {
@@ -376,7 +378,228 @@ export class PlatformService {
       metadata: body
     });
 
+    await this.invalidateI18nCache(body.locale);
     return row;
+  }
+
+  async getLanguagePacksCached(locale?: string) {
+    if (!locale) return this.listLanguagePacks(locale);
+    const key = `i18n:locale:${locale}`;
+    const cached = await this.redis.getClient().get(key).catch(() => null);
+    if (cached) return JSON.parse(cached) as Awaited<ReturnType<typeof this.listLanguagePacks>>;
+    const rows = await this.listLanguagePacks(locale);
+    await this.redis.getClient().set(key, JSON.stringify(rows), 'EX', 3600).catch(() => null);
+    return rows;
+  }
+
+  async exportLanguagePacks(locale?: string) {
+    const rows = await this.getLanguagePacksCached(locale);
+    const grouped: Record<string, Record<string, string>> = {};
+    for (const row of rows) {
+      if (!grouped[row.namespace]) grouped[row.namespace] = {};
+      grouped[row.namespace][row.key] = row.value;
+    }
+    return {
+      locale: locale ?? 'all',
+      data: grouped
+    };
+  }
+
+  async importLanguagePacks(
+    actorUserId: string,
+    payload: { locale: string; data: Record<string, Record<string, string>> },
+    ip?: string,
+    userAgent?: string
+  ) {
+    const locale = payload.locale;
+    const data = payload.data ?? {};
+    let count = 0;
+    for (const [namespace, entries] of Object.entries(data)) {
+      for (const [key, value] of Object.entries(entries)) {
+        await this.prisma.languagePack.upsert({
+          where: { locale_namespace_key: { locale, namespace, key } },
+          create: { locale, namespace, key, value: String(value) },
+          update: { value: String(value) }
+        });
+        count += 1;
+      }
+    }
+
+    await this.invalidateI18nCache(locale);
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.i18n.import',
+      entityType: 'language_pack',
+      metadata: { locale, count },
+      ip,
+      userAgent
+    });
+
+    return { success: true, imported: count };
+  }
+
+  async listPlatformAuditLogs(filters: {
+    from?: string;
+    to?: string;
+    action?: string;
+    actorUserId?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const page = Number(filters.page ?? 1);
+    const pageSize = Math.min(Number(filters.pageSize ?? 20), 100);
+    const from = filters.from ? new Date(filters.from) : undefined;
+    const to = filters.to ? new Date(filters.to) : undefined;
+
+    const where = {
+      ...(filters.action ? { action: filters.action } : {}),
+      ...(filters.actorUserId ? { actorUserId: filters.actorUserId } : {}),
+      ...(from || to
+        ? {
+            createdAt: {
+              ...(from ? { gte: from } : {}),
+              ...(to ? { lte: to } : {})
+            }
+          }
+        : {})
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.platformAuditLog.findMany({
+        where,
+        include: { actor: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      }),
+      this.prisma.platformAuditLog.count({ where })
+    ]);
+
+    return { items, total, page, pageSize };
+  }
+
+  listDepartments() {
+    return this.prisma.platformDepartment.findMany({
+      orderBy: { name: 'asc' }
+    });
+  }
+
+  createDepartment(actorUserId: string, payload: { name: string; parentId?: string | null }, ip?: string, userAgent?: string) {
+    return this.prisma.platformDepartment
+      .create({
+        data: {
+          name: payload.name,
+          parentId: payload.parentId ?? null
+        }
+      })
+      .then(async (department) => {
+        await this.audit.logPlatform({
+          actorUserId,
+          action: 'platform.org.department.create',
+          entityType: 'platform_department',
+          entityId: department.id,
+          metadata: payload,
+          ip,
+          userAgent
+        });
+        return department;
+      });
+  }
+
+  updateDepartment(
+    actorUserId: string,
+    id: string,
+    payload: { name?: string; parentId?: string | null },
+    ip?: string,
+    userAgent?: string
+  ) {
+    return this.prisma.platformDepartment
+      .update({
+        where: { id },
+        data: {
+          ...(payload.name ? { name: payload.name } : {}),
+          ...(payload.parentId !== undefined ? { parentId: payload.parentId } : {})
+        }
+      })
+      .then(async (department) => {
+        await this.audit.logPlatform({
+          actorUserId,
+          action: 'platform.org.department.update',
+          entityType: 'platform_department',
+          entityId: department.id,
+          metadata: payload,
+          ip,
+          userAgent
+        });
+        return department;
+      });
+  }
+
+  listTitles() {
+    return this.prisma.platformTitle.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  createTitle(actorUserId: string, payload: { name: string }, ip?: string, userAgent?: string) {
+    return this.prisma.platformTitle.create({ data: { name: payload.name } }).then(async (title) => {
+      await this.audit.logPlatform({
+        actorUserId,
+        action: 'platform.org.title.create',
+        entityType: 'platform_title',
+        entityId: title.id,
+        metadata: payload,
+        ip,
+        userAgent
+      });
+      return title;
+    });
+  }
+
+  listProfiles() {
+    return this.prisma.platformUserProfile.findMany({
+      include: {
+        user: true,
+        department: true,
+        title: true,
+        managerUser: true
+      },
+      orderBy: { userId: 'asc' }
+    });
+  }
+
+  upsertProfile(
+    actorUserId: string,
+    userId: string,
+    payload: { departmentId?: string | null; titleId?: string | null; managerUserId?: string | null },
+    ip?: string,
+    userAgent?: string
+  ) {
+    return this.prisma.platformUserProfile
+      .upsert({
+        where: { userId },
+        create: {
+          userId,
+          departmentId: payload.departmentId ?? null,
+          titleId: payload.titleId ?? null,
+          managerUserId: payload.managerUserId ?? null
+        },
+        update: {
+          departmentId: payload.departmentId ?? null,
+          titleId: payload.titleId ?? null,
+          managerUserId: payload.managerUserId ?? null
+        }
+      })
+      .then(async (profile) => {
+        await this.audit.logPlatform({
+          actorUserId,
+          action: 'platform.org.profile.upsert',
+          entityType: 'platform_user_profile',
+          entityId: profile.userId,
+          metadata: payload,
+          ip,
+          userAgent
+        });
+        return profile;
+      });
   }
 
   async companyDetails(companyId: string) {
@@ -398,5 +621,9 @@ export class PlatformService {
 
   private hashToken(rawToken: string) {
     return crypto.createHash('sha256').update(rawToken).digest('hex');
+  }
+
+  private async invalidateI18nCache(locale: string) {
+    await this.redis.getClient().del(`i18n:locale:${locale}`).catch(() => null);
   }
 }

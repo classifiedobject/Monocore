@@ -26,14 +26,14 @@ export class AppApiController {
 
   @Get('dashboard')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.team.read')
+  @RequirePermissions('company:team.read')
   dashboard(@Req() req: Request & { companyId: string }) {
     return this.appApi.dashboard(req.companyId);
   }
 
   @Get('team')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.team.read')
+  @RequirePermissions('company:team.read')
   listTeam(@Req() req: Request & { companyId: string }) {
     return this.appApi.listTeam(req.companyId);
   }
@@ -73,28 +73,28 @@ export class AppApiController {
 
   @Get('roles')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.roles.manage')
+  @RequirePermissions('company:roles.manage')
   listRoles(@Req() req: Request & { companyId: string }) {
     return this.appApi.listRoles(req.companyId);
   }
 
   @Post('roles')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.roles.manage')
+  @RequirePermissions('company:roles.manage')
   createRole(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.appApi.createRole(req.user.id, req.companyId, body);
   }
 
   @Get('permissions')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.roles.manage')
+  @RequirePermissions('company:roles.manage')
   listPermissions() {
     return this.appApi.listPermissions();
   }
 
   @Post('roles/:roleId/permissions/:permissionId')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.roles.manage')
+  @RequirePermissions('company:roles.manage')
   assignPermission(
     @Param('roleId') roleId: string,
     @Param('permissionId') permissionId: string,
@@ -116,14 +116,14 @@ export class AppApiController {
 
   @Get('audit-logs')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.audit.read')
+  @RequirePermissions('company:audit.read')
   logs(@Req() req: Request & { companyId: string }) {
     return this.appApi.listAuditLogs(req.companyId);
   }
 
   @Get('modules')
   @UseGuards(CompanyRbacGuard)
-  @RequirePermissions('company.team.read')
+  @RequirePermissions('company:team.read')
   modules(@Req() req: Request & { companyId: string }) {
     return this.appApi.listInstalledModules(req.companyId);
   }
