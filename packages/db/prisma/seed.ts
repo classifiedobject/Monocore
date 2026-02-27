@@ -34,7 +34,10 @@ const companyPermissions = [
   'company:audit.read',
   'company:settings.manage',
   'company:modules.read',
-  'company:modules.install'
+  'company:modules.install',
+  'module:finance-core.entry.create',
+  'module:finance-core.entry.read',
+  'module:finance-core.entry.delete'
 ];
 
 async function upsertPlatformRole() {
@@ -155,7 +158,14 @@ async function main() {
     update: { status: 'active' }
   });
 
-  const ownerRole = await upsertCompanyDefaults(company.id);
+  const companies = await prisma.company.findMany({ select: { id: true } });
+  for (const row of companies) {
+    await upsertCompanyDefaults(row.id);
+  }
+
+  const ownerRole = await prisma.companyRole.findUniqueOrThrow({
+    where: { companyId_key: { companyId: company.id, key: 'owner' } }
+  });
 
   await prisma.companyMemberRole.upsert({
     where: {
@@ -181,6 +191,24 @@ async function main() {
       name: 'Core Foundation',
       version: '1.0.0',
       status: 'PUBLISHED'
+    }
+  });
+
+  await prisma.module.upsert({
+    where: { key: 'finance-core' },
+    create: {
+      key: 'finance-core',
+      name: 'Finance Core Lite',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Income and expense tracking with monthly P&L.',
+      dependencies: { modules: ['core'] }
+    },
+    update: {
+      name: 'Finance Core Lite',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      dependencies: { modules: ['core'] }
     }
   });
 
@@ -213,6 +241,40 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
+  });
+
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'finance-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'finance-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'finance-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'finance-core',
       limits: {}
     },
     update: {}

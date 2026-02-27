@@ -14,6 +14,9 @@ import { RedisService } from './redis/redis.service.js';
 import { AuthGuard } from './common/guards/auth.guard.js';
 import { PlatformRbacGuard } from './common/guards/platform-rbac.guard.js';
 import { CompanyRbacGuard } from './common/guards/company-rbac.guard.js';
+import { ModuleInstalledGuard } from './common/guards/module-installed.guard.js';
+import { FinanceController } from './finance/finance.controller.js';
+import { FinanceService } from './finance/finance.service.js';
 
 @Module({
   imports: [
@@ -24,18 +27,20 @@ import { CompanyRbacGuard } from './common/guards/company-rbac.guard.js';
       }
     ])
   ],
-  controllers: [AuthController, PlatformController, PlatformInviteAcceptController, AppApiController],
+  controllers: [AuthController, PlatformController, PlatformInviteAcceptController, AppApiController, FinanceController],
   providers: [
     PrismaService,
     SessionService,
     AuthService,
     PlatformService,
     AppApiService,
+    FinanceService,
     AuditService,
     RedisService,
     AuthGuard,
     PlatformRbacGuard,
-    CompanyRbacGuard
+    CompanyRbacGuard,
+    ModuleInstalledGuard
   ]
 })
 export class AppModule {}
