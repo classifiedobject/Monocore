@@ -16,3 +16,4 @@ Default seed admin:
 - Password: `ChangeMe123!`
 
 See infrastructure and architecture details in `infra/README.md`.
+

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Route } from 'next';
 
 export function Shell({
   title,
@@ -6,7 +7,7 @@ export function Shell({
   children
 }: {
   title: string;
-  links: Array<{ href: string; label: string }>;
+  links: Array<{ href: Route; label: string }>;
   children: React.ReactNode;
 }) {
   return (
