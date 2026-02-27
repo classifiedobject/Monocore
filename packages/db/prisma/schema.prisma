@@ -10,6 +10,7 @@ datasource db {
 enum ModuleStatus {
   DRAFT
   PUBLISHED
+  DEPRECATED
 }
 
 enum InstallationStatus {
@@ -116,6 +117,7 @@ model Company {
   roles          CompanyRole[]
   locations      Location[]
   modules        ModuleInstallation[]
+  entitlements   CompanyEntitlement[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -201,6 +203,7 @@ model Module {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
   installations ModuleInstallation[]
+  entitlements  CompanyEntitlement[]
 }
 
 model ModuleInstallation {
@@ -215,6 +218,20 @@ model ModuleInstallation {
   module      Module              @relation(fields: [moduleKey], references: [key], onDelete: Cascade)
 
   @@unique([companyId, moduleKey])
+}
+
+model CompanyEntitlement {
+  id        String   @id @default(uuid())
+  companyId String
+  moduleKey String
+  limits    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  module    Module   @relation(fields: [moduleKey], references: [key], onDelete: Cascade)
+
+  @@unique([companyId, moduleKey])
+  @@index([companyId])
 }
 
 model SiteSetting {

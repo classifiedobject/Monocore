@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import { Injectable, ForbiddenException, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service.js';
-import { createCompanySchema, roleSchema, createInviteSchema, acceptInviteSchema } from '@monocore/shared';
+import { createCompanySchema, roleSchema, createInviteSchema, acceptInviteSchema, installModuleSchema } from '@monocore/shared';
 import { AuditService } from '../common/audit.service.js';
 
 const INVITE_TTL_DAYS = 7;
@@ -355,11 +356,137 @@ export class AppApiService {
   listInstalledModules(companyId: string) {
     return this.prisma.moduleInstallation.findMany({
       where: { companyId, status: 'ACTIVE' },
+      include: { module: true },
       orderBy: { createdAt: 'asc' }
     });
   }
 
+  async listModuleCatalog(companyId: string) {
+    const [catalog, installations, entitlements] = await Promise.all([
+      this.prisma.module.findMany({
+        where: { status: 'PUBLISHED' },
+        orderBy: { createdAt: 'asc' }
+      }),
+      this.prisma.moduleInstallation.findMany({
+        where: { companyId, status: 'ACTIVE' },
+        select: { moduleKey: true }
+      }),
+      this.prisma.companyEntitlement.findMany({
+        where: { companyId },
+        select: { moduleKey: true, limits: true }
+      })
+    ]);
+
+    const installedKeys = new Set(installations.map((row) => row.moduleKey));
+    const entitlementByKey = new Map(entitlements.map((row) => [row.moduleKey, row.limits]));
+
+    return catalog.map((module) => ({
+      ...module,
+      installed: installedKeys.has(module.key),
+      entitlementLimits: entitlementByKey.get(module.key) ?? null
+    }));
+  }
+
+  async installModule(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = installModuleSchema.parse(payload);
+    const module = await this.prisma.module.findUnique({ where: { key: body.moduleKey } });
+    if (!module || module.status !== 'PUBLISHED') {
+      throw new NotFoundException('Published module not found');
+    }
+
+    const dependencyKeys = this.extractDependencyKeys(module.dependencies);
+    if (dependencyKeys.length > 0) {
+      const installedDependencies = await this.prisma.moduleInstallation.findMany({
+        where: {
+          companyId,
+          status: 'ACTIVE',
+          moduleKey: { in: dependencyKeys }
+        },
+        select: { moduleKey: true }
+      });
+      const installedSet = new Set(installedDependencies.map((row) => row.moduleKey));
+      const missingDependencies = dependencyKeys.filter((key) => !installedSet.has(key));
+      if (missingDependencies.length > 0) {
+        await this.audit.logCompany({
+          actorUserId,
+          companyId,
+          action: 'company.module.install.blocked_dependencies',
+          entityType: 'module',
+          entityId: module.id,
+          metadata: { moduleKey: module.key, missingDependencies },
+          ip,
+          userAgent
+        });
+        throw new BadRequestException(`Missing module dependencies: ${missingDependencies.join(', ')}`);
+      }
+    }
+
+    const [installation, entitlement] = await this.prisma.$transaction([
+      this.prisma.moduleInstallation.upsert({
+        where: {
+          companyId_moduleKey: {
+            companyId,
+            moduleKey: body.moduleKey
+          }
+        },
+        create: {
+          companyId,
+          moduleKey: body.moduleKey,
+          status: 'ACTIVE',
+          config: body.config,
+          installedAt: new Date()
+        },
+        update: {
+          status: 'ACTIVE',
+          config: body.config,
+          installedAt: new Date()
+        }
+      }),
+      this.prisma.companyEntitlement.upsert({
+        where: {
+          companyId_moduleKey: {
+            companyId,
+            moduleKey: body.moduleKey
+          }
+        },
+        create: {
+          companyId,
+          moduleKey: body.moduleKey,
+          limits: {}
+        },
+        update: {}
+      })
+    ]);
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.module.install',
+      entityType: 'module_installation',
+      entityId: installation.id,
+      metadata: { moduleKey: body.moduleKey, dependencies: dependencyKeys },
+      ip,
+      userAgent
+    });
+
+    return { installation, entitlement };
+  }
+
   private hashToken(rawToken: string) {
     return crypto.createHash('sha256').update(rawToken).digest('hex');
+  }
+
+  private extractDependencyKeys(raw: Prisma.JsonValue): string[] {
+    if (Array.isArray(raw)) {
+      return raw.filter((item): item is string => typeof item === 'string');
+    }
+    if (raw && typeof raw === 'object') {
+      const row = raw as Record<string, unknown>;
+      if (Array.isArray(row.modules)) {
+        return row.modules.filter((item): item is string => typeof item === 'string');
+      }
+      return Object.keys(row);
+    }
+    return [];
   }
 }

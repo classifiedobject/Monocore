@@ -15,6 +15,7 @@ const platformPermissions = [
   'platform:tenants.read',
   'platform:tenants.manage',
   'platform:modules.manage',
+  'platform:modules.publish',
   'platform:settings.manage',
   'platform:i18n.manage',
   'platform:org.read',
@@ -31,7 +32,9 @@ const companyPermissions = [
   'company:team.role.assign',
   'company:roles.manage',
   'company:audit.read',
-  'company:settings.manage'
+  'company:settings.manage',
+  'company:modules.read',
+  'company:modules.install'
 ];
 
 async function upsertPlatformRole() {
@@ -198,6 +201,21 @@ async function main() {
       status: 'ACTIVE',
       installedAt: new Date()
     }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
   });
 
   for (const item of [

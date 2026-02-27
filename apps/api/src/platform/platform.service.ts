@@ -327,6 +327,30 @@ export class PlatformService {
     return module;
   }
 
+  async publishModule(actorUserId: string, moduleKey: string, ip?: string, userAgent?: string) {
+    const module = await this.prisma.module.findUnique({ where: { key: moduleKey } });
+    if (!module) {
+      throw new NotFoundException('Module not found');
+    }
+
+    const published = await this.prisma.module.update({
+      where: { key: moduleKey },
+      data: { status: 'PUBLISHED' }
+    });
+
+    await this.audit.logPlatform({
+      actorUserId,
+      action: 'platform.module.publish',
+      entityType: 'module',
+      entityId: published.id,
+      metadata: { moduleKey: published.key, previousStatus: module.status, status: published.status },
+      ip,
+      userAgent
+    });
+
+    return published;
+  }
+
   listSettings() {
     return this.prisma.siteSetting.findMany({ orderBy: { key: 'asc' } });
   }
