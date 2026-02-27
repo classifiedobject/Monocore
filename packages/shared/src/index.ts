@@ -69,7 +69,6 @@ export const financeEntrySchema = z.object({
   date: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
   description: z.string().max(500).optional()
 });
-
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
   namespace: z.string().min(1).max(80),

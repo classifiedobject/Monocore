@@ -279,7 +279,6 @@ async function main() {
     },
     update: {}
   });
-
   for (const item of [
     { locale: 'en', namespace: 'common', key: 'welcome', value: 'Welcome' },
     { locale: 'tr', namespace: 'common', key: 'welcome', value: 'Hos geldiniz' }
