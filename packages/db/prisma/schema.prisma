@@ -34,6 +34,8 @@ model User {
   companyAuditLogs CompanyAuditLog[]    @relation("company_actor")
   platformInvites  PlatformInvite[]     @relation("platform_invite_creator")
   companyInvites   CompanyInvite[]      @relation("company_invite_creator")
+  platformProfile  PlatformUserProfile? @relation("platform_user_profile_user")
+  managedPlatformProfiles PlatformUserProfile[] @relation("platform_user_profile_manager")
 }
 
 model Session {
@@ -265,6 +267,44 @@ model CompanyAuditLog {
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, createdAt])
+}
+
+model PlatformDepartment {
+  id        String   @id @default(uuid())
+  name      String
+  parentId  String?
+  parent    PlatformDepartment? @relation("platform_department_tree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  PlatformDepartment[] @relation("platform_department_tree")
+  profiles  PlatformUserProfile[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+}
+
+model PlatformTitle {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  profiles  PlatformUserProfile[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PlatformUserProfile {
+  userId         String @id
+  departmentId   String?
+  titleId        String?
+  managerUserId  String?
+  user           User   @relation("platform_user_profile_user", fields: [userId], references: [id], onDelete: Cascade)
+  department     PlatformDepartment? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  title          PlatformTitle? @relation(fields: [titleId], references: [id], onDelete: SetNull)
+  managerUser    User? @relation("platform_user_profile_manager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([departmentId])
+  @@index([titleId])
+  @@index([managerUserId])
 }
 
 model PlatformInvite {

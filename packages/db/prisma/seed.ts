@@ -4,31 +4,34 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const platformPermissions = [
-  'platform.users.read',
-  'platform.users.invite',
+  'platform:users.read',
+  'platform:users.invite',
   'platform:team.invite.create',
   'platform:team.invite.resend',
   'platform:team.invite.revoke',
   'platform:team.role.assign',
   'platform:sessions.invalidate',
-  'platform.roles.manage',
-  'platform.tenants.read',
-  'platform.tenants.manage',
-  'platform.modules.manage',
-  'platform.settings.manage',
-  'platform.i18n.manage'
+  'platform:roles.manage',
+  'platform:tenants.read',
+  'platform:tenants.manage',
+  'platform:modules.manage',
+  'platform:settings.manage',
+  'platform:i18n.manage',
+  'platform:org.read',
+  'platform:org.manage',
+  'platform:logs.read'
 ];
 
 const companyPermissions = [
-  'company.team.read',
-  'company.team.invite',
+  'company:team.read',
+  'company:team.invite',
   'company:team.invite.create',
   'company:team.invite.resend',
   'company:team.invite.revoke',
   'company:team.role.assign',
-  'company.roles.manage',
-  'company.audit.read',
-  'company.settings.manage'
+  'company:roles.manage',
+  'company:audit.read',
+  'company:settings.manage'
 ];
 
 async function upsertPlatformRole() {
