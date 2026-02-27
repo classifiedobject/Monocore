@@ -1,6 +1,7 @@
 import { Shell } from '../../components/shell';
+import type { Route } from 'next';
 
-const links = [
+const links: Array<{ href: Route; label: string }> = [
   { href: '/app/home', label: 'Home' },
   { href: '/app/company', label: 'Company' },
   { href: '/app/settings', label: 'Settings' },
