@@ -1,6 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import crypto from 'crypto';
+import { csrfCookieOptions } from '../session-cookie.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -10,10 +11,7 @@ export class CsrfMiddleware implements NestMiddleware {
     const csrfCookie = req.cookies?.csrf_token as string | undefined;
     if (!csrfCookie) {
       const token = crypto.randomBytes(24).toString('hex');
-      res.cookie('csrf_token', token, {
-        sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production'
-      });
+      res.cookie('csrf_token', token, csrfCookieOptions());
     }
 
     if (SAFE_METHODS.has(req.method)) {

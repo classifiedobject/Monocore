@@ -13,9 +13,12 @@
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @monocore/db prisma:generate",
     "db:migrate": "pnpm --filter @monocore/db prisma:migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @monocore/db prisma:migrate:deploy",
     "db:seed": "pnpm --filter @monocore/db seed",
+    "db:seed:prod": "pnpm --filter @monocore/db seed",
     "compose:up": "docker compose up -d",
-    "compose:down": "docker compose down"
+    "compose:down": "docker compose down",
+    "health:check": "sh infra/scripts/health-check.sh"
   },
   "devDependencies": {
     "dotenv-cli": "7.4.4",

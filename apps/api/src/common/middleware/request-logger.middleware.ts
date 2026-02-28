@@ -11,6 +11,8 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
         path: req.path,
         statusCode: res.statusCode,
         durationMs: Date.now() - start,
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
         timestamp: new Date().toISOString()
       })
     );

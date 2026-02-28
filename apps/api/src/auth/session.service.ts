@@ -1,9 +1,10 @@
 import crypto from 'crypto';
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service.js';
+import { apiEnv } from '../config/env.js';
 
-const INACTIVITY_DAYS = Number(process.env.SESSION_INACTIVITY_DAYS ?? 30);
-const ABSOLUTE_DAYS = Number(process.env.SESSION_ABSOLUTE_DAYS ?? 90);
+const INACTIVITY_DAYS = apiEnv.SESSION_INACTIVITY_DAYS;
+const ABSOLUTE_DAYS = apiEnv.SESSION_ABSOLUTE_DAYS;
 
 @Injectable()
 export class SessionService {

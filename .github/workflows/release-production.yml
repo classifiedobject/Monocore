@@ -1,0 +1,58 @@
+name: Release Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RELEASE to confirm production release"
+        required: true
+        type: string
+
+jobs:
+  release-production:
+    if: ${{ github.event.inputs.confirm == 'RELEASE' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      NEXT_PUBLIC_WEB_PUBLIC_API_URL: https://api.themonocore.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build artifacts
+        run: pnpm build
+
+      - name: Run production DB migrations (if configured)
+        if: ${{ secrets.PROD_DATABASE_URL != '' }}
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: pnpm db:migrate:deploy
+
+      - name: Skip migration notice
+        if: ${{ secrets.PROD_DATABASE_URL == '' }}
+        run: echo "PROD_DATABASE_URL is not configured. Skipping db:migrate:deploy."
+
+      - name: Deploy placeholder
+        run: |
+          echo "Add provider-specific production deployment command here."
+          echo "Example: promote staging image or deploy to app.themonocore.com / api.themonocore.com"
+
+  release-production-not-confirmed:
+    if: ${{ github.event.inputs.confirm != 'RELEASE' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Production release not confirmed."
+          exit 1
