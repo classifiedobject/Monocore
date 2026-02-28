@@ -17,6 +17,7 @@ import { CompanyRbacGuard } from './common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from './common/guards/module-installed.guard.js';
 import { FinanceController } from './finance/finance.controller.js';
 import { FinanceService } from './finance/finance.service.js';
+import { HealthController } from './health.controller.js';
 
 @Module({
   imports: [
@@ -27,7 +28,7 @@ import { FinanceService } from './finance/finance.service.js';
       }
     ])
   ],
-  controllers: [AuthController, PlatformController, PlatformInviteAcceptController, AppApiController, FinanceController],
+  controllers: [AuthController, PlatformController, PlatformInviteAcceptController, AppApiController, FinanceController, HealthController],
   providers: [
     PrismaService,
     SessionService,

@@ -1,6 +1,7 @@
 'use client';
+import { getWebEnv } from './env';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const API_URL = getWebEnv().NEXT_PUBLIC_WEB_PUBLIC_API_URL;
 
 export class ApiError extends Error {
   status: number;

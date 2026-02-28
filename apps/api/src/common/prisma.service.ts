@@ -1,12 +1,12 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { apiEnv } from '../config/env.js';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     super({
-      datasourceUrl:
-        process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/monocore'
+      datasourceUrl: apiEnv.DATABASE_URL
     });
   }
 

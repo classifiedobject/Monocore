@@ -1,5 +1,7 @@
 # Monocore Infrastructure Guide
 
+Deployment runbook for staging/production is available at [deploy.md](./deploy.md).
+
 ## Overview
 Monocore uses a single PostgreSQL database with strict tenant isolation and two API/UI namespaces:
 - Platform plane: `/platform/*` and `/platform-api/*`
@@ -20,12 +22,18 @@ One-shot startup command:
 ## Environment Variables
 - `DATABASE_URL`: PostgreSQL connection string.
 - `REDIS_URL`: Redis URL.
-- `SESSION_SECRET`: Session secret seed.
+- `API_PORT`: API server port (default 4000).
+- `API_TRUST_PROXY`: Trust proxy setting for load balancers.
+- `SESSION_SECRET`: Session secret.
 - `SESSION_INACTIVITY_DAYS`: Sliding inactivity timeout for sessions (default 30).
 - `SESSION_ABSOLUTE_DAYS`: Absolute session lifetime cap (default 90).
-- `API_PORT`: API server port (default 4000).
+- `CORS_ORIGINS`: Comma-separated web origin allowlist.
+- `SESSION_COOKIE_DOMAIN`: Cookie domain (use `.themonocore.com` in prod).
+- `SESSION_COOKIE_SECURE`: Secure cookie flag (`true` in staging/prod).
+- `SESSION_COOKIE_SAMESITE`: Session cookie same-site policy.
+- `CSRF_COOKIE_SAMESITE`: CSRF cookie same-site policy.
 - `WEB_PORT`: Web server port (default 3000).
-- `NEXT_PUBLIC_API_URL`: Browser API base URL.
+- `NEXT_PUBLIC_WEB_PUBLIC_API_URL`: Browser API base URL.
 - `SEED_PLATFORM_ADMIN_EMAIL`: Seed admin user email.
 - `SEED_PLATFORM_ADMIN_PASSWORD`: Seed admin password.
 

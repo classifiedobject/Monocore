@@ -1,0 +1,44 @@
+name: Release Staging
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      NEXT_PUBLIC_WEB_PUBLIC_API_URL: https://staging-api.themonocore.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build artifacts
+        run: pnpm build
+
+      - name: Run staging DB migrations (if configured)
+        if: ${{ secrets.STAGING_DATABASE_URL != '' }}
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: pnpm db:migrate:deploy
+
+      - name: Skip migration notice
+        if: ${{ secrets.STAGING_DATABASE_URL == '' }}
+        run: echo "STAGING_DATABASE_URL is not configured. Skipping db:migrate:deploy."
+
+      - name: Deploy placeholder
+        run: |
+          echo "Add provider-specific staging deployment command here."
+          echo "Example: deploy web to staging-app.themonocore.com and api to staging-api.themonocore.com"

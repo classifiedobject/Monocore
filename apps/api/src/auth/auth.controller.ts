@@ -2,8 +2,10 @@ import { Body, Controller, Get, Inject, Post, Req, Res, UseGuards } from '@nestj
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { AuthGuard } from '../common/guards/auth.guard.js';
+import { apiEnv } from '../config/env.js';
+import { sessionCookieOptions } from '../common/session-cookie.js';
 
-const INACTIVITY_DAYS = Number(process.env.SESSION_INACTIVITY_DAYS ?? 30);
+const INACTIVITY_DAYS = apiEnv.SESSION_INACTIVITY_DAYS;
 
 @Controller('auth')
 export class AuthController {
@@ -16,24 +18,14 @@ export class AuthController {
   @Post('register')
   async register(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const result = await this.auth.register(body, req.ip, req.get('user-agent'));
-    res.cookie('session_token', result.token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: INACTIVITY_DAYS * 24 * 60 * 60 * 1000
-    });
+    res.cookie('session_token', result.token, sessionCookieOptions(INACTIVITY_DAYS * 24 * 60 * 60 * 1000));
     return { id: result.user.id, email: result.user.email, fullName: result.user.fullName };
   }
 
   @Post('login')
   async login(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const result = await this.auth.login(body, req.ip, req.get('user-agent'));
-    res.cookie('session_token', result.token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: INACTIVITY_DAYS * 24 * 60 * 60 * 1000
-    });
+    res.cookie('session_token', result.token, sessionCookieOptions(INACTIVITY_DAYS * 24 * 60 * 60 * 1000));
     return { id: result.user.id, email: result.user.email, fullName: result.user.fullName };
   }
 
@@ -44,7 +36,7 @@ export class AuthController {
     if (token) {
       await this.auth.logout(token, req.user?.id, req.ip, req.get('user-agent'));
     }
-    res.clearCookie('session_token');
+    res.clearCookie('session_token', sessionCookieOptions(0));
     return { success: true };
   }
 
