@@ -3,11 +3,18 @@ import { Prisma, type FinanceRecurringRule } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import {
+  financeAgingQuerySchema,
   financeAllocationRuleSchema,
   financeApplyAllocationSchema,
   financeAccountSchema,
+  financeCounterpartyBalanceQuerySchema,
   financeCategorySchema,
   financeCounterpartySchema,
+  financeInvoiceQuerySchema,
+  financeInvoiceSchema,
+  financePaymentAllocateSchema,
+  financePaymentQuerySchema,
+  financePaymentSchema,
   financeEntrySchema,
   financeProfitCenterReportSchema,
   financeProfitCenterSchema,
@@ -22,6 +29,21 @@ type EntryFilters = {
   counterpartyId?: string;
   accountId?: string;
   profitCenterId?: string;
+};
+
+type InvoiceFilters = {
+  direction?: 'PAYABLE' | 'RECEIVABLE';
+  status?: 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'VOID';
+  from?: string;
+  to?: string;
+  counterpartyId?: string;
+};
+
+type PaymentFilters = {
+  direction?: 'OUTGOING' | 'INCOMING';
+  from?: string;
+  to?: string;
+  counterpartyId?: string;
 };
 
 type JsonObject = Record<string, Prisma.InputJsonValue | null>;
@@ -66,6 +88,11 @@ export class FinanceService {
       manageAllocation: keys.has('module:finance-core.allocation.manage'),
       applyAllocation: keys.has('module:finance-core.allocation.apply'),
       readAllocation: keys.has('module:finance-core.allocation.read'),
+      manageInvoice: keys.has('module:finance-core.invoice.manage'),
+      readInvoice: keys.has('module:finance-core.invoice.read'),
+      managePayment: keys.has('module:finance-core.payment.manage'),
+      readPayment: keys.has('module:finance-core.payment.read'),
+      readAgingReport: keys.has('module:finance-core.reports.aging.read'),
       createEntry: keys.has('module:finance-core.entry.create'),
       deleteEntry: keys.has('module:finance-core.entry.delete'),
       readEntry: keys.has('module:finance-core.entry.read')
@@ -691,6 +718,505 @@ export class FinanceService {
     });
   }
 
+  async listInvoices(companyId: string, query: unknown) {
+    const parsed = financeInvoiceQuerySchema.parse(query) as InvoiceFilters;
+    return this.prisma.financeInvoice.findMany({
+      where: {
+        companyId,
+        ...(parsed.direction ? { direction: parsed.direction } : {}),
+        ...(parsed.status ? { status: parsed.status } : {}),
+        ...(parsed.counterpartyId ? { counterpartyId: parsed.counterpartyId } : {}),
+        ...(parsed.from || parsed.to
+          ? {
+              issueDate: {
+                ...(parsed.from ? { gte: this.parseDateValue(parsed.from, false) } : {}),
+                ...(parsed.to ? { lte: this.parseDateValue(parsed.to, true) } : {})
+              }
+            }
+          : {})
+      },
+      include: {
+        counterparty: true,
+        lines: true,
+        paymentAllocations: true
+      },
+      orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async createInvoice(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeInvoiceSchema.parse(payload);
+    await this.requireCounterparty(companyId, body.counterpartyId);
+    const totals = this.computeInvoiceTotals(body.lines);
+
+    const created = await this.prisma.financeInvoice.create({
+      data: {
+        companyId,
+        direction: body.direction,
+        counterpartyId: body.counterpartyId,
+        invoiceNo: body.invoiceNo,
+        issueDate: this.parseDateValue(body.issueDate),
+        dueDate: this.parseDateValue(body.dueDate),
+        currency: body.currency,
+        status: body.status ?? 'ISSUED',
+        subtotal: totals.subtotal,
+        taxTotal: totals.taxTotal,
+        total: totals.total,
+        notes: body.notes ?? null,
+        createdByUserId: actorUserId,
+        lines: {
+          create: body.lines.map((line) => ({
+            description: line.description,
+            quantity: new Prisma.Decimal(line.quantity),
+            unitPrice: new Prisma.Decimal(line.unitPrice),
+            taxRate: line.taxRate === null || line.taxRate === undefined ? null : new Prisma.Decimal(line.taxRate),
+            lineTotal: this.computeLineTotal(line.quantity, line.unitPrice, line.taxRate ?? null)
+          }))
+        }
+      },
+      include: { counterparty: true, lines: true, paymentAllocations: true }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.invoice.create',
+      'finance_invoice',
+      created.id,
+      { direction: created.direction, counterpartyId: created.counterpartyId, invoiceNo: created.invoiceNo, total: Number(created.total) },
+      ip,
+      userAgent
+    );
+
+    return created;
+  }
+
+  async getInvoice(companyId: string, invoiceId: string) {
+    return this.requireInvoice(companyId, invoiceId);
+  }
+
+  async updateInvoice(
+    actorUserId: string,
+    companyId: string,
+    invoiceId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = financeInvoiceSchema.partial().parse(payload);
+    const existing = await this.requireInvoice(companyId, invoiceId);
+    if (existing.status === 'VOID') {
+      throw new BadRequestException('Cannot update void invoice');
+    }
+
+    if (body.counterpartyId) {
+      await this.requireCounterparty(companyId, body.counterpartyId);
+    }
+
+    const hasLines = body.lines !== undefined;
+    const totals = hasLines ? this.computeInvoiceTotals(body.lines as Array<{ quantity: number; unitPrice: number; taxRate?: number | null }>) : null;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (hasLines) {
+        await tx.financeInvoiceLine.deleteMany({ where: { invoiceId: existing.id } });
+      }
+
+      const invoice = await tx.financeInvoice.update({
+        where: { id: existing.id },
+        data: {
+          ...(body.direction ? { direction: body.direction } : {}),
+          ...(body.counterpartyId ? { counterpartyId: body.counterpartyId } : {}),
+          ...(body.invoiceNo ? { invoiceNo: body.invoiceNo } : {}),
+          ...(body.issueDate ? { issueDate: this.parseDateValue(body.issueDate) } : {}),
+          ...(body.dueDate ? { dueDate: this.parseDateValue(body.dueDate) } : {}),
+          ...(body.currency ? { currency: body.currency } : {}),
+          ...(body.status ? { status: body.status } : {}),
+          ...(body.notes !== undefined ? { notes: body.notes } : {}),
+          ...(totals ? { subtotal: totals.subtotal, taxTotal: totals.taxTotal, total: totals.total } : {}),
+          ...(hasLines
+            ? {
+                lines: {
+                  create: (body.lines as Array<{ description: string; quantity: number; unitPrice: number; taxRate?: number | null }>).map(
+                    (line) => ({
+                      description: line.description,
+                      quantity: new Prisma.Decimal(line.quantity),
+                      unitPrice: new Prisma.Decimal(line.unitPrice),
+                      taxRate: line.taxRate === null || line.taxRate === undefined ? null : new Prisma.Decimal(line.taxRate),
+                      lineTotal: this.computeLineTotal(line.quantity, line.unitPrice, line.taxRate ?? null)
+                    })
+                  )
+                }
+              }
+            : {})
+        },
+        include: { counterparty: true, lines: true, paymentAllocations: true }
+      });
+
+      await this.recalculateInvoiceStatus(tx, invoice.id);
+      return tx.financeInvoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+        include: { counterparty: true, lines: true, paymentAllocations: true }
+      });
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.invoice.update',
+      'finance_invoice',
+      updated.id,
+      { direction: updated.direction, counterpartyId: updated.counterpartyId, invoiceNo: updated.invoiceNo, total: Number(updated.total) },
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
+  async voidInvoice(actorUserId: string, companyId: string, invoiceId: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireInvoice(companyId, invoiceId);
+    const allocated = existing.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+    if (allocated > 0) {
+      throw new BadRequestException('Cannot void invoice with allocations');
+    }
+
+    const updated = await this.prisma.financeInvoice.update({
+      where: { id: existing.id },
+      data: { status: 'VOID' },
+      include: { counterparty: true, lines: true, paymentAllocations: true }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.invoice.void',
+      'finance_invoice',
+      updated.id,
+      { invoiceNo: updated.invoiceNo, status: updated.status },
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
+  async deleteInvoice(actorUserId: string, companyId: string, invoiceId: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireInvoice(companyId, invoiceId);
+    if (existing.status !== 'DRAFT') {
+      throw new BadRequestException('Only draft invoices can be deleted');
+    }
+    if (existing.paymentAllocations.length > 0) {
+      throw new BadRequestException('Cannot delete invoice with allocations');
+    }
+
+    await this.prisma.financeInvoice.delete({ where: { id: existing.id } });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.invoice.delete',
+      'finance_invoice',
+      existing.id,
+      { invoiceNo: existing.invoiceNo },
+      ip,
+      userAgent
+    );
+
+    return { success: true };
+  }
+
+  async listPayments(companyId: string, query: unknown) {
+    const parsed = financePaymentQuerySchema.parse(query) as PaymentFilters;
+    return this.prisma.financePayment.findMany({
+      where: {
+        companyId,
+        ...(parsed.direction ? { direction: parsed.direction } : {}),
+        ...(parsed.counterpartyId ? { counterpartyId: parsed.counterpartyId } : {}),
+        ...(parsed.from || parsed.to
+          ? {
+              paymentDate: {
+                ...(parsed.from ? { gte: this.parseDateValue(parsed.from, false) } : {}),
+                ...(parsed.to ? { lte: this.parseDateValue(parsed.to, true) } : {})
+              }
+            }
+          : {})
+      },
+      include: { counterparty: true, account: true, allocations: true },
+      orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async createPayment(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financePaymentSchema.parse(payload);
+    await this.requireCounterparty(companyId, body.counterpartyId);
+    if (body.accountId) {
+      await this.requireAccount(companyId, body.accountId);
+    }
+
+    const payment = await this.prisma.financePayment.create({
+      data: {
+        companyId,
+        direction: body.direction,
+        counterpartyId: body.counterpartyId,
+        accountId: body.accountId ?? null,
+        paymentDate: this.parseDateValue(body.paymentDate),
+        amount: new Prisma.Decimal(body.amount),
+        currency: body.currency,
+        reference: body.reference ?? null,
+        notes: body.notes ?? null,
+        createdByUserId: actorUserId
+      },
+      include: { counterparty: true, account: true, allocations: true }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.payment.create',
+      'finance_payment',
+      payment.id,
+      { direction: payment.direction, counterpartyId: payment.counterpartyId, amount: Number(payment.amount) },
+      ip,
+      userAgent
+    );
+
+    return payment;
+  }
+
+  async getPayment(companyId: string, paymentId: string) {
+    return this.requirePayment(companyId, paymentId);
+  }
+
+  async updatePayment(
+    actorUserId: string,
+    companyId: string,
+    paymentId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = financePaymentSchema.partial().parse(payload);
+    const existing = await this.requirePayment(companyId, paymentId);
+    if (body.counterpartyId) {
+      await this.requireCounterparty(companyId, body.counterpartyId);
+    }
+    if (body.accountId) {
+      await this.requireAccount(companyId, body.accountId);
+    }
+
+    const allocated = existing.allocations.reduce((sum, row) => sum + Number(row.amount), 0);
+    if (body.amount !== undefined && body.amount < allocated) {
+      throw new BadRequestException('Payment amount cannot be lower than allocated total');
+    }
+
+    const updated = await this.prisma.financePayment.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.direction ? { direction: body.direction } : {}),
+        ...(body.counterpartyId ? { counterpartyId: body.counterpartyId } : {}),
+        ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
+        ...(body.paymentDate ? { paymentDate: this.parseDateValue(body.paymentDate) } : {}),
+        ...(body.amount !== undefined ? { amount: new Prisma.Decimal(body.amount) } : {}),
+        ...(body.currency ? { currency: body.currency } : {}),
+        ...(body.reference !== undefined ? { reference: body.reference } : {}),
+        ...(body.notes !== undefined ? { notes: body.notes } : {})
+      },
+      include: { counterparty: true, account: true, allocations: true }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.payment.update',
+      'finance_payment',
+      updated.id,
+      { direction: updated.direction, counterpartyId: updated.counterpartyId, amount: Number(updated.amount) },
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
+  async allocatePayment(
+    actorUserId: string,
+    companyId: string,
+    paymentId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = financePaymentAllocateSchema.parse(payload);
+    const payment = await this.requirePayment(companyId, paymentId);
+    const existingAllocated = payment.allocations.reduce((sum, row) => sum + Number(row.amount), 0);
+    const requestAllocated = body.allocations.reduce((sum, row) => sum + row.amount, 0);
+    const paymentTotal = Number(payment.amount);
+
+    if (existingAllocated + requestAllocated > paymentTotal + 0.0001) {
+      throw new BadRequestException('Allocations exceed payment amount');
+    }
+
+    const invoiceIds = [...new Set(body.allocations.map((row) => row.invoiceId))];
+    const invoices = await this.prisma.financeInvoice.findMany({
+      where: { companyId, id: { in: invoiceIds } },
+      include: { paymentAllocations: true }
+    });
+
+    if (invoices.length !== invoiceIds.length) {
+      throw new NotFoundException('One or more invoices not found');
+    }
+
+    for (const invoice of invoices) {
+      if (invoice.counterpartyId !== payment.counterpartyId) {
+        throw new BadRequestException('Payment and invoice counterparty mismatch');
+      }
+      if (invoice.status === 'VOID') {
+        throw new BadRequestException('Cannot allocate to void invoice');
+      }
+
+      const expectedDirection = payment.direction === 'INCOMING' ? 'RECEIVABLE' : 'PAYABLE';
+      if (invoice.direction !== expectedDirection) {
+        throw new BadRequestException('Payment direction does not match invoice direction');
+      }
+
+      const alreadyAllocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+      const requestedForInvoice = body.allocations
+        .filter((row) => row.invoiceId === invoice.id)
+        .reduce((sum, row) => sum + row.amount, 0);
+      const outstanding = Number(invoice.total) - alreadyAllocated;
+      if (requestedForInvoice > outstanding + 0.0001) {
+        throw new BadRequestException(`Allocation exceeds invoice outstanding amount for ${invoice.invoiceNo}`);
+      }
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const created = [];
+      for (const row of body.allocations) {
+        const allocation = await tx.financePaymentAllocation.create({
+          data: {
+            companyId,
+            paymentId: payment.id,
+            invoiceId: row.invoiceId,
+            amount: new Prisma.Decimal(row.amount)
+          }
+        });
+        created.push(allocation);
+      }
+
+      for (const invoiceId of invoiceIds) {
+        await this.recalculateInvoiceStatus(tx, invoiceId);
+      }
+
+      return tx.financePayment.findUniqueOrThrow({
+        where: { id: payment.id },
+        include: { counterparty: true, account: true, allocations: true }
+      });
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.payment.allocate',
+      'finance_payment',
+      result.id,
+      { allocations: body.allocations, allocatedTotal: requestAllocated },
+      ip,
+      userAgent
+    );
+
+    return result;
+  }
+
+  async agingReport(companyId: string, query: unknown) {
+    const parsed = financeAgingQuerySchema.parse(query);
+    const asOf = this.parseDateValue(parsed.asOf, true);
+
+    const invoices = await this.prisma.financeInvoice.findMany({
+      where: {
+        companyId,
+        direction: parsed.direction,
+        status: { in: ['ISSUED', 'PARTIALLY_PAID', 'PAID'] }
+      },
+      include: { counterparty: true, paymentAllocations: true }
+    });
+
+    type AgingBuckets = { current: number; b1_30: number; b31_60: number; b61_90: number; b90_plus: number; total: number };
+    const grouped = new Map<string, { counterpartyId: string; counterpartyName: string; buckets: AgingBuckets }>();
+    const totals: AgingBuckets = { current: 0, b1_30: 0, b31_60: 0, b61_90: 0, b90_plus: 0, total: 0 };
+
+    for (const invoice of invoices) {
+      const allocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+      const outstanding = Math.max(0, Number(invoice.total) - allocated);
+      if (outstanding <= 0) continue;
+
+      const diffDays = Math.floor((asOf.getTime() - invoice.dueDate.getTime()) / (24 * 60 * 60 * 1000));
+      const row =
+        grouped.get(invoice.counterpartyId) ??
+        {
+          counterpartyId: invoice.counterpartyId,
+          counterpartyName: invoice.counterparty.name,
+          buckets: { current: 0, b1_30: 0, b31_60: 0, b61_90: 0, b90_plus: 0, total: 0 }
+        };
+
+      if (diffDays <= 0) row.buckets.current += outstanding;
+      else if (diffDays <= 30) row.buckets.b1_30 += outstanding;
+      else if (diffDays <= 60) row.buckets.b31_60 += outstanding;
+      else if (diffDays <= 90) row.buckets.b61_90 += outstanding;
+      else row.buckets.b90_plus += outstanding;
+      row.buckets.total += outstanding;
+      grouped.set(invoice.counterpartyId, row);
+    }
+
+    for (const row of grouped.values()) {
+      totals.current += row.buckets.current;
+      totals.b1_30 += row.buckets.b1_30;
+      totals.b31_60 += row.buckets.b31_60;
+      totals.b61_90 += row.buckets.b61_90;
+      totals.b90_plus += row.buckets.b90_plus;
+      totals.total += row.buckets.total;
+    }
+
+    return {
+      direction: parsed.direction,
+      asOf: parsed.asOf,
+      totals,
+      items: Array.from(grouped.values()).sort((a, b) => b.buckets.total - a.buckets.total)
+    };
+  }
+
+  async counterpartyBalanceReport(companyId: string, query: unknown) {
+    const parsed = financeCounterpartyBalanceQuerySchema.parse(query);
+    const invoices = await this.prisma.financeInvoice.findMany({
+      where: {
+        companyId,
+        direction: parsed.direction,
+        status: { in: ['ISSUED', 'PARTIALLY_PAID', 'PAID'] }
+      },
+      include: { counterparty: true, paymentAllocations: true }
+    });
+
+    const grouped = new Map<string, { counterpartyId: string; counterpartyName: string; outstanding: number; invoiceCount: number }>();
+
+    for (const invoice of invoices) {
+      const allocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+      const outstanding = Math.max(0, Number(invoice.total) - allocated);
+      if (outstanding <= 0) continue;
+
+      const row =
+        grouped.get(invoice.counterpartyId) ??
+        { counterpartyId: invoice.counterpartyId, counterpartyName: invoice.counterparty.name, outstanding: 0, invoiceCount: 0 };
+      row.outstanding += outstanding;
+      row.invoiceCount += 1;
+      grouped.set(invoice.counterpartyId, row);
+    }
+
+    return {
+      direction: parsed.direction,
+      items: Array.from(grouped.values()).sort((a, b) => b.outstanding - a.outstanding),
+      totalOutstanding: Array.from(grouped.values()).reduce((sum, row) => sum + row.outstanding, 0)
+    };
+  }
+
   async listEntries(companyId: string, filters: EntryFilters) {
     const where: Prisma.FinanceEntryWhereInput = {
       companyId,
@@ -726,6 +1252,8 @@ export class FinanceService {
         counterpartyId: body.counterpartyId ?? null,
         accountId: body.accountId ?? null,
         profitCenterId: body.profitCenterId ?? null,
+        invoiceId: body.invoiceId ?? null,
+        paymentId: body.paymentId ?? null,
         reference: body.reference ?? null,
         amount: new Prisma.Decimal(body.amount),
         date: this.parseDateValue(body.date),
@@ -746,6 +1274,8 @@ export class FinanceService {
         counterpartyId: body.counterpartyId ?? null,
         accountId: body.accountId ?? null,
         profitCenterId: body.profitCenterId ?? null,
+        invoiceId: body.invoiceId ?? null,
+        paymentId: body.paymentId ?? null,
         reference: body.reference ?? null,
         amount: body.amount,
         date: body.date,
@@ -774,6 +1304,8 @@ export class FinanceService {
         ...(body.counterpartyId !== undefined ? { counterpartyId: body.counterpartyId } : {}),
         ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
         ...(body.profitCenterId !== undefined ? { profitCenterId: body.profitCenterId } : {}),
+        ...(body.invoiceId !== undefined ? { invoiceId: body.invoiceId } : {}),
+        ...(body.paymentId !== undefined ? { paymentId: body.paymentId } : {}),
         ...(body.reference !== undefined ? { reference: body.reference } : {}),
         ...(body.amount !== undefined ? { amount: new Prisma.Decimal(body.amount) } : {}),
         ...(body.date ? { date: this.parseDateValue(body.date) } : {}),
@@ -793,6 +1325,8 @@ export class FinanceService {
         counterpartyId: body.counterpartyId ?? entry.counterpartyId,
         accountId: body.accountId ?? entry.accountId,
         profitCenterId: body.profitCenterId ?? entry.profitCenterId,
+        invoiceId: body.invoiceId ?? entry.invoiceId,
+        paymentId: body.paymentId ?? entry.paymentId,
         reference: body.reference ?? entry.reference,
         amount: body.amount ?? Number(entry.amount),
         date: body.date ?? entry.date.toISOString(),
@@ -824,6 +1358,8 @@ export class FinanceService {
         counterpartyId: existing.counterpartyId,
         accountId: existing.accountId,
         profitCenterId: existing.profitCenterId,
+        invoiceId: existing.invoiceId,
+        paymentId: existing.paymentId,
         reference: existing.reference,
         amount: Number(existing.amount),
         date: existing.date.toISOString()
@@ -1246,6 +1782,8 @@ export class FinanceService {
       counterpartyId?: string | null;
       accountId?: string | null;
       profitCenterId?: string | null;
+      invoiceId?: string | null;
+      paymentId?: string | null;
       recurringRuleId?: string | null;
     }
   ) {
@@ -1260,6 +1798,12 @@ export class FinanceService {
     }
     if (body.profitCenterId) {
       await this.requireProfitCenter(companyId, body.profitCenterId);
+    }
+    if (body.invoiceId) {
+      await this.requireInvoice(companyId, body.invoiceId);
+    }
+    if (body.paymentId) {
+      await this.requirePayment(companyId, body.paymentId);
     }
     if (body.recurringRuleId) {
       await this.requireRecurringRule(companyId, body.recurringRuleId);
@@ -1344,6 +1888,36 @@ export class FinanceService {
     return row;
   }
 
+  private async requireInvoice(companyId: string, id: string) {
+    const row = await this.prisma.financeInvoice.findUnique({
+      where: { id },
+      include: {
+        counterparty: true,
+        lines: true,
+        paymentAllocations: true
+      }
+    });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Invoice not found');
+    }
+    return row;
+  }
+
+  private async requirePayment(companyId: string, id: string) {
+    const row = await this.prisma.financePayment.findUnique({
+      where: { id },
+      include: {
+        counterparty: true,
+        account: true,
+        allocations: true
+      }
+    });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Payment not found');
+    }
+    return row;
+  }
+
   private async assertNoProfitCenterCycle(companyId: string, currentId: string, nextParentId: string) {
     let cursor: string | null = nextParentId;
     while (cursor) {
@@ -1383,6 +1957,60 @@ export class FinanceService {
       unique.add(target.profitCenterId);
       await this.requireProfitCenter(companyId, target.profitCenterId);
     }
+  }
+
+  private computeLineTotal(quantity: number, unitPrice: number, taxRate?: number | null) {
+    const base = quantity * unitPrice;
+    const tax = taxRate ? (base * taxRate) / 100 : 0;
+    return new Prisma.Decimal((base + tax).toFixed(2));
+  }
+
+  private computeInvoiceTotals(lines: Array<{ quantity: number; unitPrice: number; taxRate?: number | null }>) {
+    let subtotal = 0;
+    let taxTotal = 0;
+
+    for (const line of lines) {
+      const base = line.quantity * line.unitPrice;
+      if (base < 0) {
+        throw new BadRequestException('Invoice line total cannot be negative');
+      }
+      subtotal += base;
+      taxTotal += line.taxRate ? (base * line.taxRate) / 100 : 0;
+    }
+
+    const total = subtotal + taxTotal;
+    if (total < 0) {
+      throw new BadRequestException('Invoice total cannot be negative');
+    }
+
+    return {
+      subtotal: new Prisma.Decimal(subtotal.toFixed(2)),
+      taxTotal: new Prisma.Decimal(taxTotal.toFixed(2)),
+      total: new Prisma.Decimal(total.toFixed(2))
+    };
+  }
+
+  private async recalculateInvoiceStatus(tx: Prisma.TransactionClient, invoiceId: string) {
+    const invoice = await tx.financeInvoice.findUnique({
+      where: { id: invoiceId },
+      include: { paymentAllocations: true }
+    });
+
+    if (!invoice || invoice.status === 'VOID') {
+      return;
+    }
+
+    const allocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+    const total = Number(invoice.total);
+
+    let status: 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' = 'ISSUED';
+    if (allocated >= total - 0.0001) status = 'PAID';
+    else if (allocated > 0) status = 'PARTIALLY_PAID';
+
+    await tx.financeInvoice.update({
+      where: { id: invoiceId },
+      data: { status }
+    });
   }
 
   private async logCompany(

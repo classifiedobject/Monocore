@@ -68,6 +68,8 @@ export const financeEntrySchema = z.object({
   counterpartyId: z.string().uuid().nullable().optional(),
   accountId: z.string().uuid().nullable().optional(),
   profitCenterId: z.string().uuid().nullable().optional(),
+  invoiceId: z.string().uuid().nullable().optional(),
+  paymentId: z.string().uuid().nullable().optional(),
   reference: z.string().max(120).nullable().optional(),
   amount: z.coerce.number().positive(),
   date: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
@@ -140,6 +142,64 @@ export const financeAllocationRuleSchema = z.object({
 
 export const financeApplyAllocationSchema = z.object({
   sourceEntryId: z.string().uuid()
+});
+
+export const financeInvoiceLineSchema = z.object({
+  description: z.string().min(1).max(500),
+  quantity: z.coerce.number().positive().default(1),
+  unitPrice: z.coerce.number().nonnegative(),
+  taxRate: z.coerce.number().min(0).max(100).nullable().optional()
+});
+
+export const financeInvoiceSchema = z.object({
+  direction: z.enum(['PAYABLE', 'RECEIVABLE']),
+  counterpartyId: z.string().uuid(),
+  invoiceNo: z.string().min(1).max(80),
+  issueDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  dueDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  currency: z.string().min(3).max(8).default('TRY'),
+  status: z.enum(['DRAFT', 'ISSUED', 'PARTIALLY_PAID', 'PAID', 'VOID']).optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  lines: z.array(financeInvoiceLineSchema).min(1)
+});
+
+export const financeInvoiceQuerySchema = z.object({
+  direction: z.enum(['PAYABLE', 'RECEIVABLE']).optional(),
+  status: z.enum(['DRAFT', 'ISSUED', 'PARTIALLY_PAID', 'PAID', 'VOID']).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  counterpartyId: z.string().uuid().optional()
+});
+
+export const financePaymentSchema = z.object({
+  direction: z.enum(['OUTGOING', 'INCOMING']),
+  counterpartyId: z.string().uuid(),
+  accountId: z.string().uuid().nullable().optional(),
+  paymentDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  amount: z.coerce.number().positive(),
+  currency: z.string().min(3).max(8).default('TRY'),
+  reference: z.string().max(120).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional()
+});
+
+export const financePaymentQuerySchema = z.object({
+  direction: z.enum(['OUTGOING', 'INCOMING']).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  counterpartyId: z.string().uuid().optional()
+});
+
+export const financePaymentAllocateSchema = z.object({
+  allocations: z.array(z.object({ invoiceId: z.string().uuid(), amount: z.coerce.number().positive() })).min(1)
+});
+
+export const financeAgingQuerySchema = z.object({
+  direction: z.enum(['PAYABLE', 'RECEIVABLE']),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
+
+export const financeCounterpartyBalanceQuerySchema = z.object({
+  direction: z.enum(['PAYABLE', 'RECEIVABLE'])
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),

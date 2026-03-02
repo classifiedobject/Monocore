@@ -84,6 +84,10 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `FinanceAllocationRule`
   - `FinanceAllocationTarget`
   - `FinanceAllocationBatch`
+  - `FinanceInvoice`
+  - `FinanceInvoiceLine`
+  - `FinancePayment`
+  - `FinancePaymentAllocation`
   - `FinanceRecurringRule`
   - `FinanceEntry`
 - App API endpoints (all gated behind module installation + tenant RBAC):
@@ -94,9 +98,13 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `/app-api/finance/recurring`
   - `/app-api/finance/allocation-rules`
   - `/app-api/finance/allocation-batches`
+  - `/app-api/finance/invoices`
+  - `/app-api/finance/payments`
   - `/app-api/finance/reports/pnl`
   - `/app-api/finance/reports/cashflow`
   - `/app-api/finance/reports/pnl-by-profit-center`
+  - `/app-api/finance/reports/aging`
+  - `/app-api/finance/reports/counterparty-balance`
 - Recurring runs:
   - Manual per rule: `POST /app-api/finance/recurring/:id/run-now`
   - Batch due run: `POST /app-api/finance/recurring/run-due`
@@ -111,6 +119,12 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Apply a rule on one expense entry via `POST /app-api/finance/allocation-rules/:id/apply`.
   - System creates generated entries per target profit center and keeps original source entry unchanged.
   - Same source entry cannot be allocated twice; income entries cannot be allocated.
+- AP/AR Lite:
+  - `RECEIVABLE` and `PAYABLE` invoices with line-based totals.
+  - Incoming/outgoing payments and partial allocation to invoices.
+  - Invoice statuses auto-updated (`ISSUED`, `PARTIALLY_PAID`, `PAID`, `VOID`).
+  - Aging report (`current`, `1-30`, `31-60`, `61-90`, `90+`) and counterparty outstanding balance list.
+  - Fits cari flow: alacak/verecek takibi by counterparty with due-date buckets.
 
 ## i18n Foundation
 - Language keys stored in `LanguagePack` table (`locale`, `namespace`, `key`, `value`).
