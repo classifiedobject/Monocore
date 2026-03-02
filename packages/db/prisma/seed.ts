@@ -54,9 +54,16 @@ const companyPermissions = [
   'module:finance-core.payment.read',
   'module:finance-core.reports.aging.read',
   'module:inventory-core.item.manage',
+  'module:inventory-core.item.cost.manage',
   'module:inventory-core.warehouse.manage',
   'module:inventory-core.movement.manage',
-  'module:inventory-core.movement.read'
+  'module:inventory-core.movement.read',
+  'module:recipe-core.product.manage',
+  'module:recipe-core.recipe.manage',
+  'module:recipe-core.recipe.read',
+  'module:sales-core.order.manage',
+  'module:sales-core.order.read',
+  'module:sales-core.order.post'
 ];
 
 async function upsertPlatformRole() {
@@ -268,6 +275,44 @@ async function main() {
     }
   });
 
+  await prisma.module.upsert({
+    where: { key: 'recipe-core' },
+    create: {
+      key: 'recipe-core',
+      name: 'Recipe Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Bill of materials and recipe definitions for products.',
+      dependencies: { modules: ['core', 'inventory-core'] }
+    },
+    update: {
+      name: 'Recipe Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Bill of materials and recipe definitions for products.',
+      dependencies: { modules: ['core', 'inventory-core'] }
+    }
+  });
+
+  await prisma.module.upsert({
+    where: { key: 'sales-core' },
+    create: {
+      key: 'sales-core',
+      name: 'Sales Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Sales ledger with posting workflow, stock consumption and COGS integration.',
+      dependencies: { modules: ['core', 'inventory-core', 'finance-core', 'recipe-core'] }
+    },
+    update: {
+      name: 'Sales Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Sales ledger with posting workflow, stock consumption and COGS integration.',
+      dependencies: { modules: ['core', 'inventory-core', 'finance-core', 'recipe-core'] }
+    }
+  });
+
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -297,6 +342,74 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
+  });
+
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'recipe-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'recipe-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'recipe-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'recipe-core',
+      limits: {}
+    },
+    update: {}
+  });
+
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'sales-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'sales-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'sales-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'sales-core',
       limits: {}
     },
     update: {}

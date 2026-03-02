@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { Prisma, type InventoryMovementType } from '@prisma/client';
 import {
   inventoryItemSchema,
+  inventoryItemCostSchema,
   inventoryMovementQuerySchema,
   inventoryMovementSchema,
   inventoryStockBalanceQuerySchema,
@@ -44,6 +45,7 @@ export class InventoryService {
     return {
       permissions: Array.from(keys),
       manageItem: keys.has('module:inventory-core.item.manage'),
+      manageItemCost: keys.has('module:inventory-core.item.cost.manage'),
       manageWarehouse: keys.has('module:inventory-core.warehouse.manage'),
       manageMovement: keys.has('module:inventory-core.movement.manage'),
       readMovement: keys.has('module:inventory-core.movement.read')
@@ -127,6 +129,31 @@ export class InventoryService {
     });
 
     await this.logCompany(actorUserId, companyId, 'company.inventory.item.update', 'inventory_item', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async updateItemCost(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryItemCostSchema.parse(payload);
+    const existing = await this.requireItem(companyId, id);
+
+    const row = await this.prisma.inventoryItem.update({
+      where: { id: existing.id },
+      data: {
+        lastPurchaseUnitCost: body.lastPurchaseUnitCost === null ? null : new Prisma.Decimal(body.lastPurchaseUnitCost)
+      }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.cost.update',
+      'inventory_item',
+      row.id,
+      { lastPurchaseUnitCost: body.lastPurchaseUnitCost },
+      ip,
+      userAgent
+    );
+
     return row;
   }
 

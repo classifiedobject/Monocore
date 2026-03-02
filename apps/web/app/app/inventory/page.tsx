@@ -5,6 +5,7 @@ import { apiFetch, handleApiError } from '../../../lib/api';
 
 type InventoryCapabilities = {
   manageItem: boolean;
+  manageItemCost: boolean;
   manageWarehouse: boolean;
   manageMovement: boolean;
   readMovement: boolean;
@@ -22,6 +23,7 @@ type Item = {
   name: string;
   sku: string | null;
   unit: string;
+  lastPurchaseUnitCost: string | null;
   isActive: boolean;
 };
 
@@ -58,6 +60,7 @@ export default function InventoryPage() {
   const [tab, setTab] = useState<Tab>('items');
   const [caps, setCaps] = useState<InventoryCapabilities>({
     manageItem: false,
+    manageItemCost: false,
     manageWarehouse: false,
     manageMovement: false,
     readMovement: false
@@ -72,6 +75,7 @@ export default function InventoryPage() {
   const [itemSku, setItemSku] = useState('');
   const [itemUnit, setItemUnit] = useState('piece');
   const [itemActive, setItemActive] = useState(true);
+  const [itemCostDraft, setItemCostDraft] = useState<Record<string, string>>({});
 
   const [warehouseName, setWarehouseName] = useState('');
   const [warehouseLocation, setWarehouseLocation] = useState('');
@@ -282,6 +286,7 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-left">Name</th>
                 <th className="px-3 py-2 text-left">SKU</th>
                 <th className="px-3 py-2 text-left">Unit</th>
+                <th className="px-3 py-2 text-left">Last Cost</th>
                 <th className="px-3 py-2 text-left">Status</th>
               </tr>
             </thead>
@@ -291,6 +296,40 @@ export default function InventoryPage() {
                   <td className="px-3 py-2">{row.name}</td>
                   <td className="px-3 py-2">{row.sku ?? '-'}</td>
                   <td className="px-3 py-2">{row.unit}</td>
+                  <td className="px-3 py-2">
+                    {caps.manageItemCost ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          className="w-28 rounded border px-2 py-1"
+                          type="number"
+                          step="0.0001"
+                          value={itemCostDraft[row.id] ?? (row.lastPurchaseUnitCost ?? '')}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setItemCostDraft((prev) => ({ ...prev, [row.id]: value }));
+                          }}
+                        />
+                        <button
+                          className="rounded bg-slate-900 px-2 py-1 text-xs text-white"
+                          onClick={() => {
+                            const raw = itemCostDraft[row.id] ?? row.lastPurchaseUnitCost ?? '';
+                            const next = raw === '' ? null : Number(raw);
+                            apiFetch(`/app-api/inventory/items/${row.id}/cost`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({ lastPurchaseUnitCost: next })
+                            })
+                              .then(() => loadItems())
+                              .then(() => loadStock())
+                              .catch(handleApiError);
+                          }}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    ) : (
+                      row.lastPurchaseUnitCost ?? '-'
+                    )}
+                  </td>
                   <td className="px-3 py-2">{row.isActive ? 'Active' : 'Inactive'}</td>
                 </tr>
               ))}

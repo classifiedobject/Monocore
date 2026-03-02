@@ -63,6 +63,16 @@ export class InventoryController {
     return this.inventory.updateItem(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
   }
 
+  @Patch('items/:id/cost')
+  @RequirePermissions('module:inventory-core.item.cost.manage')
+  updateItemCost(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.updateItemCost(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
   @Get('movements')
   @RequirePermissions('module:inventory-core.movement.read')
   listMovements(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
