@@ -3,6 +3,8 @@ import { Prisma, type FinanceRecurringRule } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 import {
+  financeAllocationRuleSchema,
+  financeApplyAllocationSchema,
   financeAccountSchema,
   financeCategorySchema,
   financeCounterpartySchema,
@@ -61,6 +63,9 @@ export class FinanceService {
       readProfitCenter: keys.has('module:finance-core.profit-center.read'),
       readProfitCenterReports: keys.has('module:finance-core.reports.profit-center.read'),
       readReports: keys.has('module:finance-core.reports.read'),
+      manageAllocation: keys.has('module:finance-core.allocation.manage'),
+      applyAllocation: keys.has('module:finance-core.allocation.apply'),
+      readAllocation: keys.has('module:finance-core.allocation.read'),
       createEntry: keys.has('module:finance-core.entry.create'),
       deleteEntry: keys.has('module:finance-core.entry.delete'),
       readEntry: keys.has('module:finance-core.entry.read')
@@ -388,6 +393,302 @@ export class FinanceService {
     );
 
     return updated;
+  }
+
+  listAllocationRules(companyId: string) {
+    return this.prisma.financeAllocationRule.findMany({
+      where: { companyId },
+      include: {
+        sourceCategory: true,
+        sourceEntry: { include: { category: true } },
+        targets: { include: { profitCenter: true }, orderBy: { createdAt: 'asc' } }
+      },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }]
+    });
+  }
+
+  async createAllocationRule(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeAllocationRuleSchema.parse(payload);
+    this.assertAllocationRuleSources(body.sourceCategoryId, body.sourceEntryId);
+    await this.validateAllocationTargets(companyId, body.targets);
+    this.assertAllocationTotal(body.targets);
+
+    if (body.sourceCategoryId) {
+      await this.requireCategory(companyId, body.sourceCategoryId);
+    }
+    if (body.sourceEntryId) {
+      const sourceEntry = await this.requireEntry(companyId, body.sourceEntryId);
+      if (sourceEntry.category.type !== 'EXPENSE') {
+        throw new BadRequestException('Allocation source entry must be expense');
+      }
+    }
+
+    const created = await this.prisma.financeAllocationRule.create({
+      data: {
+        companyId,
+        name: body.name,
+        sourceCategoryId: body.sourceCategoryId ?? null,
+        sourceEntryId: body.sourceEntryId ?? null,
+        allocationMethod: body.allocationMethod,
+        isActive: body.isActive ?? true,
+        targets: {
+          create: body.targets.map((target) => ({
+            profitCenterId: target.profitCenterId,
+            percentage: new Prisma.Decimal(target.percentage)
+          }))
+        }
+      },
+      include: {
+        sourceCategory: true,
+        sourceEntry: { include: { category: true } },
+        targets: { include: { profitCenter: true }, orderBy: { createdAt: 'asc' } }
+      }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.allocation_rule.create',
+      'finance_allocation_rule',
+      created.id,
+      {
+        name: created.name,
+        sourceCategoryId: created.sourceCategoryId,
+        sourceEntryId: created.sourceEntryId,
+        allocationMethod: created.allocationMethod,
+        targets: created.targets.map((target) => ({
+          profitCenterId: target.profitCenterId,
+          percentage: Number(target.percentage)
+        }))
+      },
+      ip,
+      userAgent
+    );
+
+    return created;
+  }
+
+  async updateAllocationRule(
+    actorUserId: string,
+    companyId: string,
+    ruleId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = financeAllocationRuleSchema.partial().parse(payload);
+    const existing = await this.requireAllocationRule(companyId, ruleId);
+
+    const sourceCategoryId = body.sourceCategoryId === undefined ? existing.sourceCategoryId : body.sourceCategoryId;
+    const sourceEntryId = body.sourceEntryId === undefined ? existing.sourceEntryId : body.sourceEntryId;
+    this.assertAllocationRuleSources(sourceCategoryId, sourceEntryId);
+
+    if (sourceCategoryId) {
+      await this.requireCategory(companyId, sourceCategoryId);
+    }
+    if (sourceEntryId) {
+      const sourceEntry = await this.requireEntry(companyId, sourceEntryId);
+      if (sourceEntry.category.type !== 'EXPENSE') {
+        throw new BadRequestException('Allocation source entry must be expense');
+      }
+    }
+
+    if (body.targets) {
+      await this.validateAllocationTargets(companyId, body.targets);
+      this.assertAllocationTotal(body.targets);
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (body.targets) {
+        await tx.financeAllocationTarget.deleteMany({ where: { allocationRuleId: existing.id } });
+      }
+
+      return tx.financeAllocationRule.update({
+        where: { id: existing.id },
+        data: {
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.sourceCategoryId !== undefined ? { sourceCategoryId: body.sourceCategoryId } : {}),
+          ...(body.sourceEntryId !== undefined ? { sourceEntryId: body.sourceEntryId } : {}),
+          ...(body.allocationMethod !== undefined ? { allocationMethod: body.allocationMethod } : {}),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+          ...(body.targets
+            ? {
+                targets: {
+                  create: body.targets.map((target) => ({
+                    profitCenterId: target.profitCenterId,
+                    percentage: new Prisma.Decimal(target.percentage)
+                  }))
+                }
+              }
+            : {})
+        },
+        include: {
+          sourceCategory: true,
+          sourceEntry: { include: { category: true } },
+          targets: { include: { profitCenter: true }, orderBy: { createdAt: 'asc' } }
+        }
+      });
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.allocation_rule.update',
+      'finance_allocation_rule',
+      updated.id,
+      {
+        name: updated.name,
+        sourceCategoryId: updated.sourceCategoryId,
+        sourceEntryId: updated.sourceEntryId,
+        allocationMethod: updated.allocationMethod,
+        isActive: updated.isActive,
+        targets: updated.targets.map((target) => ({
+          profitCenterId: target.profitCenterId,
+          percentage: Number(target.percentage)
+        }))
+      },
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
+  async applyAllocationRule(
+    actorUserId: string,
+    companyId: string,
+    ruleId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = financeApplyAllocationSchema.parse(payload);
+    const rule = await this.prisma.financeAllocationRule.findUnique({
+      where: { id: ruleId },
+      include: { targets: true }
+    });
+
+    if (!rule || rule.companyId !== companyId) {
+      throw new NotFoundException('Allocation rule not found');
+    }
+    if (!rule.isActive) {
+      throw new BadRequestException('Allocation rule is inactive');
+    }
+    if (!rule.targets.length) {
+      throw new BadRequestException('Allocation rule has no targets');
+    }
+
+    this.assertAllocationTotal(
+      rule.targets.map((target) => ({ profitCenterId: target.profitCenterId, percentage: Number(target.percentage) }))
+    );
+
+    const sourceEntry = await this.requireEntry(companyId, body.sourceEntryId);
+    if (sourceEntry.category.type !== 'EXPENSE') {
+      throw new BadRequestException('Only expense entries can be allocated');
+    }
+    if (sourceEntry.isAllocationGenerated) {
+      throw new BadRequestException('Generated allocation entries cannot be re-allocated');
+    }
+
+    if (rule.sourceEntryId && rule.sourceEntryId !== sourceEntry.id) {
+      throw new BadRequestException('This rule can only be applied to its configured source entry');
+    }
+    if (rule.sourceCategoryId && rule.sourceCategoryId !== sourceEntry.categoryId) {
+      throw new BadRequestException('Source entry category does not match allocation rule category');
+    }
+
+    const alreadyAllocated = await this.prisma.financeAllocationBatch.findFirst({
+      where: { companyId, sourceEntryId: sourceEntry.id },
+      select: { id: true }
+    });
+    if (alreadyAllocated) {
+      throw new BadRequestException('This source entry is already allocated');
+    }
+
+    const generated = await this.prisma.$transaction(async (tx) => {
+      const batch = await tx.financeAllocationBatch.create({
+        data: {
+          companyId,
+          allocationRuleId: rule.id,
+          sourceEntryId: sourceEntry.id,
+          createdByUserId: actorUserId
+        }
+      });
+
+      const sourceAmount = Number(sourceEntry.amount);
+      const normalizedTargets = rule.targets.map((target) => ({
+        profitCenterId: target.profitCenterId,
+        percentage: Number(target.percentage)
+      }));
+
+      const data = normalizedTargets.map((target, index) => {
+        const raw = (sourceAmount * target.percentage) / 100;
+        const rounded = index === normalizedTargets.length - 1 ? 0 : Math.round(raw * 100) / 100;
+        return { ...target, amount: rounded };
+      });
+
+      const totalWithoutLast = data.slice(0, -1).reduce((sum, row) => sum + row.amount, 0);
+      if (data.length) {
+        data[data.length - 1].amount = Math.round((sourceAmount - totalWithoutLast) * 100) / 100;
+      }
+
+      const entries = [];
+      for (const row of data) {
+        const createdEntry = await tx.financeEntry.create({
+          data: {
+            companyId,
+            categoryId: sourceEntry.categoryId,
+            counterpartyId: sourceEntry.counterpartyId,
+            accountId: sourceEntry.accountId,
+            profitCenterId: row.profitCenterId,
+            reference: sourceEntry.reference,
+            amount: new Prisma.Decimal(row.amount.toFixed(2)),
+            date: sourceEntry.date,
+            description: sourceEntry.description ? `[Allocated] ${sourceEntry.description}` : 'Allocated expense',
+            createdByUserId: actorUserId,
+            allocationBatchId: batch.id,
+            isAllocationGenerated: true
+          },
+          include: { category: true, counterparty: true, account: true, profitCenter: true }
+        });
+        entries.push(createdEntry);
+      }
+
+      return { batch, entries };
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.allocation_rule.apply',
+      'finance_allocation_batch',
+      generated.batch.id,
+      {
+        allocationRuleId: rule.id,
+        sourceEntryId: sourceEntry.id,
+        generatedEntriesCount: generated.entries.length,
+        generatedEntryIds: generated.entries.map((entry) => entry.id)
+      },
+      ip,
+      userAgent
+    );
+
+    return {
+      batch: generated.batch,
+      generatedEntries: generated.entries
+    };
+  }
+
+  listAllocationBatches(companyId: string) {
+    return this.prisma.financeAllocationBatch.findMany({
+      where: { companyId },
+      include: {
+        allocationRule: true,
+        sourceEntry: { include: { category: true } },
+        generatedEntries: { include: { profitCenter: true, category: true }, orderBy: { createdAt: 'asc' } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
   }
 
   async listEntries(companyId: string, filters: EntryFilters) {
@@ -1024,6 +1325,25 @@ export class FinanceService {
     return row;
   }
 
+  private async requireEntry(companyId: string, id: string) {
+    const row = await this.prisma.financeEntry.findUnique({
+      where: { id },
+      include: { category: true }
+    });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Entry not found');
+    }
+    return row;
+  }
+
+  private async requireAllocationRule(companyId: string, id: string) {
+    const row = await this.prisma.financeAllocationRule.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Allocation rule not found');
+    }
+    return row;
+  }
+
   private async assertNoProfitCenterCycle(companyId: string, currentId: string, nextParentId: string) {
     let cursor: string | null = nextParentId;
     while (cursor) {
@@ -1038,6 +1358,30 @@ export class FinanceService {
         throw new BadRequestException('Invalid parent profit center');
       }
       cursor = parent.parentId;
+    }
+  }
+
+  private assertAllocationRuleSources(sourceCategoryId?: string | null, sourceEntryId?: string | null) {
+    if (sourceCategoryId && sourceEntryId) {
+      throw new BadRequestException('Allocation rule sourceCategoryId and sourceEntryId cannot both be set');
+    }
+  }
+
+  private assertAllocationTotal(targets: Array<{ percentage: number }>) {
+    const total = targets.reduce((sum, target) => sum + target.percentage, 0);
+    if (Math.abs(total - 100) > 0.0001) {
+      throw new BadRequestException('Allocation target percentages must add up to 100');
+    }
+  }
+
+  private async validateAllocationTargets(companyId: string, targets: Array<{ profitCenterId: string; percentage: number }>) {
+    const unique = new Set<string>();
+    for (const target of targets) {
+      if (unique.has(target.profitCenterId)) {
+        throw new BadRequestException('Duplicate profit center in allocation targets');
+      }
+      unique.add(target.profitCenterId);
+      await this.requireProfitCenter(companyId, target.profitCenterId);
     }
   }
 

@@ -168,6 +168,44 @@ export class FinanceController {
     return this.finance.deactivateProfitCenter(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
+  @Get('allocation-rules')
+  @RequirePermissions('module:finance-core.allocation.read')
+  listAllocationRules(@Req() req: Request & { companyId: string }) {
+    return this.finance.listAllocationRules(req.companyId);
+  }
+
+  @Post('allocation-rules')
+  @RequirePermissions('module:finance-core.allocation.manage')
+  createAllocationRule(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createAllocationRule(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('allocation-rules/:id')
+  @RequirePermissions('module:finance-core.allocation.manage')
+  updateAllocationRule(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateAllocationRule(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('allocation-rules/:id/apply')
+  @RequirePermissions('module:finance-core.allocation.apply')
+  applyAllocationRule(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.applyAllocationRule(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('allocation-batches')
+  @RequirePermissions('module:finance-core.allocation.read')
+  listAllocationBatches(@Req() req: Request & { companyId: string }) {
+    return this.finance.listAllocationBatches(req.companyId);
+  }
+
   @Get('recurring')
   @RequirePermissions('module:finance-core.entry.read')
   listRecurring(@Req() req: Request & { companyId: string }) {

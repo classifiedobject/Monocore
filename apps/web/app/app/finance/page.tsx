@@ -41,6 +41,7 @@ type Entry = {
   date: string;
   reference: string | null;
   description: string | null;
+  isAllocationGenerated: boolean;
   category: Category;
   counterparty: Counterparty | null;
   account: Account | null;
@@ -87,6 +88,24 @@ type ProfitCenterPnlDetail = {
   byCategory: Array<{ categoryId: string; categoryName: string; type: string; total: number }>;
 };
 
+type AllocationRule = {
+  id: string;
+  name: string;
+  allocationMethod: 'PERCENTAGE';
+  isActive: boolean;
+  sourceCategoryId: string | null;
+  sourceEntryId: string | null;
+  targets: Array<{ id: string; profitCenterId: string; percentage: string; profitCenter: ProfitCenter }>;
+};
+
+type AllocationBatch = {
+  id: string;
+  sourceEntryId: string;
+  createdAt: string;
+  allocationRule: { id: string; name: string };
+  generatedEntries: Array<{ id: string; amount: string; profitCenter: ProfitCenter | null }>;
+};
+
 type Capabilities = {
   manageCounterparty: boolean;
   manageAccount: boolean;
@@ -95,11 +114,14 @@ type Capabilities = {
   readProfitCenter: boolean;
   readProfitCenterReports: boolean;
   readReports: boolean;
+  manageAllocation: boolean;
+  applyAllocation: boolean;
+  readAllocation: boolean;
   createEntry: boolean;
   deleteEntry: boolean;
 };
 
-type TabKey = 'entries' | 'counterparties' | 'accounts' | 'profit-centers' | 'recurring' | 'reports';
+type TabKey = 'entries' | 'counterparties' | 'accounts' | 'profit-centers' | 'recurring' | 'allocation' | 'reports';
 
 export default function FinancePage() {
   const [tab, setTab] = useState<TabKey>('entries');
@@ -110,6 +132,8 @@ export default function FinancePage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [monthlyPnl, setMonthlyPnl] = useState<PnlMonthlyRow[]>([]);
   const [recurring, setRecurring] = useState<RecurringRule[]>([]);
+  const [allocationRules, setAllocationRules] = useState<AllocationRule[]>([]);
+  const [allocationBatches, setAllocationBatches] = useState<AllocationBatch[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities>({
     manageCounterparty: false,
     manageAccount: false,
@@ -118,6 +142,9 @@ export default function FinancePage() {
     readProfitCenter: false,
     readProfitCenterReports: false,
     readReports: false,
+    manageAllocation: false,
+    applyAllocation: false,
+    readAllocation: false,
     createEntry: false,
     deleteEntry: false
   });
@@ -170,6 +197,14 @@ export default function FinancePage() {
   const [ruleCounterpartyId, setRuleCounterpartyId] = useState('');
   const [ruleAccountId, setRuleAccountId] = useState('');
 
+  const [allocationRuleName, setAllocationRuleName] = useState('');
+  const [allocationRuleSourceCategoryId, setAllocationRuleSourceCategoryId] = useState('');
+  const [allocationTargetCenterId, setAllocationTargetCenterId] = useState('');
+  const [allocationTargetPercentage, setAllocationTargetPercentage] = useState('');
+  const [allocationTargets, setAllocationTargets] = useState<Array<{ profitCenterId: string; percentage: number }>>([]);
+  const [applyRuleId, setApplyRuleId] = useState('');
+  const [applySourceEntryId, setApplySourceEntryId] = useState('');
+
   const [reportFrom, setReportFrom] = useState(monthStart);
   const [reportTo, setReportTo] = useState(today);
   const [reportAccountId, setReportAccountId] = useState('');
@@ -182,18 +217,24 @@ export default function FinancePage() {
     try {
       const caps = (await apiFetch('/app-api/finance/capabilities')) as Capabilities;
       setCapabilities(caps);
+      return caps;
     } catch (error) {
       handleApiError(error);
+      return null;
     }
   }
 
-  async function loadMasterData() {
+  async function loadMasterData(caps?: Capabilities | null) {
     try {
+      const canReadProfitCenter = Boolean(caps?.readProfitCenter || caps?.manageProfitCenter);
+
       const [categoryRows, counterpartyRows, accountRows, profitCenterRows] = await Promise.all([
         apiFetch('/app-api/finance/categories') as Promise<Category[]>,
         apiFetch('/app-api/finance/counterparties') as Promise<Counterparty[]>,
         apiFetch('/app-api/finance/accounts') as Promise<Account[]>,
-        apiFetch('/app-api/finance/profit-centers') as Promise<ProfitCenter[]>
+        canReadProfitCenter
+          ? (apiFetch('/app-api/finance/profit-centers') as Promise<ProfitCenter[]>)
+          : Promise.resolve([] as ProfitCenter[])
       ]);
       setCategories(categoryRows);
       setCounterparties(counterpartyRows);
@@ -239,11 +280,40 @@ export default function FinancePage() {
     }
   }
 
+  async function loadAllocation() {
+    try {
+      if (!capabilities.readAllocation && !capabilities.manageAllocation && !capabilities.applyAllocation) {
+        setAllocationRules([]);
+        setAllocationBatches([]);
+        return;
+      }
+
+      const [rules, batches] = await Promise.all([
+        apiFetch('/app-api/finance/allocation-rules') as Promise<AllocationRule[]>,
+        apiFetch('/app-api/finance/allocation-batches') as Promise<AllocationBatch[]>
+      ]);
+      setAllocationRules(rules);
+      setAllocationBatches(batches);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
   useEffect(() => {
-    loadCapabilities().catch(handleApiError);
-    loadMasterData().catch(handleApiError);
-    loadEntries().catch(handleApiError);
-    loadRecurring().catch(handleApiError);
+    (async () => {
+      const caps = await loadCapabilities();
+      await loadMasterData(caps);
+      await loadEntries();
+      await loadRecurring();
+      if (caps?.readAllocation || caps?.manageAllocation || caps?.applyAllocation) {
+        const [rules, batches] = await Promise.all([
+          apiFetch('/app-api/finance/allocation-rules') as Promise<AllocationRule[]>,
+          apiFetch('/app-api/finance/allocation-batches') as Promise<AllocationBatch[]>
+        ]);
+        setAllocationRules(rules);
+        setAllocationBatches(batches);
+      }
+    })().catch(handleApiError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -476,6 +546,78 @@ export default function FinancePage() {
     }
   }
 
+  function addAllocationTarget() {
+    if (!allocationTargetCenterId || !allocationTargetPercentage) return;
+    const percentage = Number(allocationTargetPercentage);
+    if (!Number.isFinite(percentage) || percentage <= 0) return;
+    setAllocationTargets((prev) => {
+      if (prev.some((item) => item.profitCenterId === allocationTargetCenterId)) {
+        return prev;
+      }
+      return [...prev, { profitCenterId: allocationTargetCenterId, percentage }];
+    });
+    setAllocationTargetCenterId('');
+    setAllocationTargetPercentage('');
+  }
+
+  function removeAllocationTarget(profitCenterId: string) {
+    setAllocationTargets((prev) => prev.filter((target) => target.profitCenterId !== profitCenterId));
+  }
+
+  async function createAllocationRule(e: FormEvent) {
+    e.preventDefault();
+    try {
+      const total = allocationTargets.reduce((sum, target) => sum + target.percentage, 0);
+      if (Math.abs(total - 100) > 0.0001) {
+        window.alert('Allocation targets must total 100%.');
+        return;
+      }
+
+      await apiFetch('/app-api/finance/allocation-rules', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: allocationRuleName,
+          sourceCategoryId: allocationRuleSourceCategoryId || null,
+          allocationMethod: 'PERCENTAGE',
+          isActive: true,
+          targets: allocationTargets
+        })
+      });
+      setAllocationRuleName('');
+      setAllocationRuleSourceCategoryId('');
+      setAllocationTargets([]);
+      await loadAllocation();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function toggleAllocationRule(rule: AllocationRule, nextActive: boolean) {
+    try {
+      await apiFetch(`/app-api/finance/allocation-rules/${rule.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: nextActive })
+      });
+      await loadAllocation();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function applyAllocation(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await apiFetch(`/app-api/finance/allocation-rules/${applyRuleId}/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ sourceEntryId: applySourceEntryId })
+      });
+      setApplySourceEntryId('');
+      await Promise.all([loadAllocation(), loadEntries(), loadReports()]);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
   async function loadReports(e?: FormEvent) {
     e?.preventDefault();
     try {
@@ -561,6 +703,7 @@ export default function FinancePage() {
           ['accounts', 'Accounts'],
           ['profit-centers', 'Profit Centers'],
           ['recurring', 'Recurring'],
+          ['allocation', 'Allocation'],
           ['reports', 'Reports']
         ] as Array<[TabKey, string]>).map(([key, label]) => (
           <button
@@ -677,7 +820,10 @@ export default function FinancePage() {
               {entries.map((entry) => (
                 <div key={entry.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
                   <div>
-                    <p>{entry.date.slice(0, 10)} | {entry.category.name} ({entry.category.type}) | {entry.amount}</p>
+                    <p>
+                      {entry.date.slice(0, 10)} | {entry.category.name} ({entry.category.type}) | {entry.amount}
+                      {entry.isAllocationGenerated ? ' | Allocated' : ''}
+                    </p>
                     <p className="text-slate-500">Counterparty: {entry.counterparty?.name ?? '-'} | Account: {entry.account?.name ?? '-'} | Profit Center: {entry.profitCenter?.name ?? '-'}</p>
                     {entry.description ? <p className="text-slate-500">{entry.description}</p> : null}
                   </div>
@@ -857,6 +1003,181 @@ export default function FinancePage() {
               ))}
             </div>
           </article>
+        </div>
+      ) : null}
+
+      {tab === 'allocation' ? (
+        <div className="space-y-4">
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">Allocation Rules</h2>
+            {capabilities.manageAllocation ? (
+              <form className="space-y-3" onSubmit={createAllocationRule}>
+                <div className="grid gap-2 md:grid-cols-3">
+                  <input
+                    className="rounded border p-2"
+                    placeholder="Rule name"
+                    value={allocationRuleName}
+                    onChange={(e) => setAllocationRuleName(e.target.value)}
+                    required
+                  />
+                  <select
+                    className="rounded border p-2"
+                    value={allocationRuleSourceCategoryId}
+                    onChange={(e) => setAllocationRuleSourceCategoryId(e.target.value)}
+                  >
+                    <option value="">Any expense category</option>
+                    {categories
+                      .filter((category) => category.type === 'EXPENSE')
+                      .map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                  </select>
+                  <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    Target total: {allocationTargets.reduce((sum, item) => sum + item.percentage, 0).toFixed(2)}%
+                  </div>
+                </div>
+                <div className="grid gap-2 md:grid-cols-4">
+                  <select
+                    className="rounded border p-2"
+                    value={allocationTargetCenterId}
+                    onChange={(e) => setAllocationTargetCenterId(e.target.value)}
+                  >
+                    <option value="">Profit center</option>
+                    {profitCenters
+                      .filter((center) => center.isActive)
+                      .map((center) => (
+                        <option key={center.id} value={center.id}>
+                          {center.name}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    className="rounded border p-2"
+                    type="number"
+                    min="0.01"
+                    max="100"
+                    step="0.01"
+                    placeholder="Percentage"
+                    value={allocationTargetPercentage}
+                    onChange={(e) => setAllocationTargetPercentage(e.target.value)}
+                  />
+                  <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" type="button" onClick={addAllocationTarget}>
+                    Add Target
+                  </button>
+                  <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white" type="submit">
+                    Create Rule
+                  </button>
+                </div>
+                <div className="space-y-1 text-sm">
+                  {allocationTargets.map((target) => {
+                    const centerName = profitCenters.find((center) => center.id === target.profitCenterId)?.name ?? target.profitCenterId;
+                    return (
+                      <div key={target.profitCenterId} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2">
+                        <span>
+                          {centerName}: {target.percentage.toFixed(2)}%
+                        </span>
+                        <button className="rounded bg-red-600 px-2 py-1 text-xs text-white" type="button" onClick={() => removeAllocationTarget(target.profitCenterId)}>
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </form>
+            ) : (
+              <p className="text-sm text-slate-500">You do not have permission to manage allocation rules.</p>
+            )}
+          </article>
+
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-2 text-base font-semibold">Apply Allocation</h3>
+            {capabilities.applyAllocation ? (
+              <form className="grid gap-2 md:grid-cols-3" onSubmit={applyAllocation}>
+                <select className="rounded border p-2" value={applyRuleId} onChange={(e) => setApplyRuleId(e.target.value)} required>
+                  <option value="">Select rule</option>
+                  {allocationRules
+                    .filter((rule) => rule.isActive)
+                    .map((rule) => (
+                      <option key={rule.id} value={rule.id}>
+                        {rule.name}
+                      </option>
+                    ))}
+                </select>
+                <select className="rounded border p-2" value={applySourceEntryId} onChange={(e) => setApplySourceEntryId(e.target.value)} required>
+                  <option value="">Select expense entry</option>
+                  {entries
+                    .filter((entry) => entry.category.type === 'EXPENSE' && !entry.isAllocationGenerated)
+                    .map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.date.slice(0, 10)} | {entry.category.name} | {entry.amount}
+                      </option>
+                    ))}
+                </select>
+                <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white">Apply</button>
+              </form>
+            ) : (
+              <p className="text-sm text-slate-500">You do not have permission to apply allocations.</p>
+            )}
+          </article>
+
+          {capabilities.readAllocation ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Rules</h3>
+              <div className="space-y-2 text-sm">
+                {allocationRules.map((rule) => (
+                  <div key={rule.id} className="rounded border border-slate-200 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <p>
+                        {rule.name} | {rule.isActive ? 'active' : 'inactive'}
+                      </p>
+                      {capabilities.manageAllocation ? (
+                        <button
+                          className="rounded bg-slate-700 px-2 py-1 text-xs text-white"
+                          onClick={() => toggleAllocationRule(rule, !rule.isActive)}
+                        >
+                          {rule.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="text-slate-500">
+                      Source category: {categories.find((category) => category.id === rule.sourceCategoryId)?.name ?? 'Any expense category'}
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                      {rule.targets.map((target) => (
+                        <span key={target.id} className="rounded bg-slate-100 px-2 py-1">
+                          {target.profitCenter.name}: {Number(target.percentage).toFixed(2)}%
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
+          {capabilities.readAllocation ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Allocation Batches</h3>
+              <div className="space-y-2 text-sm">
+                {allocationBatches.map((batch) => (
+                  <div key={batch.id} className="rounded border border-slate-200 px-3 py-2">
+                    <p>
+                      {batch.createdAt.slice(0, 10)} | {batch.allocationRule.name} | generated: {batch.generatedEntries.length}
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs">
+                      {batch.generatedEntries.map((entry) => (
+                        <span key={entry.id} className="rounded bg-slate-100 px-2 py-1">
+                          {entry.profitCenter?.name ?? 'Unassigned'}: {entry.amount}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
         </div>
       ) : null}
 

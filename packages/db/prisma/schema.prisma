@@ -56,6 +56,10 @@ enum FinanceProfitCenterType {
   OTHER
 }
 
+enum FinanceAllocationMethod {
+  PERCENTAGE
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -76,6 +80,7 @@ model User {
   managedPlatformProfiles PlatformUserProfile[] @relation("platform_user_profile_manager")
   financeEntriesCreated FinanceEntry[]  @relation("finance_entry_creator")
   financeRecurringRulesCreated FinanceRecurringRule[] @relation("finance_recurring_rule_creator")
+  financeAllocationBatchesCreated FinanceAllocationBatch[] @relation("finance_allocation_batch_creator")
 }
 
 model Session {
@@ -163,6 +168,8 @@ model Company {
   financeAccounts FinanceAccount[]
   financeRecurringRules FinanceRecurringRule[]
   financeProfitCenters FinanceProfitCenter[]
+  financeAllocationRules FinanceAllocationRule[]
+  financeAllocationBatches FinanceAllocationBatch[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -415,6 +422,7 @@ model FinanceCategory {
   company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   entries   FinanceEntry[]
   recurringRules FinanceRecurringRule[]
+  allocationRules FinanceAllocationRule[] @relation("allocation_rule_source_category")
 
   @@unique([companyId, name])
   @@index([companyId, type])
@@ -430,6 +438,8 @@ model FinanceEntry {
   reference       String?
   isRecurringGenerated Boolean @default(false)
   recurringRuleId String?
+  allocationBatchId String?
+  isAllocationGenerated Boolean @default(false)
   amount          Decimal   @db.Decimal(14, 2)
   date            DateTime
   description     String?
@@ -442,6 +452,9 @@ model FinanceEntry {
   account         FinanceAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   profitCenter    FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
   recurringRule   FinanceRecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
+  allocationBatch FinanceAllocationBatch? @relation("allocation_batch_entries", fields: [allocationBatchId], references: [id], onDelete: SetNull)
+  sourceAllocationBatch FinanceAllocationBatch? @relation("allocation_batch_source_entry")
+  sourceForAllocationRules FinanceAllocationRule[] @relation("allocation_rule_source_entry")
   createdByUser   User      @relation("finance_entry_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([companyId, date])
@@ -529,8 +542,58 @@ model FinanceProfitCenter {
   parent    FinanceProfitCenter? @relation("finance_profit_center_tree", fields: [parentId], references: [id], onDelete: SetNull)
   children  FinanceProfitCenter[] @relation("finance_profit_center_tree")
   entries   FinanceEntry[]
+  allocationTargets FinanceAllocationTarget[]
 
   @@index([companyId, isActive])
   @@index([companyId, parentId])
   @@unique([companyId, name])
+}
+
+model FinanceAllocationRule {
+  id              String   @id @default(uuid())
+  companyId       String
+  name            String
+  sourceCategoryId String?
+  sourceEntryId   String?
+  allocationMethod FinanceAllocationMethod
+  isActive        Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sourceCategory  FinanceCategory? @relation("allocation_rule_source_category", fields: [sourceCategoryId], references: [id], onDelete: SetNull)
+  sourceEntry     FinanceEntry? @relation("allocation_rule_source_entry", fields: [sourceEntryId], references: [id], onDelete: SetNull)
+  targets         FinanceAllocationTarget[]
+  batches         FinanceAllocationBatch[]
+
+  @@index([companyId, isActive])
+}
+
+model FinanceAllocationTarget {
+  id               String   @id @default(uuid())
+  allocationRuleId String
+  profitCenterId   String
+  percentage       Decimal  @db.Decimal(5, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  allocationRule   FinanceAllocationRule @relation(fields: [allocationRuleId], references: [id], onDelete: Cascade)
+  profitCenter     FinanceProfitCenter   @relation(fields: [profitCenterId], references: [id], onDelete: Restrict)
+
+  @@unique([allocationRuleId, profitCenterId])
+  @@index([allocationRuleId])
+}
+
+model FinanceAllocationBatch {
+  id              String   @id @default(uuid())
+  companyId       String
+  allocationRuleId String
+  sourceEntryId   String   @unique
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  allocationRule  FinanceAllocationRule @relation(fields: [allocationRuleId], references: [id], onDelete: Cascade)
+  sourceEntry     FinanceEntry @relation("allocation_batch_source_entry", fields: [sourceEntryId], references: [id], onDelete: Restrict)
+  createdByUser   User     @relation("finance_allocation_batch_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  generatedEntries FinanceEntry[] @relation("allocation_batch_entries")
+
+  @@index([companyId, createdAt])
 }

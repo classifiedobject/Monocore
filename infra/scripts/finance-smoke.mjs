@@ -94,6 +94,11 @@ async function main() {
     body: JSON.stringify({ name: `Smoke Center ${nonce}`, type: 'SERVICE', code: `SC${nonce}` })
   }, auth);
 
+  const secondProfitCenter = await request('/app-api/finance/profit-centers', {
+    method: 'POST',
+    body: JSON.stringify({ name: `Smoke Center B ${nonce}`, type: 'DEPARTMENT', code: `SCB${nonce}` })
+  }, auth);
+
   const entry = await request('/app-api/finance/entries', {
     method: 'POST',
     body: JSON.stringify({
@@ -140,6 +145,42 @@ async function main() {
 
   const runNow = await request(`/app-api/finance/recurring/${recurring.id}/run-now`, { method: 'POST', body: JSON.stringify({}) }, auth);
 
+  const allocationSourceEntry = await request('/app-api/finance/entries', {
+    method: 'POST',
+    body: JSON.stringify({
+      categoryId: category.id,
+      amount: 1000,
+      date: new Date().toISOString().slice(0, 10),
+      description: 'Allocation source entry',
+      accountId: account.id,
+      reference: `ALLOC-${nonce}`
+    })
+  }, auth);
+
+  const allocationRule = await request('/app-api/finance/allocation-rules', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: `Smoke Allocation ${nonce}`,
+      sourceCategoryId: category.id,
+      allocationMethod: 'PERCENTAGE',
+      targets: [
+        { profitCenterId: profitCenter.id, percentage: 50 },
+        { profitCenterId: secondProfitCenter.id, percentage: 50 }
+      ]
+    })
+  }, auth);
+
+  const allocationResult = await request(`/app-api/finance/allocation-rules/${allocationRule.id}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ sourceEntryId: allocationSourceEntry.id })
+  }, auth);
+
+  assert(Array.isArray(allocationResult?.generatedEntries), 'Allocation did not generate entries');
+  assert(allocationResult.generatedEntries.length === 2, 'Allocation must create 2 generated entries');
+  const sortedAllocated = [...allocationResult.generatedEntries].sort((a, b) => Number(a.amount) - Number(b.amount));
+  assert(Number(sortedAllocated[0].amount) === 500, 'First allocated amount should be 500');
+  assert(Number(sortedAllocated[1].amount) === 500, 'Second allocated amount should be 500');
+
   const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const to = new Date().toISOString().slice(0, 10);
 
@@ -160,6 +201,10 @@ async function main() {
   );
   assert(profitCenterDetail?.profitCenter?.id === profitCenter.id, 'Profit center detail missing');
 
+  const allocationBatches = await request('/app-api/finance/allocation-batches', { method: 'GET' }, auth);
+  assert(Array.isArray(allocationBatches), 'Allocation batches response is invalid');
+  assert(allocationBatches.some((item) => item.sourceEntryId === allocationSourceEntry.id), 'Allocation batch not found');
+
   console.log(
     JSON.stringify(
       {
@@ -169,9 +214,13 @@ async function main() {
           counterpartyId: counterparty.id,
           accountId: account.id,
           profitCenterId: profitCenter.id,
+          secondProfitCenterId: secondProfitCenter.id,
           entryId: entry.id,
           recurringId: recurring.id,
-          recurringGeneratedEntryId: runNow?.entry?.id
+          recurringGeneratedEntryId: runNow?.entry?.id,
+          allocationRuleId: allocationRule.id,
+          allocationSourceEntryId: allocationSourceEntry.id,
+          allocationGeneratedEntryIds: allocationResult.generatedEntries.map((item) => item.id)
         },
         totals: pnl.totals,
         profitCenterNet: profitCenterDetail?.totals?.net ?? null
