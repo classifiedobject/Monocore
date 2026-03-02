@@ -78,6 +78,14 @@ enum FinancePaymentDirection {
   INCOMING
 }
 
+enum InventoryMovementType {
+  IN
+  OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -101,6 +109,7 @@ model User {
   financeAllocationBatchesCreated FinanceAllocationBatch[] @relation("finance_allocation_batch_creator")
   financeInvoicesCreated FinanceInvoice[] @relation("finance_invoice_creator")
   financePaymentsCreated FinancePayment[] @relation("finance_payment_creator")
+  inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
 }
 
 model Session {
@@ -193,6 +202,9 @@ model Company {
   financeInvoices FinanceInvoice[]
   financePayments FinancePayment[]
   financePaymentAllocations FinancePaymentAllocation[]
+  inventoryWarehouses InventoryWarehouse[]
+  inventoryItems InventoryItem[]
+  inventoryStockMovements InventoryStockMovement[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -712,4 +724,59 @@ model FinancePaymentAllocation {
 
   @@index([companyId, paymentId])
   @@index([companyId, invoiceId])
+}
+
+model InventoryWarehouse {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  location  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements InventoryStockMovement[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+}
+
+model InventoryItem {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  sku       String?
+  unit      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements InventoryStockMovement[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, isActive])
+  @@index([companyId, name])
+}
+
+model InventoryStockMovement {
+  id                  String   @id @default(uuid())
+  companyId           String
+  itemId              String
+  warehouseId         String
+  type                InventoryMovementType
+  quantity            Decimal  @db.Decimal(14, 4)
+  reference           String?
+  relatedDocumentType String?
+  relatedDocumentId   String?
+  createdByUserId     String
+  createdAt           DateTime @default(now())
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  item                InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  warehouse           InventoryWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdByUser       User @relation("inventory_movement_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, itemId])
+  @@index([companyId, warehouseId])
+  @@index([companyId, itemId, warehouseId])
+  @@index([companyId, createdAt])
 }

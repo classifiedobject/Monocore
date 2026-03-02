@@ -52,7 +52,11 @@ const companyPermissions = [
   'module:finance-core.invoice.read',
   'module:finance-core.payment.manage',
   'module:finance-core.payment.read',
-  'module:finance-core.reports.aging.read'
+  'module:finance-core.reports.aging.read',
+  'module:inventory-core.item.manage',
+  'module:inventory-core.warehouse.manage',
+  'module:inventory-core.movement.manage',
+  'module:inventory-core.movement.read'
 ];
 
 async function upsertPlatformRole() {
@@ -245,6 +249,25 @@ async function main() {
     }
   });
 
+  await prisma.module.upsert({
+    where: { key: 'inventory-core' },
+    create: {
+      key: 'inventory-core',
+      name: 'Inventory Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Warehouse, item and stock movement management with transfer and stock balance reports.',
+      dependencies: { modules: ['core'] }
+    },
+    update: {
+      name: 'Inventory Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Warehouse, item and stock movement management with transfer and stock balance reports.',
+      dependencies: { modules: ['core'] }
+    }
+  });
+
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -274,6 +297,40 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
+  });
+
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'inventory-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'inventory-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'inventory-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'inventory-core',
       limits: {}
     },
     update: {}

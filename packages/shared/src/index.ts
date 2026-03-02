@@ -201,6 +201,49 @@ export const financeAgingQuerySchema = z.object({
 export const financeCounterpartyBalanceQuerySchema = z.object({
   direction: z.enum(['PAYABLE', 'RECEIVABLE'])
 });
+
+export const inventoryWarehouseSchema = z.object({
+  name: z.string().min(2).max(140),
+  location: z.string().max(300).nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const inventoryItemSchema = z.object({
+  name: z.string().min(2).max(160),
+  sku: z.string().max(80).nullable().optional(),
+  unit: z.string().min(1).max(20),
+  isActive: z.boolean().optional()
+});
+
+export const inventoryMovementSchema = z.object({
+  itemId: z.string().uuid(),
+  warehouseId: z.string().uuid(),
+  type: z.enum(['IN', 'OUT', 'ADJUSTMENT']),
+  quantity: z.coerce.number().refine((value) => value !== 0, 'Quantity cannot be zero'),
+  reference: z.string().max(120).nullable().optional(),
+  relatedDocumentType: z.enum(['purchase', 'sale', 'manual', 'transfer']).nullable().optional(),
+  relatedDocumentId: z.string().max(120).nullable().optional()
+});
+
+export const inventoryTransferSchema = z.object({
+  itemId: z.string().uuid(),
+  fromWarehouseId: z.string().uuid(),
+  toWarehouseId: z.string().uuid(),
+  quantity: z.coerce.number().positive(),
+  reference: z.string().max(120).nullable().optional()
+});
+
+export const inventoryMovementQuerySchema = z.object({
+  itemId: z.string().uuid().optional(),
+  warehouseId: z.string().uuid().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+export const inventoryStockBalanceQuerySchema = z.object({
+  itemId: z.string().uuid().optional(),
+  warehouseId: z.string().uuid().optional()
+});
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
   namespace: z.string().min(1).max(80),

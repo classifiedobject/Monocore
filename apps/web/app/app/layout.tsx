@@ -41,6 +41,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     if (installedModuleKeys.includes('finance-core')) {
       list.push({ href: '/app/finance', label: 'Finance' });
     }
+    if (installedModuleKeys.includes('inventory-core')) {
+      list.push({ href: '/app/inventory', label: 'Inventory' });
+    }
     return list;
   }, [installedModuleKeys]);
 
