@@ -80,6 +80,7 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `FinanceCategory`
   - `FinanceCounterparty`
   - `FinanceAccount`
+  - `FinanceProfitCenter`
   - `FinanceRecurringRule`
   - `FinanceEntry`
 - App API endpoints (all gated behind module installation + tenant RBAC):
@@ -95,6 +96,10 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Batch due run: `POST /app-api/finance/recurring/run-due`
   - Worker placeholder logs scheduling hint in `apps/worker/src/index.ts`
   - For cron later, schedule a secure internal call to `run-due` with service auth.
+- Profit Center usage:
+  - Create hierarchical centers such as `Vestiyer`, `Vale`, `Event`, `Department`.
+  - Assign optional `profitCenterId` on each finance entry.
+  - Profit center P&L report includes an `Unassigned` bucket for entries without center.
 
 ## i18n Foundation
 - Language keys stored in `LanguagePack` table (`locale`, `namespace`, `key`, `value`).

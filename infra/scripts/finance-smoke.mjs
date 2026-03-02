@@ -89,6 +89,11 @@ async function main() {
     body: JSON.stringify({ type: 'BANK', name: `Smoke Account ${nonce}`, currency: 'TRY' })
   }, auth);
 
+  const profitCenter = await request('/app-api/finance/profit-centers', {
+    method: 'POST',
+    body: JSON.stringify({ name: `Smoke Center ${nonce}`, type: 'SERVICE', code: `SC${nonce}` })
+  }, auth);
+
   const entry = await request('/app-api/finance/entries', {
     method: 'POST',
     body: JSON.stringify({
@@ -98,7 +103,21 @@ async function main() {
       description: 'Finance smoke entry',
       counterpartyId: counterparty.id,
       accountId: account.id,
+      profitCenterId: profitCenter.id,
       reference: `SMK-${nonce}`
+    })
+  }, auth);
+
+  await request('/app-api/finance/entries', {
+    method: 'POST',
+    body: JSON.stringify({
+      categoryId: category.id,
+      amount: 250,
+      date: new Date().toISOString().slice(0, 10),
+      description: 'Finance smoke unassigned entry',
+      counterpartyId: counterparty.id,
+      accountId: account.id,
+      reference: `SMK-U-${nonce}`
     })
   }, auth);
 
@@ -130,6 +149,17 @@ async function main() {
   const cashflow = await request(`/app-api/finance/reports/cashflow?from=${from}&to=${to}&accountId=${account.id}`, { method: 'GET' }, auth);
   assert(Array.isArray(cashflow?.groupedByAccount), 'Cashflow result missing');
 
+  const pnlByProfitCenter = await request(`/app-api/finance/reports/pnl-by-profit-center?from=${from}&to=${to}`, { method: 'GET' }, auth);
+  assert(Array.isArray(pnlByProfitCenter?.items), 'Profit center summary missing');
+  assert(pnlByProfitCenter.items.some((item) => item.profitCenterId === null), 'Unassigned bucket missing');
+
+  const profitCenterDetail = await request(
+    `/app-api/finance/reports/pnl-by-profit-center?from=${from}&to=${to}&profitCenterId=${profitCenter.id}`,
+    { method: 'GET' },
+    auth
+  );
+  assert(profitCenterDetail?.profitCenter?.id === profitCenter.id, 'Profit center detail missing');
+
   console.log(
     JSON.stringify(
       {
@@ -138,11 +168,13 @@ async function main() {
           categoryId: category.id,
           counterpartyId: counterparty.id,
           accountId: account.id,
+          profitCenterId: profitCenter.id,
           entryId: entry.id,
           recurringId: recurring.id,
           recurringGeneratedEntryId: runNow?.entry?.id
         },
-        totals: pnl.totals
+        totals: pnl.totals,
+        profitCenterNet: profitCenterDetail?.totals?.net ?? null
       },
       null,
       2

@@ -25,6 +25,16 @@ type Account = {
   isActive: boolean;
 };
 
+type ProfitCenter = {
+  id: string;
+  name: string;
+  code: string | null;
+  type: 'GENERAL' | 'SERVICE' | 'DEPARTMENT' | 'LOCATION' | 'EVENT' | 'OTHER';
+  parentId: string | null;
+  isActive: boolean;
+  _count?: { entries: number };
+};
+
 type Entry = {
   id: string;
   amount: string;
@@ -34,6 +44,7 @@ type Entry = {
   category: Category;
   counterparty: Counterparty | null;
   account: Account | null;
+  profitCenter: ProfitCenter | null;
 };
 
 type RecurringRule = {
@@ -66,22 +77,36 @@ type CashflowReport = {
   groupedByAccount: Array<{ accountId: string | null; accountName: string; income: number; expense: number; net: number }>;
 };
 
+type ProfitCenterPnlSummary = {
+  items: Array<{ profitCenterId: string | null; profitCenterName: string; income: number; expense: number; net: number }>;
+};
+
+type ProfitCenterPnlDetail = {
+  profitCenter: { id: string; name: string; code: string | null; type: string };
+  totals: { income: number; expense: number; net: number };
+  byCategory: Array<{ categoryId: string; categoryName: string; type: string; total: number }>;
+};
+
 type Capabilities = {
   manageCounterparty: boolean;
   manageAccount: boolean;
   manageRecurring: boolean;
+  manageProfitCenter: boolean;
+  readProfitCenter: boolean;
+  readProfitCenterReports: boolean;
   readReports: boolean;
   createEntry: boolean;
   deleteEntry: boolean;
 };
 
-type TabKey = 'entries' | 'counterparties' | 'accounts' | 'recurring' | 'reports';
+type TabKey = 'entries' | 'counterparties' | 'accounts' | 'profit-centers' | 'recurring' | 'reports';
 
 export default function FinancePage() {
   const [tab, setTab] = useState<TabKey>('entries');
   const [categories, setCategories] = useState<Category[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [profitCenters, setProfitCenters] = useState<ProfitCenter[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [monthlyPnl, setMonthlyPnl] = useState<PnlMonthlyRow[]>([]);
   const [recurring, setRecurring] = useState<RecurringRule[]>([]);
@@ -89,6 +114,9 @@ export default function FinancePage() {
     manageCounterparty: false,
     manageAccount: false,
     manageRecurring: false,
+    manageProfitCenter: false,
+    readProfitCenter: false,
+    readProfitCenterReports: false,
     readReports: false,
     createEntry: false,
     deleteEntry: false
@@ -107,12 +135,14 @@ export default function FinancePage() {
   const [entryReference, setEntryReference] = useState('');
   const [entryCounterpartyId, setEntryCounterpartyId] = useState('');
   const [entryAccountId, setEntryAccountId] = useState('');
+  const [entryProfitCenterId, setEntryProfitCenterId] = useState('');
 
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
   const [filterCategoryId, setFilterCategoryId] = useState('');
   const [filterCounterpartyId, setFilterCounterpartyId] = useState('');
   const [filterAccountId, setFilterAccountId] = useState('');
+  const [filterProfitCenterId, setFilterProfitCenterId] = useState('');
 
   const [counterpartyType, setCounterpartyType] = useState<'VENDOR' | 'CUSTOMER' | 'OTHER'>('VENDOR');
   const [counterpartyName, setCounterpartyName] = useState('');
@@ -122,6 +152,12 @@ export default function FinancePage() {
   const [accountType, setAccountType] = useState<'CASH' | 'BANK' | 'POS' | 'OTHER'>('BANK');
   const [accountName, setAccountName] = useState('');
   const [accountCurrency, setAccountCurrency] = useState('TRY');
+
+  const [profitCenterName, setProfitCenterName] = useState('');
+  const [profitCenterCode, setProfitCenterCode] = useState('');
+  const [profitCenterType, setProfitCenterType] = useState<'GENERAL' | 'SERVICE' | 'DEPARTMENT' | 'LOCATION' | 'EVENT' | 'OTHER'>('GENERAL');
+  const [profitCenterParentId, setProfitCenterParentId] = useState('');
+  const [showInactiveProfitCenters, setShowInactiveProfitCenters] = useState(false);
 
   const [ruleName, setRuleName] = useState('');
   const [ruleDirection, setRuleDirection] = useState<'INCOME' | 'EXPENSE'>('EXPENSE');
@@ -139,6 +175,8 @@ export default function FinancePage() {
   const [reportAccountId, setReportAccountId] = useState('');
   const [pnlReport, setPnlReport] = useState<PnlReport | null>(null);
   const [cashflowReport, setCashflowReport] = useState<CashflowReport | null>(null);
+  const [profitCenterSummary, setProfitCenterSummary] = useState<ProfitCenterPnlSummary | null>(null);
+  const [profitCenterDetail, setProfitCenterDetail] = useState<ProfitCenterPnlDetail | null>(null);
 
   async function loadCapabilities() {
     try {
@@ -151,21 +189,19 @@ export default function FinancePage() {
 
   async function loadMasterData() {
     try {
-      const [categoryRows, counterpartyRows, accountRows] = await Promise.all([
+      const [categoryRows, counterpartyRows, accountRows, profitCenterRows] = await Promise.all([
         apiFetch('/app-api/finance/categories') as Promise<Category[]>,
         apiFetch('/app-api/finance/counterparties') as Promise<Counterparty[]>,
-        apiFetch('/app-api/finance/accounts') as Promise<Account[]>
+        apiFetch('/app-api/finance/accounts') as Promise<Account[]>,
+        apiFetch('/app-api/finance/profit-centers') as Promise<ProfitCenter[]>
       ]);
       setCategories(categoryRows);
       setCounterparties(counterpartyRows);
       setAccounts(accountRows);
+      setProfitCenters(profitCenterRows);
 
-      if (!entryCategoryId && categoryRows[0]) {
-        setEntryCategoryId(categoryRows[0].id);
-      }
-      if (!ruleCategoryId && categoryRows[0]) {
-        setRuleCategoryId(categoryRows[0].id);
-      }
+      if (!entryCategoryId && categoryRows[0]) setEntryCategoryId(categoryRows[0].id);
+      if (!ruleCategoryId && categoryRows[0]) setRuleCategoryId(categoryRows[0].id);
     } catch (error) {
       handleApiError(error);
     }
@@ -179,6 +215,7 @@ export default function FinancePage() {
       if (filterCategoryId) query.set('categoryId', filterCategoryId);
       if (filterCounterpartyId) query.set('counterpartyId', filterCounterpartyId);
       if (filterAccountId) query.set('accountId', filterAccountId);
+      if (filterProfitCenterId) query.set('profitCenterId', filterProfitCenterId);
       const suffix = query.toString() ? `?${query.toString()}` : '';
 
       const [entryRows, monthlyRows] = await Promise.all([
@@ -207,7 +244,6 @@ export default function FinancePage() {
     loadMasterData().catch(handleApiError);
     loadEntries().catch(handleApiError);
     loadRecurring().catch(handleApiError);
-    // Initial module data load should run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -237,7 +273,8 @@ export default function FinancePage() {
           description: entryDescription || undefined,
           reference: entryReference || undefined,
           counterpartyId: entryCounterpartyId || null,
-          accountId: entryAccountId || null
+          accountId: entryAccountId || null,
+          profitCenterId: entryProfitCenterId || null
         })
       });
       setEntryAmount('');
@@ -263,12 +300,7 @@ export default function FinancePage() {
     try {
       await apiFetch('/app-api/finance/counterparties', {
         method: 'POST',
-        body: JSON.stringify({
-          type: counterpartyType,
-          name: counterpartyName,
-          email: counterpartyEmail || null,
-          phone: counterpartyPhone || null
-        })
+        body: JSON.stringify({ type: counterpartyType, name: counterpartyName, email: counterpartyEmail || null, phone: counterpartyPhone || null })
       });
       setCounterpartyName('');
       setCounterpartyEmail('');
@@ -283,8 +315,6 @@ export default function FinancePage() {
     try {
       await apiFetch(`/app-api/finance/counterparties/${id}`, { method: 'DELETE', body: JSON.stringify({}) });
       await loadMasterData();
-      await loadEntries();
-      await loadRecurring();
     } catch (error) {
       handleApiError(error);
     }
@@ -294,13 +324,8 @@ export default function FinancePage() {
     const nextName = window.prompt('Counterparty name', cp.name);
     if (!nextName) return;
     try {
-      await apiFetch(`/app-api/finance/counterparties/${cp.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name: nextName })
-      });
+      await apiFetch(`/app-api/finance/counterparties/${cp.id}`, { method: 'PATCH', body: JSON.stringify({ name: nextName }) });
       await loadMasterData();
-      await loadEntries();
-      await loadRecurring();
     } catch (error) {
       handleApiError(error);
     }
@@ -311,11 +336,7 @@ export default function FinancePage() {
     try {
       await apiFetch('/app-api/finance/accounts', {
         method: 'POST',
-        body: JSON.stringify({
-          type: accountType,
-          name: accountName,
-          currency: accountCurrency
-        })
+        body: JSON.stringify({ type: accountType, name: accountName, currency: accountCurrency })
       });
       setAccountName('');
       setAccountCurrency('TRY');
@@ -338,13 +359,62 @@ export default function FinancePage() {
     const nextName = window.prompt('Account name', acc.name);
     if (!nextName) return;
     try {
-      await apiFetch(`/app-api/finance/accounts/${acc.id}`, {
+      await apiFetch(`/app-api/finance/accounts/${acc.id}`, { method: 'PATCH', body: JSON.stringify({ name: nextName }) });
+      await loadMasterData();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function createProfitCenter(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await apiFetch('/app-api/finance/profit-centers', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: profitCenterName,
+          code: profitCenterCode || null,
+          type: profitCenterType,
+          parentId: profitCenterParentId || null
+        })
+      });
+      setProfitCenterName('');
+      setProfitCenterCode('');
+      setProfitCenterParentId('');
+      await loadMasterData();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function editProfitCenter(center: ProfitCenter) {
+    const nextName = window.prompt('Profit center name', center.name);
+    if (!nextName) return;
+    try {
+      await apiFetch(`/app-api/finance/profit-centers/${center.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ name: nextName })
       });
       await loadMasterData();
-      await loadEntries();
-      await loadRecurring();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function toggleProfitCenter(center: ProfitCenter, isActive: boolean) {
+    try {
+      if (!isActive) {
+        await apiFetch(`/app-api/finance/profit-centers/${center.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isActive: true })
+        });
+      } else {
+        await apiFetch(`/app-api/finance/profit-centers/${center.id}`, {
+          method: 'DELETE',
+          body: JSON.stringify({})
+        });
+      }
+      await loadMasterData();
     } catch (error) {
       handleApiError(error);
     }
@@ -390,10 +460,7 @@ export default function FinancePage() {
     const nextName = window.prompt('Rule name', rule.name);
     if (!nextName) return;
     try {
-      await apiFetch(`/app-api/finance/recurring/${rule.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name: nextName })
-      });
+      await apiFetch(`/app-api/finance/recurring/${rule.id}`, { method: 'PATCH', body: JSON.stringify({ name: nextName }) });
       await loadRecurring();
     } catch (error) {
       handleApiError(error);
@@ -414,27 +481,56 @@ export default function FinancePage() {
     try {
       const pnlQuery = new URLSearchParams({ from: reportFrom, to: reportTo });
       const cfQuery = new URLSearchParams({ from: reportFrom, to: reportTo });
+      const pcQuery = new URLSearchParams({ from: reportFrom, to: reportTo });
       if (reportAccountId) cfQuery.set('accountId', reportAccountId);
 
-      const [pnlRows, cashRows] = await Promise.all([
-        apiFetch(`/app-api/finance/reports/pnl?${pnlQuery.toString()}`) as Promise<PnlReport>,
-        apiFetch(`/app-api/finance/reports/cashflow?${cfQuery.toString()}`) as Promise<CashflowReport>
-      ]);
-      setPnlReport(pnlRows);
-      setCashflowReport(cashRows);
+      if (capabilities.readReports) {
+        const [pnlRows, cashRows] = await Promise.all([
+          apiFetch(`/app-api/finance/reports/pnl?${pnlQuery.toString()}`) as Promise<PnlReport>,
+          apiFetch(`/app-api/finance/reports/cashflow?${cfQuery.toString()}`) as Promise<CashflowReport>
+        ]);
+        setPnlReport(pnlRows);
+        setCashflowReport(cashRows);
+      } else {
+        setPnlReport(null);
+        setCashflowReport(null);
+      }
+
+      if (capabilities.readProfitCenterReports) {
+        const pcRows = (await apiFetch(`/app-api/finance/reports/pnl-by-profit-center?${pcQuery.toString()}`)) as ProfitCenterPnlSummary;
+        setProfitCenterSummary(pcRows);
+      } else {
+        setProfitCenterSummary(null);
+      }
+      setProfitCenterDetail(null);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function loadProfitCenterDetail(profitCenterId: string | null) {
+    if (profitCenterId === null) {
+      setProfitCenterDetail(null);
+      return;
+    }
+    try {
+      const query = new URLSearchParams({ from: reportFrom, to: reportTo, profitCenterId });
+      const detail = (await apiFetch(`/app-api/finance/reports/pnl-by-profit-center?${query.toString()}`)) as ProfitCenterPnlDetail;
+      setProfitCenterDetail(detail);
     } catch (error) {
       handleApiError(error);
     }
   }
 
   const csvContent = useMemo(() => {
-    const header = 'date,category,type,counterparty,account,reference,amount,description';
+    const header = 'date,category,type,counterparty,account,profit_center,reference,amount,description';
     const lines = entries.map((entry) => {
       const safeDescription = (entry.description ?? '').replace(/"/g, '""');
       const safeReference = (entry.reference ?? '').replace(/"/g, '""');
       const cp = (entry.counterparty?.name ?? '').replace(/"/g, '""');
       const acc = (entry.account?.name ?? '').replace(/"/g, '""');
-      return `${entry.date.slice(0, 10)},${entry.category.name},${entry.category.type},"${cp}","${acc}","${safeReference}",${entry.amount},"${safeDescription}"`;
+      const pc = (entry.profitCenter?.name ?? '').replace(/"/g, '""');
+      return `${entry.date.slice(0, 10)},${entry.category.name},${entry.category.type},"${cp}","${acc}","${pc}","${safeReference}",${entry.amount},"${safeDescription}"`;
     });
     return [header, ...lines].join('\n');
   }, [entries]);
@@ -449,11 +545,13 @@ export default function FinancePage() {
     URL.revokeObjectURL(url);
   }
 
+  const visibleProfitCenters = showInactiveProfitCenters ? profitCenters : profitCenters.filter((p) => p.isActive);
+
   return (
     <section className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Finance Core Pro</h1>
-        <p className="text-sm text-slate-600">Entries, counterparties, accounts, recurring and reporting in one module.</p>
+        <p className="text-sm text-slate-600">Entries, profit centers, recurring rules and advanced reporting.</p>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -461,6 +559,7 @@ export default function FinancePage() {
           ['entries', 'Entries'],
           ['counterparties', 'Counterparties'],
           ['accounts', 'Accounts'],
+          ['profit-centers', 'Profit Centers'],
           ['recurring', 'Recurring'],
           ['reports', 'Reports']
         ] as Array<[TabKey, string]>).map(([key, label]) => (
@@ -487,13 +586,6 @@ export default function FinancePage() {
                 </select>
                 <button className="rounded bg-mono-500 px-4 text-white">Add</button>
               </form>
-              <div className="space-y-2">
-                {categories.map((category) => (
-                  <div key={category.id} className="rounded border border-slate-200 px-3 py-2 text-sm">
-                    {category.name} <span className="text-slate-500">({category.type})</span>
-                  </div>
-                ))}
-              </div>
             </article>
 
             <article className="space-y-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
@@ -503,40 +595,36 @@ export default function FinancePage() {
                   <select className="w-full rounded border p-2" value={entryCategoryId} onChange={(e) => setEntryCategoryId(e.target.value)} required>
                     <option value="">Select category</option>
                     {categories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name} ({category.type})
-                      </option>
+                      <option key={category.id} value={category.id}>{category.name} ({category.type})</option>
                     ))}
                   </select>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <select className="rounded border p-2" value={entryCounterpartyId} onChange={(e) => setEntryCounterpartyId(e.target.value)}>
-                      <option value="">Counterparty (optional)</option>
-                      {counterparties.map((cp) => (
-                        <option key={cp.id} value={cp.id}>{cp.name}</option>
-                      ))}
+                      <option value="">Counterparty</option>
+                      {counterparties.map((cp) => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
                     </select>
                     <select className="rounded border p-2" value={entryAccountId} onChange={(e) => setEntryAccountId(e.target.value)}>
-                      <option value="">Account (optional)</option>
-                      {accounts.filter((acc) => acc.isActive).map((acc) => (
-                        <option key={acc.id} value={acc.id}>{acc.name}</option>
-                      ))}
+                      <option value="">Account</option>
+                      {accounts.filter((acc) => acc.isActive).map((acc) => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+                    </select>
+                    <select className="rounded border p-2" value={entryProfitCenterId} onChange={(e) => setEntryProfitCenterId(e.target.value)}>
+                      <option value="">Profit Center</option>
+                      {profitCenters.filter((pc) => pc.isActive).map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
                     </select>
                   </div>
-                  <input className="w-full rounded border p-2" placeholder="Reference (invoice no etc.)" value={entryReference} onChange={(e) => setEntryReference(e.target.value)} />
+                  <input className="w-full rounded border p-2" placeholder="Reference" value={entryReference} onChange={(e) => setEntryReference(e.target.value)} />
                   <input className="w-full rounded border p-2" type="number" step="0.01" min="0" placeholder="Amount" value={entryAmount} onChange={(e) => setEntryAmount(e.target.value)} required />
                   <input className="w-full rounded border p-2" type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} required />
                   <input className="w-full rounded border p-2" placeholder="Description" value={entryDescription} onChange={(e) => setEntryDescription(e.target.value)} />
                   <button className="rounded bg-mono-500 px-4 py-2 text-white">Create Entry</button>
                 </form>
-              ) : (
-                <p className="text-sm text-slate-500">You do not have permission to create entries.</p>
-              )}
+              ) : <p className="text-sm text-slate-500">You do not have permission to create entries.</p>}
             </article>
           </div>
 
           <article className="space-y-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-lg font-semibold">Entry Filters</h2>
-            <div className="grid gap-2 md:grid-cols-5">
+            <div className="grid gap-2 md:grid-cols-6">
               <input className="rounded border p-2" type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
               <input className="rounded border p-2" type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
               <select className="rounded border p-2" value={filterCategoryId} onChange={(e) => setFilterCategoryId(e.target.value)}>
@@ -551,10 +639,12 @@ export default function FinancePage() {
                 <option value="">All accounts</option>
                 {accounts.map((acc) => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
               </select>
+              <select className="rounded border p-2" value={filterProfitCenterId} onChange={(e) => setFilterProfitCenterId(e.target.value)}>
+                <option value="">All profit centers</option>
+                {profitCenters.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
+              </select>
             </div>
-            <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => loadEntries().catch(handleApiError)}>
-              Apply Filters
-            </button>
+            <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => loadEntries().catch(handleApiError)}>Apply Filters</button>
           </article>
 
           <article className="space-y-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
@@ -587,19 +677,11 @@ export default function FinancePage() {
               {entries.map((entry) => (
                 <div key={entry.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
                   <div>
-                    <p>
-                      {entry.date.slice(0, 10)} | {entry.category.name} ({entry.category.type}) | {entry.amount}
-                    </p>
-                    <p className="text-slate-500">
-                      Counterparty: {entry.counterparty?.name ?? '-'} | Account: {entry.account?.name ?? '-'} | Ref: {entry.reference ?? '-'}
-                    </p>
+                    <p>{entry.date.slice(0, 10)} | {entry.category.name} ({entry.category.type}) | {entry.amount}</p>
+                    <p className="text-slate-500">Counterparty: {entry.counterparty?.name ?? '-'} | Account: {entry.account?.name ?? '-'} | Profit Center: {entry.profitCenter?.name ?? '-'}</p>
                     {entry.description ? <p className="text-slate-500">{entry.description}</p> : null}
                   </div>
-                  {capabilities.deleteEntry ? (
-                    <button className="rounded bg-red-600 px-2 py-1 text-xs text-white" onClick={() => deleteEntry(entry.id)}>
-                      Delete
-                    </button>
-                  ) : null}
+                  {capabilities.deleteEntry ? <button className="rounded bg-red-600 px-2 py-1 text-xs text-white" onClick={() => deleteEntry(entry.id)}>Delete</button> : null}
                 </div>
               ))}
             </div>
@@ -614,20 +696,15 @@ export default function FinancePage() {
             {capabilities.manageCounterparty ? (
               <form className="grid gap-2 md:grid-cols-4" onSubmit={createCounterparty}>
                 <select className="rounded border p-2" value={counterpartyType} onChange={(e) => setCounterpartyType(e.target.value as 'VENDOR' | 'CUSTOMER' | 'OTHER')}>
-                  <option value="VENDOR">Vendor</option>
-                  <option value="CUSTOMER">Customer</option>
-                  <option value="OTHER">Other</option>
+                  <option value="VENDOR">Vendor</option><option value="CUSTOMER">Customer</option><option value="OTHER">Other</option>
                 </select>
                 <input className="rounded border p-2" placeholder="Name" value={counterpartyName} onChange={(e) => setCounterpartyName(e.target.value)} required />
                 <input className="rounded border p-2" placeholder="Email" value={counterpartyEmail} onChange={(e) => setCounterpartyEmail(e.target.value)} />
                 <input className="rounded border p-2" placeholder="Phone" value={counterpartyPhone} onChange={(e) => setCounterpartyPhone(e.target.value)} />
                 <button className="rounded bg-mono-500 px-4 py-2 text-white md:col-span-4">Create Counterparty</button>
               </form>
-            ) : (
-              <p className="text-sm text-slate-500">You do not have permission to manage counterparties.</p>
-            )}
+            ) : <p className="text-sm text-slate-500">You do not have permission to manage counterparties.</p>}
           </article>
-
           <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
             <div className="space-y-2">
               {counterparties.map((cp) => (
@@ -653,31 +730,71 @@ export default function FinancePage() {
             {capabilities.manageAccount ? (
               <form className="grid gap-2 md:grid-cols-4" onSubmit={createAccount}>
                 <select className="rounded border p-2" value={accountType} onChange={(e) => setAccountType(e.target.value as 'CASH' | 'BANK' | 'POS' | 'OTHER')}>
-                  <option value="BANK">Bank</option>
-                  <option value="CASH">Cash</option>
-                  <option value="POS">POS</option>
-                  <option value="OTHER">Other</option>
+                  <option value="BANK">Bank</option><option value="CASH">Cash</option><option value="POS">POS</option><option value="OTHER">Other</option>
                 </select>
                 <input className="rounded border p-2" placeholder="Account name" value={accountName} onChange={(e) => setAccountName(e.target.value)} required />
                 <input className="rounded border p-2" placeholder="Currency" value={accountCurrency} onChange={(e) => setAccountCurrency(e.target.value.toUpperCase())} required />
                 <button className="rounded bg-mono-500 px-4 py-2 text-white">Create Account</button>
               </form>
-            ) : (
-              <p className="text-sm text-slate-500">You do not have permission to manage accounts.</p>
-            )}
+            ) : <p className="text-sm text-slate-500">You do not have permission to manage accounts.</p>}
           </article>
-
           <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
             <div className="space-y-2">
               {accounts.map((acc) => (
                 <div key={acc.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
-                  <p>
-                    {acc.name} ({acc.type}) [{acc.currency}] {acc.isActive ? '' : '(inactive)'}
-                  </p>
-                  {capabilities.manageAccount && acc.isActive ? (
+                  <p>{acc.name} ({acc.type}) [{acc.currency}] {acc.isActive ? '' : '(inactive)'}</p>
+                  {capabilities.manageAccount ? (
                     <div className="flex gap-2">
                       <button className="rounded bg-slate-700 px-2 py-1 text-xs text-white" onClick={() => editAccount(acc)}>Edit</button>
-                      <button className="rounded bg-amber-600 px-2 py-1 text-xs text-white" onClick={() => deactivateAccount(acc.id)}>Deactivate</button>
+                      {acc.isActive ? <button className="rounded bg-amber-600 px-2 py-1 text-xs text-white" onClick={() => deactivateAccount(acc.id)}>Deactivate</button> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {tab === 'profit-centers' ? (
+        <div className="space-y-4">
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Profit Centers</h2>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={showInactiveProfitCenters} onChange={(e) => setShowInactiveProfitCenters(e.target.checked)} />
+                Show inactive
+              </label>
+            </div>
+            {capabilities.manageProfitCenter ? (
+              <form className="grid gap-2 md:grid-cols-5" onSubmit={createProfitCenter}>
+                <input className="rounded border p-2" placeholder="Name" value={profitCenterName} onChange={(e) => setProfitCenterName(e.target.value)} required />
+                <input className="rounded border p-2" placeholder="Code" value={profitCenterCode} onChange={(e) => setProfitCenterCode(e.target.value)} />
+                <select className="rounded border p-2" value={profitCenterType} onChange={(e) => setProfitCenterType(e.target.value as ProfitCenter['type'])}>
+                  <option value="GENERAL">General</option><option value="SERVICE">Service</option><option value="DEPARTMENT">Department</option><option value="LOCATION">Location</option><option value="EVENT">Event</option><option value="OTHER">Other</option>
+                </select>
+                <select className="rounded border p-2" value={profitCenterParentId} onChange={(e) => setProfitCenterParentId(e.target.value)}>
+                  <option value="">No parent</option>
+                  {profitCenters.filter((pc) => pc.isActive).map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
+                </select>
+                <button className="rounded bg-mono-500 px-4 py-2 text-white">Create</button>
+              </form>
+            ) : <p className="text-sm text-slate-500">You do not have permission to manage profit centers.</p>}
+          </article>
+
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="space-y-2">
+              {visibleProfitCenters.map((pc) => (
+                <div key={pc.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
+                  <p>
+                    {pc.name} {pc.code ? `(${pc.code})` : ''} | {pc.type} | {pc.isActive ? 'active' : 'inactive'} | entries: {pc._count?.entries ?? 0}
+                  </p>
+                  {capabilities.manageProfitCenter ? (
+                    <div className="flex gap-2">
+                      <button className="rounded bg-slate-700 px-2 py-1 text-xs text-white" onClick={() => editProfitCenter(pc)}>Edit</button>
+                      <button className="rounded bg-amber-600 px-2 py-1 text-xs text-white" onClick={() => toggleProfitCenter(pc, pc.isActive)}>
+                        {pc.isActive ? 'Deactivate' : 'Reactivate'}
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -695,8 +812,7 @@ export default function FinancePage() {
               <form className="grid gap-2 md:grid-cols-3" onSubmit={createRecurringRule}>
                 <input className="rounded border p-2" placeholder="Rule name" value={ruleName} onChange={(e) => setRuleName(e.target.value)} required />
                 <select className="rounded border p-2" value={ruleDirection} onChange={(e) => setRuleDirection(e.target.value as 'INCOME' | 'EXPENSE')}>
-                  <option value="EXPENSE">Expense</option>
-                  <option value="INCOME">Income</option>
+                  <option value="EXPENSE">Expense</option><option value="INCOME">Income</option>
                 </select>
                 <select className="rounded border p-2" value={ruleCategoryId} onChange={(e) => setRuleCategoryId(e.target.value)} required>
                   <option value="">Category</option>
@@ -704,40 +820,33 @@ export default function FinancePage() {
                 </select>
                 <input className="rounded border p-2" type="number" step="0.01" min="0" placeholder="Amount" value={ruleAmount} onChange={(e) => setRuleAmount(e.target.value)} required />
                 <select className="rounded border p-2" value={ruleFrequency} onChange={(e) => setRuleFrequency(e.target.value as 'MONTHLY' | 'WEEKLY')}>
-                  <option value="MONTHLY">Monthly</option>
-                  <option value="WEEKLY">Weekly</option>
+                  <option value="MONTHLY">Monthly</option><option value="WEEKLY">Weekly</option>
                 </select>
                 <input className="rounded border p-2" type="number" min="1" max="31" placeholder="Day of month" value={ruleDayOfMonth} onChange={(e) => setRuleDayOfMonth(e.target.value)} disabled={ruleFrequency !== 'MONTHLY'} />
                 <input className="rounded border p-2" type="date" value={ruleStartDate} onChange={(e) => setRuleStartDate(e.target.value)} required />
                 <input className="rounded border p-2" type="date" value={ruleNextRunAt} onChange={(e) => setRuleNextRunAt(e.target.value)} required />
                 <select className="rounded border p-2" value={ruleCounterpartyId} onChange={(e) => setRuleCounterpartyId(e.target.value)}>
-                  <option value="">Counterparty (optional)</option>
+                  <option value="">Counterparty</option>
                   {counterparties.map((cp) => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
                 </select>
                 <select className="rounded border p-2" value={ruleAccountId} onChange={(e) => setRuleAccountId(e.target.value)}>
-                  <option value="">Account (optional)</option>
+                  <option value="">Account</option>
                   {accounts.filter((acc) => acc.isActive).map((acc) => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
                 </select>
                 <button className="rounded bg-mono-500 px-4 py-2 text-white md:col-span-3">Create Rule</button>
               </form>
-            ) : (
-              <p className="text-sm text-slate-500">You do not have permission to manage recurring rules.</p>
-            )}
+            ) : <p className="text-sm text-slate-500">You do not have permission to manage recurring rules.</p>}
           </article>
 
           <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Rules</h2>
-              {capabilities.manageRecurring ? (
-                <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => runDue().catch(handleApiError)}>Run Due</button>
-              ) : null}
+              {capabilities.manageRecurring ? <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => runDue().catch(handleApiError)}>Run Due</button> : null}
             </div>
             <div className="space-y-2">
               {recurring.map((rule) => (
                 <div key={rule.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2 text-sm">
-                  <p>
-                    {rule.name} | {rule.direction} | {rule.amount} | next: {rule.nextRunAt.slice(0, 10)}
-                  </p>
+                  <p>{rule.name} | {rule.direction} | {rule.amount} | next: {rule.nextRunAt.slice(0, 10)}</p>
                   {capabilities.manageRecurring ? (
                     <div className="flex gap-2">
                       <button className="rounded bg-slate-700 px-2 py-1 text-xs text-white" onClick={() => editRecurring(rule)}>Edit</button>
@@ -755,7 +864,7 @@ export default function FinancePage() {
         <div className="space-y-4">
           <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold">Reports</h2>
-            {capabilities.readReports ? (
+            {capabilities.readReports || capabilities.readProfitCenterReports ? (
               <form className="grid gap-2 md:grid-cols-4" onSubmit={loadReports}>
                 <input className="rounded border p-2" type="date" value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} required />
                 <input className="rounded border p-2" type="date" value={reportTo} onChange={(e) => setReportTo(e.target.value)} required />
@@ -765,22 +874,13 @@ export default function FinancePage() {
                 </select>
                 <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white">Load Reports</button>
               </form>
-            ) : (
-              <p className="text-sm text-slate-500">You do not have permission to read reports.</p>
-            )}
+            ) : <p className="text-sm text-slate-500">You do not have permission to read reports.</p>}
           </article>
 
           {pnlReport ? (
             <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
               <h3 className="mb-2 text-base font-semibold">P&amp;L Totals</h3>
               <p className="text-sm">Income: {pnlReport.totals.income.toFixed(2)} | Expense: {pnlReport.totals.expense.toFixed(2)} | Net: {pnlReport.totals.net.toFixed(2)}</p>
-              <div className="mt-3 space-y-1 text-sm">
-                {pnlReport.byCategory.map((row) => (
-                  <div key={row.categoryId} className="rounded border border-slate-200 px-3 py-2">
-                    {row.categoryName} ({row.type}) : {row.total.toFixed(2)}
-                  </div>
-                ))}
-              </div>
             </article>
           ) : null}
 
@@ -792,6 +892,41 @@ export default function FinancePage() {
                   <div key={row.accountId ?? 'unassigned'} className="rounded border border-slate-200 px-3 py-2">
                     {row.accountName}: income {row.income.toFixed(2)} | expense {row.expense.toFixed(2)} | net {row.net.toFixed(2)}
                   </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
+          {capabilities.readProfitCenterReports && profitCenterSummary ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Profit Center P&amp;L</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b"><th className="py-2">Profit Center</th><th className="py-2">Income</th><th className="py-2">Expense</th><th className="py-2">Net</th></tr>
+                  </thead>
+                  <tbody>
+                    {profitCenterSummary.items.map((row) => (
+                      <tr key={row.profitCenterId ?? 'unassigned'} className="cursor-pointer border-b border-slate-100" onClick={() => loadProfitCenterDetail(row.profitCenterId)}>
+                        <td className="py-2">{row.profitCenterName}</td>
+                        <td className="py-2">{row.income.toFixed(2)}</td>
+                        <td className="py-2">{row.expense.toFixed(2)}</td>
+                        <td className={`py-2 ${row.net >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{row.net.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          ) : null}
+
+          {profitCenterDetail ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">{profitCenterDetail.profitCenter.name} Detail</h3>
+              <p className="mb-2 text-sm">Income: {profitCenterDetail.totals.income.toFixed(2)} | Expense: {profitCenterDetail.totals.expense.toFixed(2)} | Net: {profitCenterDetail.totals.net.toFixed(2)}</p>
+              <div className="space-y-1 text-sm">
+                {profitCenterDetail.byCategory.map((row) => (
+                  <div key={row.categoryId} className="rounded border border-slate-200 px-3 py-2">{row.categoryName} ({row.type}) : {row.total.toFixed(2)}</div>
                 ))}
               </div>
             </article>
