@@ -65,9 +65,48 @@ export const financeCategorySchema = z.object({
 
 export const financeEntrySchema = z.object({
   categoryId: z.string().uuid(),
+  counterpartyId: z.string().uuid().nullable().optional(),
+  accountId: z.string().uuid().nullable().optional(),
+  reference: z.string().max(120).nullable().optional(),
   amount: z.coerce.number().positive(),
   date: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
   description: z.string().max(500).optional()
+});
+
+export const financeCounterpartySchema = z.object({
+  type: z.enum(['VENDOR', 'CUSTOMER', 'OTHER']),
+  name: z.string().min(2).max(140),
+  taxId: z.string().max(80).nullable().optional(),
+  email: z.string().email().max(140).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  notes: z.string().max(1000).nullable().optional()
+});
+
+export const financeAccountSchema = z.object({
+  type: z.enum(['CASH', 'BANK', 'POS', 'OTHER']),
+  name: z.string().min(2).max(140),
+  currency: z.string().min(3).max(8).default('TRY'),
+  isActive: z.boolean().optional()
+});
+
+export const financeRecurringRuleSchema = z.object({
+  name: z.string().min(2).max(140),
+  direction: z.enum(['INCOME', 'EXPENSE']),
+  categoryId: z.string().uuid(),
+  amount: z.coerce.number().positive(),
+  startDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  frequency: z.enum(['WEEKLY', 'MONTHLY']),
+  dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
+  nextRunAt: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  isActive: z.boolean().optional(),
+  counterpartyId: z.string().uuid().nullable().optional(),
+  accountId: z.string().uuid().nullable().optional()
+});
+
+export const financeReportRangeSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  accountId: z.string().uuid().optional()
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),

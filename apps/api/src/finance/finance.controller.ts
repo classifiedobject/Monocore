@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
@@ -12,6 +12,12 @@ import { FinanceService } from './finance.service.js';
 @RequireInstalledModules('finance-core')
 export class FinanceController {
   constructor(@Inject(FinanceService) private readonly finance: FinanceService) {}
+
+  @Get('capabilities')
+  @RequirePermissions('module:finance-core.entry.read')
+  capabilities(@Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.capabilities(req.user.id, req.companyId);
+  }
 
   @Get('categories')
   @RequirePermissions('module:finance-core.entry.read')
@@ -43,8 +49,15 @@ export class FinanceController {
 
   @Get('entries')
   @RequirePermissions('module:finance-core.entry.read')
-  listEntries(@Req() req: Request & { companyId: string }) {
-    return this.finance.listEntries(req.companyId);
+  listEntries(
+    @Req() req: Request & { companyId: string },
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('counterpartyId') counterpartyId?: string,
+    @Query('accountId') accountId?: string
+  ) {
+    return this.finance.listEntries(req.companyId, { from, to, categoryId, counterpartyId, accountId });
   }
 
   @Post('entries')
@@ -69,9 +82,111 @@ export class FinanceController {
     return this.finance.deleteEntry(req.user.id, req.companyId, entryId, req.ip, req.get('user-agent'));
   }
 
+  @Get('counterparties')
+  @RequirePermissions('module:finance-core.entry.read')
+  listCounterparties(@Req() req: Request & { companyId: string }, @Query('type') type?: string) {
+    return this.finance.listCounterparties(req.companyId, type);
+  }
+
+  @Post('counterparties')
+  @RequirePermissions('module:finance-core.counterparty.manage')
+  createCounterparty(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createCounterparty(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('counterparties/:id')
+  @RequirePermissions('module:finance-core.counterparty.manage')
+  updateCounterparty(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateCounterparty(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('counterparties/:id')
+  @RequirePermissions('module:finance-core.counterparty.manage')
+  deleteCounterparty(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.deleteCounterparty(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('accounts')
+  @RequirePermissions('module:finance-core.entry.read')
+  listAccounts(@Req() req: Request & { companyId: string }) {
+    return this.finance.listAccounts(req.companyId);
+  }
+
+  @Post('accounts')
+  @RequirePermissions('module:finance-core.account.manage')
+  createAccount(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createAccount(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('accounts/:id')
+  @RequirePermissions('module:finance-core.account.manage')
+  updateAccount(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateAccount(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('accounts/:id')
+  @RequirePermissions('module:finance-core.account.manage')
+  deactivateAccount(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.deactivateAccount(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('recurring')
+  @RequirePermissions('module:finance-core.entry.read')
+  listRecurring(@Req() req: Request & { companyId: string }) {
+    return this.finance.listRecurringRules(req.companyId);
+  }
+
+  @Post('recurring')
+  @RequirePermissions('module:finance-core.recurring.manage')
+  createRecurring(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createRecurringRule(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('recurring/:id')
+  @RequirePermissions('module:finance-core.recurring.manage')
+  updateRecurring(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateRecurringRule(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('recurring/:id/run-now')
+  @RequirePermissions('module:finance-core.recurring.manage')
+  runRecurringNow(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.runRecurringNow(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('recurring/run-due')
+  @RequirePermissions('module:finance-core.recurring.manage')
+  runDueRecurring(@Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.runDueRecurring(req.user.id, req.companyId, req.ip, req.get('user-agent'));
+  }
+
   @Get('pnl/monthly')
   @RequirePermissions('module:finance-core.entry.read')
   monthlyPnl(@Req() req: Request & { companyId: string }) {
     return this.finance.monthlyPnl(req.companyId);
+  }
+
+  @Get('reports/pnl')
+  @RequirePermissions('module:finance-core.reports.read')
+  pnlReport(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.pnlReport(req.companyId, query);
+  }
+
+  @Get('reports/cashflow')
+  @RequirePermissions('module:finance-core.reports.read')
+  cashflowReport(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.cashflowReport(req.companyId, query);
   }
 }

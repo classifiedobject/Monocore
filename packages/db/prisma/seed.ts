@@ -37,7 +37,11 @@ const companyPermissions = [
   'company:modules.install',
   'module:finance-core.entry.create',
   'module:finance-core.entry.read',
-  'module:finance-core.entry.delete'
+  'module:finance-core.entry.delete',
+  'module:finance-core.counterparty.manage',
+  'module:finance-core.account.manage',
+  'module:finance-core.recurring.manage',
+  'module:finance-core.reports.read'
 ];
 
 async function upsertPlatformRole() {
@@ -76,6 +80,12 @@ async function upsertCompanyDefaults(companyId: string) {
     update: { name: 'Owner' }
   });
 
+  const adminRole = await prisma.companyRole.upsert({
+    where: { companyId_key: { companyId, key: 'admin' } },
+    create: { companyId, key: 'admin', name: 'Admin' },
+    update: { name: 'Admin' }
+  });
+
   for (const key of companyPermissions) {
     const permission = await prisma.companyPermission.upsert({
       where: { key },
@@ -91,6 +101,17 @@ async function upsertCompanyDefaults(companyId: string) {
         }
       },
       create: { roleId: ownerRole.id, permissionId: permission.id },
+      update: {}
+    });
+
+    await prisma.companyRolePermission.upsert({
+      where: {
+        roleId_permissionId: {
+          roleId: adminRole.id,
+          permissionId: permission.id
+        }
+      },
+      create: { roleId: adminRole.id, permissionId: permission.id },
       update: {}
     });
   }
@@ -198,16 +219,17 @@ async function main() {
     where: { key: 'finance-core' },
     create: {
       key: 'finance-core',
-      name: 'Finance Core Lite',
-      version: '1.0.0',
+      name: 'Finance Core Pro',
+      version: '1.1.0',
       status: 'PUBLISHED',
-      description: 'Income and expense tracking with monthly P&L.',
+      description: 'Daily finance operations with entries, counterparties, accounts, recurring rules and reports.',
       dependencies: { modules: ['core'] }
     },
     update: {
-      name: 'Finance Core Lite',
-      version: '1.0.0',
+      name: 'Finance Core Pro',
+      version: '1.1.0',
       status: 'PUBLISHED',
+      description: 'Daily finance operations with entries, counterparties, accounts, recurring rules and reports.',
       dependencies: { modules: ['core'] }
     }
   });
