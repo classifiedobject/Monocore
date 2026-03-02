@@ -87,7 +87,6 @@ enum FinanceCashflowDirection {
   INFLOW
   OUTFLOW
 }
-
 enum InventoryMovementType {
   IN
   OUT
@@ -818,7 +817,6 @@ model FinanceCashflowForecastItem {
   @@index([companyId, date])
   @@index([companyId, direction, date])
 }
-
 model InventoryWarehouse {
   id        String   @id @default(uuid())
   companyId String
