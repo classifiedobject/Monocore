@@ -47,6 +47,15 @@ enum FinanceFrequency {
   MONTHLY
 }
 
+enum FinanceProfitCenterType {
+  GENERAL
+  SERVICE
+  DEPARTMENT
+  LOCATION
+  EVENT
+  OTHER
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -153,6 +162,7 @@ model Company {
   financeCounterparties FinanceCounterparty[]
   financeAccounts FinanceAccount[]
   financeRecurringRules FinanceRecurringRule[]
+  financeProfitCenters FinanceProfitCenter[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -416,6 +426,7 @@ model FinanceEntry {
   categoryId      String
   counterpartyId  String?
   accountId       String?
+  profitCenterId  String?
   reference       String?
   isRecurringGenerated Boolean @default(false)
   recurringRuleId String?
@@ -429,6 +440,7 @@ model FinanceEntry {
   category        FinanceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   counterparty    FinanceCounterparty? @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
   account         FinanceAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  profitCenter    FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
   recurringRule   FinanceRecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
   createdByUser   User      @relation("finance_entry_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
@@ -436,6 +448,7 @@ model FinanceEntry {
   @@index([companyId, categoryId])
   @@index([companyId, counterpartyId])
   @@index([companyId, accountId])
+  @@index([companyId, profitCenterId, date])
 }
 
 model FinanceCounterparty {
@@ -500,4 +513,24 @@ model FinanceRecurringRule {
 
   @@index([companyId, isActive, nextRunAt])
   @@index([companyId, frequency])
+}
+
+model FinanceProfitCenter {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  code      String?
+  type      FinanceProfitCenterType
+  parentId  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent    FinanceProfitCenter? @relation("finance_profit_center_tree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  FinanceProfitCenter[] @relation("finance_profit_center_tree")
+  entries   FinanceEntry[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, parentId])
+  @@unique([companyId, name])
 }

@@ -41,7 +41,10 @@ const companyPermissions = [
   'module:finance-core.counterparty.manage',
   'module:finance-core.account.manage',
   'module:finance-core.recurring.manage',
-  'module:finance-core.reports.read'
+  'module:finance-core.reports.read',
+  'module:finance-core.profit-center.manage',
+  'module:finance-core.profit-center.read',
+  'module:finance-core.reports.profit-center.read'
 ];
 
 async function upsertPlatformRole() {

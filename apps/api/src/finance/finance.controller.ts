@@ -55,9 +55,10 @@ export class FinanceController {
     @Query('to') to?: string,
     @Query('categoryId') categoryId?: string,
     @Query('counterpartyId') counterpartyId?: string,
-    @Query('accountId') accountId?: string
+    @Query('accountId') accountId?: string,
+    @Query('profitCenterId') profitCenterId?: string
   ) {
-    return this.finance.listEntries(req.companyId, { from, to, categoryId, counterpartyId, accountId });
+    return this.finance.listEntries(req.companyId, { from, to, categoryId, counterpartyId, accountId, profitCenterId });
   }
 
   @Post('entries')
@@ -138,6 +139,35 @@ export class FinanceController {
     return this.finance.deactivateAccount(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
+  @Get('profit-centers')
+  @RequirePermissions('module:finance-core.profit-center.read')
+  listProfitCenters(@Req() req: Request & { companyId: string }, @Query('active') active?: string) {
+    const activeFilter = active === undefined ? undefined : active === 'true';
+    return this.finance.listProfitCenters(req.companyId, activeFilter);
+  }
+
+  @Post('profit-centers')
+  @RequirePermissions('module:finance-core.profit-center.manage')
+  createProfitCenter(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createProfitCenter(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('profit-centers/:id')
+  @RequirePermissions('module:finance-core.profit-center.manage')
+  updateProfitCenter(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateProfitCenter(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('profit-centers/:id')
+  @RequirePermissions('module:finance-core.profit-center.manage')
+  deactivateProfitCenter(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.deactivateProfitCenter(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
   @Get('recurring')
   @RequirePermissions('module:finance-core.entry.read')
   listRecurring(@Req() req: Request & { companyId: string }) {
@@ -188,5 +218,17 @@ export class FinanceController {
   @RequirePermissions('module:finance-core.reports.read')
   cashflowReport(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
     return this.finance.cashflowReport(req.companyId, query);
+  }
+
+  @Get('reports/pnl-by-profit-center')
+  @RequirePermissions('module:finance-core.reports.profit-center.read')
+  pnlByProfitCenter(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.pnlByProfitCenter(req.companyId, query);
+  }
+
+  @Get('reports/profit-center-comparison')
+  @RequirePermissions('module:finance-core.reports.profit-center.read')
+  profitCenterComparison(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.profitCenterComparison(req.companyId, query);
   }
 }

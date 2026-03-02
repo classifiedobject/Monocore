@@ -7,6 +7,8 @@ import {
   financeCategorySchema,
   financeCounterpartySchema,
   financeEntrySchema,
+  financeProfitCenterReportSchema,
+  financeProfitCenterSchema,
   financeRecurringRuleSchema,
   financeReportRangeSchema
 } from '@monocore/shared';
@@ -17,6 +19,7 @@ type EntryFilters = {
   categoryId?: string;
   counterpartyId?: string;
   accountId?: string;
+  profitCenterId?: string;
 };
 
 type JsonObject = Record<string, Prisma.InputJsonValue | null>;
@@ -54,6 +57,9 @@ export class FinanceService {
       manageCounterparty: keys.has('module:finance-core.counterparty.manage'),
       manageAccount: keys.has('module:finance-core.account.manage'),
       manageRecurring: keys.has('module:finance-core.recurring.manage'),
+      manageProfitCenter: keys.has('module:finance-core.profit-center.manage'),
+      readProfitCenter: keys.has('module:finance-core.profit-center.read'),
+      readProfitCenterReports: keys.has('module:finance-core.reports.profit-center.read'),
       readReports: keys.has('module:finance-core.reports.read'),
       createEntry: keys.has('module:finance-core.entry.create'),
       deleteEntry: keys.has('module:finance-core.entry.delete'),
@@ -276,12 +282,121 @@ export class FinanceService {
     return updated;
   }
 
+  listProfitCenters(companyId: string, active?: boolean) {
+    return this.prisma.financeProfitCenter.findMany({
+      where: {
+        companyId,
+        ...(active === undefined ? {} : { isActive: active })
+      },
+      include: {
+        _count: { select: { entries: true } }
+      },
+      orderBy: [{ name: 'asc' }]
+    });
+  }
+
+  async createProfitCenter(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeProfitCenterSchema.parse(payload);
+    if (body.parentId) {
+      await this.requireProfitCenter(companyId, body.parentId);
+    }
+
+    const center = await this.prisma.financeProfitCenter.create({
+      data: {
+        companyId,
+        name: body.name,
+        code: body.code ?? null,
+        type: body.type,
+        parentId: body.parentId ?? null,
+        isActive: body.isActive ?? true
+      },
+      include: {
+        _count: { select: { entries: true } }
+      }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.profit_center.create',
+      'finance_profit_center',
+      center.id,
+      body,
+      ip,
+      userAgent
+    );
+
+    return center;
+  }
+
+  async updateProfitCenter(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeProfitCenterSchema.partial().parse(payload);
+    const center = await this.requireProfitCenter(companyId, id);
+
+    if (body.parentId) {
+      if (body.parentId === id) {
+        throw new BadRequestException('parentId cannot be self');
+      }
+      await this.requireProfitCenter(companyId, body.parentId);
+      await this.assertNoProfitCenterCycle(companyId, id, body.parentId);
+    }
+
+    const updated = await this.prisma.financeProfitCenter.update({
+      where: { id: center.id },
+      data: {
+        ...(body.name ? { name: body.name } : {}),
+        ...(body.code !== undefined ? { code: body.code } : {}),
+        ...(body.type ? { type: body.type } : {}),
+        ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+      },
+      include: {
+        _count: { select: { entries: true } }
+      }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.profit_center.update',
+      'finance_profit_center',
+      updated.id,
+      body,
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
+  async deactivateProfitCenter(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const center = await this.requireProfitCenter(companyId, id);
+    const updated = await this.prisma.financeProfitCenter.update({
+      where: { id: center.id },
+      data: { isActive: false }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.profit_center.deactivate',
+      'finance_profit_center',
+      updated.id,
+      { previousActive: center.isActive },
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
   async listEntries(companyId: string, filters: EntryFilters) {
     const where: Prisma.FinanceEntryWhereInput = {
       companyId,
       ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
       ...(filters.counterpartyId ? { counterpartyId: filters.counterpartyId } : {}),
       ...(filters.accountId ? { accountId: filters.accountId } : {}),
+      ...(filters.profitCenterId ? { profitCenterId: filters.profitCenterId } : {}),
       ...(filters.from || filters.to
         ? {
             date: {
@@ -294,7 +409,7 @@ export class FinanceService {
 
     return this.prisma.financeEntry.findMany({
       where,
-      include: { category: true, counterparty: true, account: true, recurringRule: true, createdByUser: true },
+      include: { category: true, counterparty: true, account: true, profitCenter: true, recurringRule: true, createdByUser: true },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
     });
   }
@@ -309,13 +424,14 @@ export class FinanceService {
         categoryId: body.categoryId,
         counterpartyId: body.counterpartyId ?? null,
         accountId: body.accountId ?? null,
+        profitCenterId: body.profitCenterId ?? null,
         reference: body.reference ?? null,
         amount: new Prisma.Decimal(body.amount),
         date: this.parseDateValue(body.date),
         description: body.description,
         createdByUserId: actorUserId
       },
-      include: { category: true, counterparty: true, account: true }
+      include: { category: true, counterparty: true, account: true, profitCenter: true }
     });
 
     await this.logCompany(
@@ -328,6 +444,7 @@ export class FinanceService {
         categoryId: body.categoryId,
         counterpartyId: body.counterpartyId ?? null,
         accountId: body.accountId ?? null,
+        profitCenterId: body.profitCenterId ?? null,
         reference: body.reference ?? null,
         amount: body.amount,
         date: body.date,
@@ -355,12 +472,13 @@ export class FinanceService {
         ...(body.categoryId ? { categoryId: body.categoryId } : {}),
         ...(body.counterpartyId !== undefined ? { counterpartyId: body.counterpartyId } : {}),
         ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
+        ...(body.profitCenterId !== undefined ? { profitCenterId: body.profitCenterId } : {}),
         ...(body.reference !== undefined ? { reference: body.reference } : {}),
         ...(body.amount !== undefined ? { amount: new Prisma.Decimal(body.amount) } : {}),
         ...(body.date ? { date: this.parseDateValue(body.date) } : {}),
         ...(body.description !== undefined ? { description: body.description } : {})
       },
-      include: { category: true, counterparty: true, account: true }
+      include: { category: true, counterparty: true, account: true, profitCenter: true }
     });
 
     await this.logCompany(
@@ -373,6 +491,7 @@ export class FinanceService {
         categoryId: body.categoryId ?? entry.categoryId,
         counterpartyId: body.counterpartyId ?? entry.counterpartyId,
         accountId: body.accountId ?? entry.accountId,
+        profitCenterId: body.profitCenterId ?? entry.profitCenterId,
         reference: body.reference ?? entry.reference,
         amount: body.amount ?? Number(entry.amount),
         date: body.date ?? entry.date.toISOString(),
@@ -403,6 +522,7 @@ export class FinanceService {
         categoryId: existing.categoryId,
         counterpartyId: existing.counterpartyId,
         accountId: existing.accountId,
+        profitCenterId: existing.profitCenterId,
         reference: existing.reference,
         amount: Number(existing.amount),
         date: existing.date.toISOString()
@@ -659,6 +779,103 @@ export class FinanceService {
     };
   }
 
+  async pnlByProfitCenter(companyId: string, query: unknown) {
+    const parsed = financeProfitCenterReportSchema.parse(query);
+    const range = this.reportRange(parsed.from, parsed.to);
+
+    if (parsed.profitCenterId) {
+      const center = await this.requireProfitCenter(companyId, parsed.profitCenterId);
+      const entries = await this.prisma.financeEntry.findMany({
+        where: {
+          companyId,
+          profitCenterId: center.id,
+          date: { gte: range.from, lte: range.to }
+        },
+        include: { category: true }
+      });
+
+      let income = 0;
+      let expense = 0;
+      const byCategory = new Map<string, { categoryId: string; categoryName: string; type: string; total: number }>();
+
+      for (const entry of entries) {
+        const amount = Number(entry.amount);
+        if (entry.category.type === 'INCOME') income += amount;
+        else expense += amount;
+
+        const key = entry.categoryId;
+        const row = byCategory.get(key) ?? {
+          categoryId: entry.categoryId,
+          categoryName: entry.category.name,
+          type: entry.category.type,
+          total: 0
+        };
+        row.total += amount;
+        byCategory.set(key, row);
+      }
+
+      return {
+        from: parsed.from,
+        to: parsed.to,
+        profitCenter: { id: center.id, name: center.name, code: center.code, type: center.type },
+        totals: { income, expense, net: income - expense },
+        byCategory: Array.from(byCategory.values()).sort((a, b) => a.categoryName.localeCompare(b.categoryName))
+      };
+    }
+
+    const entries = await this.prisma.financeEntry.findMany({
+      where: {
+        companyId,
+        date: { gte: range.from, lte: range.to }
+      },
+      include: { category: true, profitCenter: true }
+    });
+
+    const grouped = new Map<
+      string,
+      { profitCenterId: string | null; profitCenterName: string; income: number; expense: number; net: number }
+    >();
+
+    for (const entry of entries) {
+      const key = entry.profitCenterId ?? 'unassigned';
+      const row = grouped.get(key) ?? {
+        profitCenterId: entry.profitCenterId,
+        profitCenterName: entry.profitCenter?.name ?? 'Unassigned',
+        income: 0,
+        expense: 0,
+        net: 0
+      };
+      const amount = Number(entry.amount);
+      if (entry.category.type === 'INCOME') row.income += amount;
+      else row.expense += amount;
+      row.net = row.income - row.expense;
+      grouped.set(key, row);
+    }
+
+    return {
+      from: parsed.from,
+      to: parsed.to,
+      items: Array.from(grouped.values()).sort((a, b) => a.profitCenterName.localeCompare(b.profitCenterName))
+    };
+  }
+
+  async profitCenterComparison(companyId: string, query: unknown) {
+    const parsed = financeProfitCenterReportSchema.parse(query);
+    this.reportRange(parsed.from, parsed.to);
+
+    const summary = await this.pnlByProfitCenter(companyId, { from: parsed.from, to: parsed.to });
+    const items = Array.isArray((summary as { items?: unknown }).items)
+      ? (summary as { items: Array<{ profitCenterId: string | null; profitCenterName: string; income: number; expense: number; net: number }> })
+          .items
+      : [];
+
+    return {
+      from: parsed.from,
+      to: parsed.to,
+      items: [...items].sort((a, b) => b.net - a.net)
+    };
+  }
+
   private async generateEntryFromRule(actorUserId: string, companyId: string, rule: FinanceRecurringRule) {
     const runAt = new Date();
     const nextRunAt = this.computeNextRunAt(rule.nextRunAt, rule.frequency, rule.dayOfMonth ?? undefined);
@@ -727,6 +944,7 @@ export class FinanceService {
       categoryId?: string;
       counterpartyId?: string | null;
       accountId?: string | null;
+      profitCenterId?: string | null;
       recurringRuleId?: string | null;
     }
   ) {
@@ -738,6 +956,9 @@ export class FinanceService {
     }
     if (body.accountId) {
       await this.requireAccount(companyId, body.accountId);
+    }
+    if (body.profitCenterId) {
+      await this.requireProfitCenter(companyId, body.profitCenterId);
     }
     if (body.recurringRuleId) {
       await this.requireRecurringRule(companyId, body.recurringRuleId);
@@ -793,6 +1014,31 @@ export class FinanceService {
       throw new NotFoundException('Recurring rule not found');
     }
     return row;
+  }
+
+  private async requireProfitCenter(companyId: string, id: string) {
+    const row = await this.prisma.financeProfitCenter.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Profit center not found');
+    }
+    return row;
+  }
+
+  private async assertNoProfitCenterCycle(companyId: string, currentId: string, nextParentId: string) {
+    let cursor: string | null = nextParentId;
+    while (cursor) {
+      if (cursor === currentId) {
+        throw new BadRequestException('Profit center hierarchy cycle is not allowed');
+      }
+      const parent: { id: string; companyId: string; parentId: string | null } | null = await this.prisma.financeProfitCenter.findUnique({
+        where: { id: cursor },
+        select: { id: true, companyId: true, parentId: true }
+      });
+      if (!parent || parent.companyId !== companyId) {
+        throw new BadRequestException('Invalid parent profit center');
+      }
+      cursor = parent.parentId;
+    }
   }
 
   private async logCompany(

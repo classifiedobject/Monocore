@@ -67,6 +67,7 @@ export const financeEntrySchema = z.object({
   categoryId: z.string().uuid(),
   counterpartyId: z.string().uuid().nullable().optional(),
   accountId: z.string().uuid().nullable().optional(),
+  profitCenterId: z.string().uuid().nullable().optional(),
   reference: z.string().max(120).nullable().optional(),
   amount: z.coerce.number().positive(),
   date: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
@@ -107,6 +108,20 @@ export const financeReportRangeSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   accountId: z.string().uuid().optional()
+});
+
+export const financeProfitCenterSchema = z.object({
+  name: z.string().min(2).max(140),
+  code: z.string().max(40).nullable().optional(),
+  type: z.enum(['GENERAL', 'SERVICE', 'DEPARTMENT', 'LOCATION', 'EVENT', 'OTHER']),
+  parentId: z.string().uuid().nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const financeProfitCenterReportSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  profitCenterId: z.string().uuid().optional()
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
