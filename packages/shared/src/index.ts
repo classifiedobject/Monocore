@@ -204,6 +204,47 @@ export const financeCounterpartyBalanceQuerySchema = z.object({
   direction: z.enum(['PAYABLE', 'RECEIVABLE'])
 });
 
+export const financeBudgetSchema = z.object({
+  name: z.string().min(2).max(140),
+  year: z.coerce.number().int().min(2000).max(2100),
+  currency: z.string().min(3).max(8).default('TRY'),
+  isActive: z.boolean().optional()
+});
+
+export const financeBudgetLineSchema = z.object({
+  month: z.coerce.number().int().min(1).max(12),
+  direction: z.enum(['INCOME', 'EXPENSE']),
+  categoryId: z.string().uuid().nullable().optional(),
+  profitCenterId: z.string().uuid().nullable().optional(),
+  amount: z.coerce.number().nonnegative(),
+  notes: z.string().max(1000).nullable().optional()
+});
+
+export const financeBudgetLinesBulkSchema = z.object({
+  lines: z.array(financeBudgetLineSchema).min(1)
+});
+
+export const financeBudgetVsActualQuerySchema = z.object({
+  budgetId: z.string().uuid(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  profitCenterId: z.string().uuid().optional(),
+  categoryId: z.string().uuid().optional()
+});
+
+export const financeCashflowForecastItemSchema = z.object({
+  direction: z.enum(['INFLOW', 'OUTFLOW']),
+  date: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  amount: z.coerce.number().positive(),
+  currency: z.string().min(3).max(8).default('TRY'),
+  description: z.string().min(2).max(300),
+  profitCenterId: z.string().uuid().nullable().optional()
+});
+
+export const financeCashflowProjectionQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
 export const inventoryWarehouseSchema = z.object({
   name: z.string().min(2).max(140),
   location: z.string().max(300).nullable().optional(),

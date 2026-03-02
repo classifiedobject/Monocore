@@ -125,6 +125,72 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Invoice statuses auto-updated (`ISSUED`, `PARTIALLY_PAID`, `PAID`, `VOID`).
   - Aging report (`current`, `1-30`, `31-60`, `61-90`, `90+`) and counterparty outstanding balance list.
   - Fits cari flow: alacak/verecek takibi by counterparty with due-date buckets.
+- Budget & Forecast (Sprint 11):
+  - `FinanceBudget` + `FinanceBudgetLine` for annual budgets with monthly lines.
+  - Optional `categoryId` and `profitCenterId` on budget lines for granular planning.
+  - Budget endpoints:
+    - `/app-api/finance/budgets`
+    - `/app-api/finance/budgets/:id`
+    - `/app-api/finance/budgets/:id/lines`
+    - `/app-api/finance/budgets/:id/duplicate`
+    - `/app-api/finance/budgets/:id/activate|deactivate`
+  - Budget vs Actual report:
+    - `/app-api/finance/reports/budget-vs-actual`
+    - Returns monthly breakdown + totals + variance and variance percent.
+- Cashflow Projection v0:
+  - Includes open AP/AR invoices by due date, recurring rule occurrences, and manual forecast items.
+  - Manual forecast entity: `FinanceCashflowForecastItem`.
+  - Endpoints:
+    - `/app-api/finance/cashflow-forecast-items`
+    - `/app-api/finance/reports/cashflow-projection`
+  - Projection is weekly bucketed in v0 and returns source split: invoices / recurring / manual.
+
+## Inventory Core
+- Module key: `inventory-core`.
+- Tenant-owned entities:
+  - `InventoryWarehouse`
+  - `InventoryItem`
+  - `InventoryStockMovement`
+- App API endpoints (module installation + tenant RBAC enforced):
+  - `/app-api/inventory/capabilities`
+  - `/app-api/inventory/warehouses`
+  - `/app-api/inventory/items`
+  - `/app-api/inventory/movements`
+  - `/app-api/inventory/transfer`
+  - `/app-api/inventory/stock-balance`
+- Rules:
+  - Strict negative stock protection for `OUT` and `TRANSFER_OUT` operations.
+  - Transfer creates two linked movements (`TRANSFER_OUT` + `TRANSFER_IN`).
+  - Stock balance is derived from movement sums by item+warehouse.
+- UI route:
+  - `/app/inventory` with tabs: Items, Warehouses, Stock, Movements.
+- Smoke flow:
+  - `pnpm inventory:smoke` creates A/B warehouses + one item, stocks in 100, transfers 40, verifies `A=60`, `B=40`.
+
+## Recipe + Sales Core
+- Module keys:
+  - `recipe-core` for product + BOM management.
+  - `sales-core` for sales ledger posting.
+- Tenant-owned entities:
+  - `SalesProduct`
+  - `Recipe`
+  - `RecipeLine`
+  - `SalesOrder`
+  - `SalesOrderLine`
+- Posting flow:
+  - Sales post requires recipe for each product.
+  - Consumes ingredient stock from selected warehouse (`InventoryStockMovement` with `relatedDocumentType="sale"`).
+  - Computes COGS using `InventoryItem.lastPurchaseUnitCost` (v1 simple cost model).
+  - Creates finance entries linked to sales order:
+    - `Sales Revenue` (income)
+    - `COGS` (expense)
+  - Optional `profitCenterId` is forwarded to generated finance entries.
+- Endpoints:
+  - Recipe: `/app-api/recipes/products`, `/app-api/recipes/recipes`
+  - Sales: `/app-api/sales/orders`, `/app-api/sales/orders/:id/post`, `/app-api/sales/orders/:id/void`
+  - Inventory cost edit: `/app-api/inventory/items/:id/cost`
+- Smoke flow:
+  - `pnpm sales:smoke` validates: item cost=10, recipe consumption 2/unit, order 3x50, stock 100->94, revenue=150, cogs=60.
 
 ## Inventory Core
 - Module key: `inventory-core`.

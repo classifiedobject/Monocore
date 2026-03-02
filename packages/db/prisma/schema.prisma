@@ -78,6 +78,15 @@ enum FinancePaymentDirection {
   INCOMING
 }
 
+enum FinanceBudgetDirection {
+  INCOME
+  EXPENSE
+}
+
+enum FinanceCashflowDirection {
+  INFLOW
+  OUTFLOW
+}
 enum InventoryMovementType {
   IN
   OUT
@@ -115,6 +124,8 @@ model User {
   financeAllocationBatchesCreated FinanceAllocationBatch[] @relation("finance_allocation_batch_creator")
   financeInvoicesCreated FinanceInvoice[] @relation("finance_invoice_creator")
   financePaymentsCreated FinancePayment[] @relation("finance_payment_creator")
+  financeBudgetsCreated FinanceBudget[] @relation("finance_budget_creator")
+  financeCashflowForecastItemsCreated FinanceCashflowForecastItem[] @relation("finance_cashflow_forecast_creator")
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
 }
@@ -209,6 +220,9 @@ model Company {
   financeInvoices FinanceInvoice[]
   financePayments FinancePayment[]
   financePaymentAllocations FinancePaymentAllocation[]
+  financeBudgets FinanceBudget[]
+  financeBudgetLines FinanceBudgetLine[]
+  financeCashflowForecastItems FinanceCashflowForecastItem[]
   inventoryWarehouses InventoryWarehouse[]
   inventoryItems InventoryItem[]
   inventoryStockMovements InventoryStockMovement[]
@@ -470,6 +484,7 @@ model FinanceCategory {
   entries   FinanceEntry[]
   recurringRules FinanceRecurringRule[]
   allocationRules FinanceAllocationRule[] @relation("allocation_rule_source_category")
+  budgetLines FinanceBudgetLine[]
 
   @@unique([companyId, name])
   @@index([companyId, type])
@@ -603,6 +618,8 @@ model FinanceProfitCenter {
   entries   FinanceEntry[]
   salesOrders SalesOrder[]
   allocationTargets FinanceAllocationTarget[]
+  budgetLines FinanceBudgetLine[]
+  cashflowForecastItems FinanceCashflowForecastItem[]
 
   @@index([companyId, isActive])
   @@index([companyId, parentId])
@@ -742,6 +759,64 @@ model FinancePaymentAllocation {
   @@index([companyId, invoiceId])
 }
 
+model FinanceBudget {
+  id              String   @id @default(uuid())
+  companyId       String
+  name            String
+  year            Int
+  currency        String   @default("TRY")
+  isActive        Boolean  @default(true)
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdByUser   User     @relation("finance_budget_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  lines           FinanceBudgetLine[]
+
+  @@index([companyId, year, isActive])
+}
+
+model FinanceBudgetLine {
+  id             String   @id @default(uuid())
+  companyId      String
+  budgetId       String
+  month          Int
+  direction      FinanceBudgetDirection
+  categoryId     String?
+  profitCenterId String?
+  amount         Decimal  @db.Decimal(14, 2)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  budget         FinanceBudget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  category       FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  profitCenter   FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, budgetId, month])
+  @@index([companyId, categoryId])
+  @@index([companyId, profitCenterId])
+}
+
+model FinanceCashflowForecastItem {
+  id             String   @id @default(uuid())
+  companyId      String
+  direction      FinanceCashflowDirection
+  date           DateTime
+  amount         Decimal  @db.Decimal(14, 2)
+  currency       String   @default("TRY")
+  description    String
+  profitCenterId String?
+  createdByUserId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  profitCenter   FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
+  createdByUser  User @relation("finance_cashflow_forecast_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, date])
+  @@index([companyId, direction, date])
+}
 model InventoryWarehouse {
   id        String   @id @default(uuid())
   companyId String
