@@ -24,6 +24,29 @@ enum FinanceCategoryType {
   EXPENSE
 }
 
+enum FinanceCounterpartyType {
+  VENDOR
+  CUSTOMER
+  OTHER
+}
+
+enum FinanceAccountType {
+  CASH
+  BANK
+  POS
+  OTHER
+}
+
+enum FinanceDirection {
+  INCOME
+  EXPENSE
+}
+
+enum FinanceFrequency {
+  WEEKLY
+  MONTHLY
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -43,6 +66,7 @@ model User {
   platformProfile  PlatformUserProfile? @relation("platform_user_profile_user")
   managedPlatformProfiles PlatformUserProfile[] @relation("platform_user_profile_manager")
   financeEntriesCreated FinanceEntry[]  @relation("finance_entry_creator")
+  financeRecurringRulesCreated FinanceRecurringRule[] @relation("finance_recurring_rule_creator")
 }
 
 model Session {
@@ -126,6 +150,9 @@ model Company {
   entitlements   CompanyEntitlement[]
   financeCategories FinanceCategory[]
   financeEntries FinanceEntry[]
+  financeCounterparties FinanceCounterparty[]
+  financeAccounts FinanceAccount[]
+  financeRecurringRules FinanceRecurringRule[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -377,6 +404,7 @@ model FinanceCategory {
   updatedAt DateTime            @updatedAt
   company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   entries   FinanceEntry[]
+  recurringRules FinanceRecurringRule[]
 
   @@unique([companyId, name])
   @@index([companyId, type])
@@ -386,6 +414,11 @@ model FinanceEntry {
   id              String    @id @default(uuid())
   companyId       String
   categoryId      String
+  counterpartyId  String?
+  accountId       String?
+  reference       String?
+  isRecurringGenerated Boolean @default(false)
+  recurringRuleId String?
   amount          Decimal   @db.Decimal(14, 2)
   date            DateTime
   description     String?
@@ -394,8 +427,77 @@ model FinanceEntry {
   updatedAt       DateTime  @updatedAt
   company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   category        FinanceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  counterparty    FinanceCounterparty? @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  account         FinanceAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  recurringRule   FinanceRecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
   createdByUser   User      @relation("finance_entry_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([companyId, date])
   @@index([companyId, categoryId])
+  @@index([companyId, counterpartyId])
+  @@index([companyId, accountId])
+}
+
+model FinanceCounterparty {
+  id        String   @id @default(uuid())
+  companyId String
+  type      FinanceCounterpartyType
+  name      String
+  taxId     String?
+  email     String?
+  phone     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entries   FinanceEntry[]
+  recurringRules FinanceRecurringRule[]
+
+  @@index([companyId, type])
+  @@index([companyId, name])
+}
+
+model FinanceAccount {
+  id        String   @id @default(uuid())
+  companyId String
+  type      FinanceAccountType
+  name      String
+  currency  String   @default("TRY")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entries   FinanceEntry[]
+  recurringRules FinanceRecurringRule[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, name])
+}
+
+model FinanceRecurringRule {
+  id              String   @id @default(uuid())
+  companyId       String
+  name            String
+  direction       FinanceDirection
+  categoryId      String
+  amount          Decimal  @db.Decimal(14, 2)
+  startDate       DateTime
+  frequency       FinanceFrequency
+  dayOfMonth      Int?
+  nextRunAt       DateTime
+  isActive        Boolean  @default(true)
+  counterpartyId  String?
+  accountId       String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category        FinanceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  counterparty    FinanceCounterparty? @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+  account         FinanceAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("finance_recurring_rule_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  generatedEntries FinanceEntry[]
+
+  @@index([companyId, isActive, nextRunAt])
+  @@index([companyId, frequency])
 }

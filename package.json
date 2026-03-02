@@ -18,7 +18,8 @@
     "db:seed:prod": "pnpm --filter @monocore/db seed",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
-    "health:check": "sh infra/scripts/health-check.sh"
+    "health:check": "sh infra/scripts/health-check.sh",
+    "finance:smoke": "node infra/scripts/finance-smoke.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "7.4.4",

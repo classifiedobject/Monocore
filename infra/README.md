@@ -74,6 +74,28 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 - `Module`: global platform-owned registry.
 - `ModuleInstallation`: tenant installation state and config.
 
+## Finance Core Pro
+- Module key: `finance-core`.
+- Tenant-owned entities:
+  - `FinanceCategory`
+  - `FinanceCounterparty`
+  - `FinanceAccount`
+  - `FinanceRecurringRule`
+  - `FinanceEntry`
+- App API endpoints (all gated behind module installation + tenant RBAC):
+  - `/app-api/finance/categories`
+  - `/app-api/finance/counterparties`
+  - `/app-api/finance/accounts`
+  - `/app-api/finance/entries`
+  - `/app-api/finance/recurring`
+  - `/app-api/finance/reports/pnl`
+  - `/app-api/finance/reports/cashflow`
+- Recurring runs:
+  - Manual per rule: `POST /app-api/finance/recurring/:id/run-now`
+  - Batch due run: `POST /app-api/finance/recurring/run-due`
+  - Worker placeholder logs scheduling hint in `apps/worker/src/index.ts`
+  - For cron later, schedule a secure internal call to `run-due` with service auth.
+
 ## i18n Foundation
 - Language keys stored in `LanguagePack` table (`locale`, `namespace`, `key`, `value`).
 - Platform UI page `/platform/i18n` supports editing translations for `en` and `tr`.
@@ -86,3 +108,4 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 5. Review audit logs (`/app/audit-logs`)
 6. Platform tenant/module/i18n management (`/platform/tenants`, `/platform/modules`, `/platform/i18n`)
 7. Invite lifecycle (`/platform-api/invites/*`, `/app-api/invites/*`, `/auth/accept-invite`)
+8. Finance smoke flow (`pnpm finance:smoke`)
