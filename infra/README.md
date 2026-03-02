@@ -125,6 +125,25 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Invoice statuses auto-updated (`ISSUED`, `PARTIALLY_PAID`, `PAID`, `VOID`).
   - Aging report (`current`, `1-30`, `31-60`, `61-90`, `90+`) and counterparty outstanding balance list.
   - Fits cari flow: alacak/verecek takibi by counterparty with due-date buckets.
+- Budget & Forecast (Sprint 11):
+  - `FinanceBudget` + `FinanceBudgetLine` for annual budgets with monthly lines.
+  - Optional `categoryId` and `profitCenterId` on budget lines for granular planning.
+  - Budget endpoints:
+    - `/app-api/finance/budgets`
+    - `/app-api/finance/budgets/:id`
+    - `/app-api/finance/budgets/:id/lines`
+    - `/app-api/finance/budgets/:id/duplicate`
+    - `/app-api/finance/budgets/:id/activate|deactivate`
+  - Budget vs Actual report:
+    - `/app-api/finance/reports/budget-vs-actual`
+    - Returns monthly breakdown + totals + variance and variance percent.
+- Cashflow Projection v0:
+  - Includes open AP/AR invoices by due date, recurring rule occurrences, and manual forecast items.
+  - Manual forecast entity: `FinanceCashflowForecastItem`.
+  - Endpoints:
+    - `/app-api/finance/cashflow-forecast-items`
+    - `/app-api/finance/reports/cashflow-projection`
+  - Projection is weekly bucketed in v0 and returns source split: invoices / recurring / manual.
 
 ## Inventory Core
 - Module key: `inventory-core`.

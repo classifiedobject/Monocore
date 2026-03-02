@@ -7,6 +7,11 @@ import {
   financeAllocationRuleSchema,
   financeApplyAllocationSchema,
   financeAccountSchema,
+  financeBudgetLinesBulkSchema,
+  financeBudgetSchema,
+  financeBudgetVsActualQuerySchema,
+  financeCashflowForecastItemSchema,
+  financeCashflowProjectionQuerySchema,
   financeCounterpartyBalanceQuerySchema,
   financeCategorySchema,
   financeCounterpartySchema,
@@ -93,6 +98,11 @@ export class FinanceService {
       managePayment: keys.has('module:finance-core.payment.manage'),
       readPayment: keys.has('module:finance-core.payment.read'),
       readAgingReport: keys.has('module:finance-core.reports.aging.read'),
+      manageBudget: keys.has('module:finance-core.budget.manage'),
+      readBudget: keys.has('module:finance-core.budget.read'),
+      readBudgetReports: keys.has('module:finance-core.reports.budget.read'),
+      readCashflowProjection: keys.has('module:finance-core.reports.cashflow.read'),
+      manageCashflowForecast: keys.has('module:finance-core.cashflow-forecast.manage'),
       createEntry: keys.has('module:finance-core.entry.create'),
       deleteEntry: keys.has('module:finance-core.entry.delete'),
       readEntry: keys.has('module:finance-core.entry.read')
@@ -1127,6 +1137,239 @@ export class FinanceService {
     return result;
   }
 
+  listBudgets(companyId: string) {
+    return this.prisma.financeBudget.findMany({
+      where: { companyId },
+      include: {
+        _count: { select: { lines: true } }
+      },
+      orderBy: [{ isActive: 'desc' }, { year: 'desc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async createBudget(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeBudgetSchema.parse(payload);
+    const row = await this.prisma.financeBudget.create({
+      data: {
+        companyId,
+        name: body.name,
+        year: body.year,
+        currency: body.currency,
+        isActive: body.isActive ?? true,
+        createdByUserId: actorUserId
+      }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.finance.budget.create', 'finance_budget', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async getBudget(companyId: string, id: string) {
+    return this.requireBudget(companyId, id);
+  }
+
+  async updateBudget(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeBudgetSchema.partial().parse(payload);
+    const existing = await this.requireBudget(companyId, id);
+
+    const row = await this.prisma.financeBudget.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.year !== undefined ? { year: body.year } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+      }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.finance.budget.update', 'finance_budget', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async duplicateBudget(actorUserId: string, companyId: string, id: string, yearRaw: string | undefined, ip?: string, userAgent?: string) {
+    const existing = await this.requireBudget(companyId, id);
+    const lines = await this.prisma.financeBudgetLine.findMany({
+      where: { companyId, budgetId: existing.id }
+    });
+    const year = yearRaw ? Number(yearRaw) : existing.year + 1;
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      throw new BadRequestException('Invalid target year');
+    }
+
+    const clone = await this.prisma.$transaction(async (tx) => {
+      const budget = await tx.financeBudget.create({
+        data: {
+          companyId,
+          name: `${existing.name} (${year})`,
+          year,
+          currency: existing.currency,
+          isActive: false,
+          createdByUserId: actorUserId
+        }
+      });
+
+      for (const line of lines) {
+        await tx.financeBudgetLine.create({
+          data: {
+            companyId,
+            budgetId: budget.id,
+            month: line.month,
+            direction: line.direction,
+            categoryId: line.categoryId,
+            profitCenterId: line.profitCenterId,
+            amount: line.amount,
+            notes: line.notes
+          }
+        });
+      }
+
+      return budget;
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.budget.duplicate',
+      'finance_budget',
+      clone.id,
+      { sourceBudgetId: id, year },
+      ip,
+      userAgent
+    );
+
+    return clone;
+  }
+
+  async activateBudget(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const budget = await this.requireBudget(companyId, id);
+    const row = await this.prisma.financeBudget.update({
+      where: { id: budget.id },
+      data: { isActive: true }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.finance.budget.activate', 'finance_budget', row.id, {}, ip, userAgent);
+    return row;
+  }
+
+  async deactivateBudget(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const budget = await this.requireBudget(companyId, id);
+    const row = await this.prisma.financeBudget.update({
+      where: { id: budget.id },
+      data: { isActive: false }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.finance.budget.deactivate', 'finance_budget', row.id, {}, ip, userAgent);
+    return row;
+  }
+
+  async listBudgetLines(companyId: string, budgetId: string) {
+    await this.requireBudget(companyId, budgetId);
+    return this.prisma.financeBudgetLine.findMany({
+      where: { companyId, budgetId },
+      include: { category: true, profitCenter: true },
+      orderBy: [{ month: 'asc' }, { direction: 'asc' }]
+    });
+  }
+
+  async upsertBudgetLines(actorUserId: string, companyId: string, budgetId: string, payload: unknown, ip?: string, userAgent?: string) {
+    await this.requireBudget(companyId, budgetId);
+    const body = financeBudgetLinesBulkSchema.parse(payload);
+
+    for (const line of body.lines) {
+      if (line.categoryId) await this.requireCategory(companyId, line.categoryId);
+      if (line.profitCenterId) await this.requireProfitCenter(companyId, line.profitCenterId);
+    }
+
+    const rows = await this.prisma.$transaction(async (tx) => {
+      await tx.financeBudgetLine.deleteMany({ where: { companyId, budgetId } });
+      for (const line of body.lines) {
+        await tx.financeBudgetLine.create({
+          data: {
+            companyId,
+            budgetId,
+            month: line.month,
+            direction: line.direction,
+            categoryId: line.categoryId ?? null,
+            profitCenterId: line.profitCenterId ?? null,
+            amount: new Prisma.Decimal(line.amount),
+            notes: line.notes ?? null
+          }
+        });
+      }
+
+      return tx.financeBudgetLine.findMany({
+        where: { companyId, budgetId },
+        include: { category: true, profitCenter: true },
+        orderBy: [{ month: 'asc' }, { direction: 'asc' }]
+      });
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.finance.budget.lines.upsert',
+      'finance_budget',
+      budgetId,
+      { lineCount: body.lines.length },
+      ip,
+      userAgent
+    );
+
+    return rows;
+  }
+
+  listCashflowForecastItems(companyId: string) {
+    return this.prisma.financeCashflowForecastItem.findMany({
+      where: { companyId },
+      include: { profitCenter: true, createdByUser: true },
+      orderBy: [{ date: 'asc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async createCashflowForecastItem(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeCashflowForecastItemSchema.parse(payload);
+    if (body.profitCenterId) await this.requireProfitCenter(companyId, body.profitCenterId);
+
+    const row = await this.prisma.financeCashflowForecastItem.create({
+      data: {
+        companyId,
+        direction: body.direction,
+        date: this.parseDateValue(body.date),
+        amount: new Prisma.Decimal(body.amount),
+        currency: body.currency,
+        description: body.description,
+        profitCenterId: body.profitCenterId ?? null,
+        createdByUserId: actorUserId
+      },
+      include: { profitCenter: true }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.finance.cashflow_forecast.create', 'finance_cashflow_forecast_item', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async updateCashflowForecastItem(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = financeCashflowForecastItemSchema.partial().parse(payload);
+    const existing = await this.requireCashflowForecastItem(companyId, id);
+    if (body.profitCenterId) await this.requireProfitCenter(companyId, body.profitCenterId);
+
+    const row = await this.prisma.financeCashflowForecastItem.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.direction !== undefined ? { direction: body.direction } : {}),
+        ...(body.date !== undefined ? { date: this.parseDateValue(body.date) } : {}),
+        ...(body.amount !== undefined ? { amount: new Prisma.Decimal(body.amount) } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
+        ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.profitCenterId !== undefined ? { profitCenterId: body.profitCenterId } : {})
+      },
+      include: { profitCenter: true }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.finance.cashflow_forecast.update', 'finance_cashflow_forecast_item', row.id, body, ip, userAgent);
+    return row;
+  }
+
   async agingReport(companyId: string, query: unknown) {
     const parsed = financeAgingQuerySchema.parse(query);
     const asOf = this.parseDateValue(parsed.asOf, true);
@@ -1214,6 +1457,205 @@ export class FinanceService {
       direction: parsed.direction,
       items: Array.from(grouped.values()).sort((a, b) => b.outstanding - a.outstanding),
       totalOutstanding: Array.from(grouped.values()).reduce((sum, row) => sum + row.outstanding, 0)
+    };
+  }
+
+  async budgetVsActualReport(companyId: string, query: unknown) {
+    const parsed = financeBudgetVsActualQuerySchema.parse(query);
+    const budget = await this.requireBudget(companyId, parsed.budgetId);
+    const range = this.reportRange(parsed.from, parsed.to);
+
+    if (range.from.getUTCFullYear() !== budget.year || range.to.getUTCFullYear() !== budget.year) {
+      throw new BadRequestException('Selected date range must be within budget year');
+    }
+
+    if (parsed.categoryId) await this.requireCategory(companyId, parsed.categoryId);
+    if (parsed.profitCenterId) await this.requireProfitCenter(companyId, parsed.profitCenterId);
+
+    const budgetLines = await this.prisma.financeBudgetLine.findMany({
+      where: {
+        companyId,
+        budgetId: budget.id,
+        ...(parsed.categoryId ? { categoryId: parsed.categoryId } : {}),
+        ...(parsed.profitCenterId ? { profitCenterId: parsed.profitCenterId } : {})
+      },
+      include: { category: true, profitCenter: true }
+    });
+
+    const entries = await this.prisma.financeEntry.findMany({
+      where: {
+        companyId,
+        date: { gte: range.from, lte: range.to },
+        ...(parsed.categoryId ? { categoryId: parsed.categoryId } : {}),
+        ...(parsed.profitCenterId ? { profitCenterId: parsed.profitCenterId } : {})
+      },
+      include: { category: true }
+    });
+
+    const monthly = new Map<
+      string,
+      {
+        month: string;
+        budgetIncome: number;
+        budgetExpense: number;
+        actualIncome: number;
+        actualExpense: number;
+      }
+    >();
+
+    for (let month = range.from.getUTCMonth() + 1; month <= range.to.getUTCMonth() + 1; month += 1) {
+      const key = `${budget.year}-${String(month).padStart(2, '0')}`;
+      monthly.set(key, { month: key, budgetIncome: 0, budgetExpense: 0, actualIncome: 0, actualExpense: 0 });
+    }
+
+    for (const line of budgetLines) {
+      const key = `${budget.year}-${String(line.month).padStart(2, '0')}`;
+      const bucket =
+        monthly.get(key) ??
+        (() => {
+          const seed = { month: key, budgetIncome: 0, budgetExpense: 0, actualIncome: 0, actualExpense: 0 };
+          monthly.set(key, seed);
+          return seed;
+        })();
+      if (line.direction === 'INCOME') bucket.budgetIncome += Number(line.amount);
+      else bucket.budgetExpense += Number(line.amount);
+    }
+
+    for (const entry of entries) {
+      const key = `${entry.date.getUTCFullYear()}-${String(entry.date.getUTCMonth() + 1).padStart(2, '0')}`;
+      const bucket =
+        monthly.get(key) ??
+        (() => {
+          const seed = { month: key, budgetIncome: 0, budgetExpense: 0, actualIncome: 0, actualExpense: 0 };
+          monthly.set(key, seed);
+          return seed;
+        })();
+      if (entry.category.type === 'INCOME') bucket.actualIncome += Number(entry.amount);
+      else bucket.actualExpense += Number(entry.amount);
+    }
+
+    const rows = Array.from(monthly.values())
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((row) => ({
+        ...row,
+        budgetNet: row.budgetIncome - row.budgetExpense,
+        actualNet: row.actualIncome - row.actualExpense,
+        variance: row.actualIncome - row.actualExpense - (row.budgetIncome - row.budgetExpense)
+      }));
+
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.budgetIncome += row.budgetIncome;
+        acc.budgetExpense += row.budgetExpense;
+        acc.actualIncome += row.actualIncome;
+        acc.actualExpense += row.actualExpense;
+        return acc;
+      },
+      { budgetIncome: 0, budgetExpense: 0, actualIncome: 0, actualExpense: 0 }
+    );
+
+    const budgetNet = totals.budgetIncome - totals.budgetExpense;
+    const actualNet = totals.actualIncome - totals.actualExpense;
+    const variance = actualNet - budgetNet;
+
+    return {
+      budget: { id: budget.id, name: budget.name, year: budget.year, currency: budget.currency },
+      filters: parsed,
+      totals: {
+        budgetIncome: totals.budgetIncome,
+        budgetExpense: totals.budgetExpense,
+        budgetNet,
+        actualIncome: totals.actualIncome,
+        actualExpense: totals.actualExpense,
+        actualNet,
+        variance,
+        variancePercent: budgetNet === 0 ? null : (variance / Math.abs(budgetNet)) * 100
+      },
+      byMonth: rows
+    };
+  }
+
+  async cashflowProjection(companyId: string, query: unknown) {
+    const parsed = financeCashflowProjectionQuerySchema.parse(query);
+    const range = this.reportRange(parsed.from, parsed.to);
+
+    const [invoices, recurringRules, manualForecasts] = await Promise.all([
+      this.prisma.financeInvoice.findMany({
+        where: {
+          companyId,
+          status: { in: ['ISSUED', 'PARTIALLY_PAID', 'PAID'] },
+          dueDate: { gte: range.from, lte: range.to }
+        },
+        include: { paymentAllocations: true }
+      }),
+      this.prisma.financeRecurringRule.findMany({
+        where: { companyId, isActive: true, nextRunAt: { lte: range.to } }
+      }),
+      this.prisma.financeCashflowForecastItem.findMany({
+        where: { companyId, date: { gte: range.from, lte: range.to } }
+      })
+    ]);
+
+    const buckets = new Map<string, { bucketStart: string; inflow: number; outflow: number; sources: Record<string, number> }>();
+    const ensureBucket = (date: Date) => {
+      const bucketStart = this.weekStart(date);
+      const key = bucketStart.toISOString().slice(0, 10);
+      if (!buckets.has(key)) {
+        buckets.set(key, { bucketStart: key, inflow: 0, outflow: 0, sources: { invoices: 0, recurring: 0, manual: 0 } });
+      }
+      return buckets.get(key)!;
+    };
+
+    for (const invoice of invoices) {
+      const allocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+      const outstanding = Math.max(0, Number(invoice.total) - allocated);
+      if (outstanding <= 0) continue;
+      const bucket = ensureBucket(invoice.dueDate);
+      if (invoice.direction === 'RECEIVABLE') bucket.inflow += outstanding;
+      else bucket.outflow += outstanding;
+      bucket.sources.invoices += outstanding;
+    }
+
+    for (const rule of recurringRules) {
+      const occurrences = this.recurringOccurrencesInRange(rule, range.from, range.to);
+      for (const at of occurrences) {
+        const amount = Number(rule.amount);
+        const bucket = ensureBucket(at);
+        if (rule.direction === 'INCOME') bucket.inflow += amount;
+        else bucket.outflow += amount;
+        bucket.sources.recurring += amount;
+      }
+    }
+
+    for (const row of manualForecasts) {
+      const bucket = ensureBucket(row.date);
+      const amount = Number(row.amount);
+      if (row.direction === 'INFLOW') bucket.inflow += amount;
+      else bucket.outflow += amount;
+      bucket.sources.manual += amount;
+    }
+
+    const rows = Array.from(buckets.values())
+      .sort((a, b) => a.bucketStart.localeCompare(b.bucketStart))
+      .map((row) => ({
+        ...row,
+        net: row.inflow - row.outflow
+      }));
+
+    return {
+      from: parsed.from,
+      to: parsed.to,
+      granularity: 'week',
+      totals: rows.reduce(
+        (acc, row) => {
+          acc.inflow += row.inflow;
+          acc.outflow += row.outflow;
+          acc.net += row.net;
+          return acc;
+        },
+        { inflow: 0, outflow: 0, net: 0 }
+      ),
+      buckets: rows
     };
   }
 
@@ -1928,6 +2370,30 @@ export class FinanceService {
     return row;
   }
 
+  private async requireBudget(companyId: string, id: string) {
+    const row = await this.prisma.financeBudget.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { lines: true } }
+      }
+    });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Budget not found');
+    }
+    return row;
+  }
+
+  private async requireCashflowForecastItem(companyId: string, id: string) {
+    const row = await this.prisma.financeCashflowForecastItem.findUnique({
+      where: { id },
+      include: { profitCenter: true }
+    });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Cashflow forecast item not found');
+    }
+    return row;
+  }
+
   private async assertNoProfitCenterCycle(companyId: string, currentId: string, nextParentId: string) {
     let cursor: string | null = nextParentId;
     while (cursor) {
@@ -1943,6 +2409,44 @@ export class FinanceService {
       }
       cursor = parent.parentId;
     }
+  }
+
+  private weekStart(date: Date) {
+    const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const day = utc.getUTCDay();
+    const diffToMonday = (day + 6) % 7;
+    utc.setUTCDate(utc.getUTCDate() - diffToMonday);
+    return utc;
+  }
+
+  private recurringOccurrencesInRange(rule: FinanceRecurringRule, from: Date, to: Date) {
+    const occurrences: Date[] = [];
+    let cursor = new Date(rule.nextRunAt);
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate()));
+    const limit = 400;
+    let guard = 0;
+
+    while (cursor <= to && guard < limit) {
+      if (cursor >= from) {
+        occurrences.push(new Date(cursor));
+      }
+
+      if (rule.frequency === 'WEEKLY') {
+        cursor.setUTCDate(cursor.getUTCDate() + 7);
+      } else {
+        const dayOfMonth = rule.dayOfMonth ?? cursor.getUTCDate();
+        const nextMonth = cursor.getUTCMonth() + 1;
+        const nextYear = cursor.getUTCFullYear() + Math.floor(nextMonth / 12);
+        const normalizedMonth = nextMonth % 12;
+        const lastDay = new Date(Date.UTC(nextYear, normalizedMonth + 1, 0)).getUTCDate();
+        const day = Math.min(dayOfMonth, lastDay);
+        cursor = new Date(Date.UTC(nextYear, normalizedMonth, day));
+      }
+
+      guard += 1;
+    }
+
+    return occurrences;
   }
 
   private assertAllocationRuleSources(sourceCategoryId?: string | null, sourceEntryId?: string | null) {

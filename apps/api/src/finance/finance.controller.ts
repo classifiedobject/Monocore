@@ -284,6 +284,94 @@ export class FinanceController {
     return this.finance.allocatePayment(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
   }
 
+  @Get('budgets')
+  @RequirePermissions('module:finance-core.budget.read')
+  listBudgets(@Req() req: Request & { companyId: string }) {
+    return this.finance.listBudgets(req.companyId);
+  }
+
+  @Post('budgets')
+  @RequirePermissions('module:finance-core.budget.manage')
+  createBudget(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createBudget(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('budgets/:id')
+  @RequirePermissions('module:finance-core.budget.read')
+  getBudget(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.finance.getBudget(req.companyId, id);
+  }
+
+  @Patch('budgets/:id')
+  @RequirePermissions('module:finance-core.budget.manage')
+  updateBudget(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateBudget(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('budgets/:id/duplicate')
+  @RequirePermissions('module:finance-core.budget.manage')
+  duplicateBudget(
+    @Param('id') id: string,
+    @Query('year') year: string | undefined,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.duplicateBudget(req.user.id, req.companyId, id, year, req.ip, req.get('user-agent'));
+  }
+
+  @Post('budgets/:id/activate')
+  @RequirePermissions('module:finance-core.budget.manage')
+  activateBudget(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.activateBudget(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('budgets/:id/deactivate')
+  @RequirePermissions('module:finance-core.budget.manage')
+  deactivateBudget(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.deactivateBudget(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('budgets/:id/lines')
+  @RequirePermissions('module:finance-core.budget.read')
+  listBudgetLines(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.finance.listBudgetLines(req.companyId, id);
+  }
+
+  @Post('budgets/:id/lines')
+  @RequirePermissions('module:finance-core.budget.manage')
+  upsertBudgetLines(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.upsertBudgetLines(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('cashflow-forecast-items')
+  @RequirePermissions('module:finance-core.reports.cashflow.read')
+  listCashflowForecastItems(@Req() req: Request & { companyId: string }) {
+    return this.finance.listCashflowForecastItems(req.companyId);
+  }
+
+  @Post('cashflow-forecast-items')
+  @RequirePermissions('module:finance-core.cashflow-forecast.manage')
+  createCashflowForecastItem(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createCashflowForecastItem(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('cashflow-forecast-items/:id')
+  @RequirePermissions('module:finance-core.cashflow-forecast.manage')
+  updateCashflowForecastItem(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateCashflowForecastItem(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
   @Get('recurring')
   @RequirePermissions('module:finance-core.entry.read')
   listRecurring(@Req() req: Request & { companyId: string }) {
@@ -358,5 +446,17 @@ export class FinanceController {
   @RequirePermissions('module:finance-core.payment.read')
   counterpartyBalance(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
     return this.finance.counterpartyBalanceReport(req.companyId, query);
+  }
+
+  @Get('reports/budget-vs-actual')
+  @RequirePermissions('module:finance-core.reports.budget.read')
+  budgetVsActual(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.budgetVsActualReport(req.companyId, query);
+  }
+
+  @Get('reports/cashflow-projection')
+  @RequirePermissions('module:finance-core.reports.cashflow.read')
+  cashflowProjection(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.cashflowProjection(req.companyId, query);
   }
 }

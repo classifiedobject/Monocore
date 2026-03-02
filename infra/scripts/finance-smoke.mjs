@@ -248,6 +248,57 @@ async function main() {
   );
   assert(aging?.totals?.total >= 400, 'Aging totals should include remaining receivable');
 
+  const currentYear = new Date().getUTCFullYear();
+  const budget = await request('/app-api/finance/budgets', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: `Smoke Budget ${currentYear} ${nonce}`,
+      year: currentYear,
+      currency: 'TRY'
+    })
+  }, auth);
+
+  const month = new Date().getUTCMonth() + 1;
+  await request(`/app-api/finance/budgets/${budget.id}/lines`, {
+    method: 'POST',
+    body: JSON.stringify({
+      lines: [
+        { month, direction: 'INCOME', amount: 2000 },
+        { month, direction: 'EXPENSE', amount: 500 }
+      ]
+    })
+  }, auth);
+
+  const budgetFrom = new Date(Date.UTC(currentYear, 0, 1)).toISOString().slice(0, 10);
+  const budgetTo = new Date(Date.UTC(currentYear, 11, 31)).toISOString().slice(0, 10);
+  const budgetVsActual = await request(
+    `/app-api/finance/reports/budget-vs-actual?budgetId=${budget.id}&from=${budgetFrom}&to=${budgetTo}`,
+    { method: 'GET' },
+    auth
+  );
+  assert(typeof budgetVsActual?.totals?.variance === 'number', 'Budget vs actual variance missing');
+
+  const forecastDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  await request('/app-api/finance/cashflow-forecast-items', {
+    method: 'POST',
+    body: JSON.stringify({
+      direction: 'INFLOW',
+      date: forecastDate,
+      amount: 300,
+      currency: 'TRY',
+      description: `Smoke manual forecast ${nonce}`
+    })
+  }, auth);
+
+  const projectionTo = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const projection = await request(
+    `/app-api/finance/reports/cashflow-projection?from=${new Date().toISOString().slice(0, 10)}&to=${projectionTo}`,
+    { method: 'GET' },
+    auth
+  );
+  assert(Array.isArray(projection?.buckets), 'Cashflow projection buckets missing');
+  assert(projection.buckets.some((bucket) => bucket.sources?.manual > 0), 'Cashflow projection should include manual forecast source');
+
   console.log(
     JSON.stringify(
       {
@@ -265,10 +316,13 @@ async function main() {
           allocationSourceEntryId: allocationSourceEntry.id,
           allocationGeneratedEntryIds: allocationResult.generatedEntries.map((item) => item.id),
           receivableInvoiceId: receivableInvoice.id,
-          incomingPaymentId: incomingPayment.id
+          incomingPaymentId: incomingPayment.id,
+          budgetId: budget.id
         },
         totals: pnl.totals,
-        profitCenterNet: profitCenterDetail?.totals?.net ?? null
+        profitCenterNet: profitCenterDetail?.totals?.net ?? null,
+        budgetVariance: budgetVsActual.totals.variance,
+        cashflowProjectionBuckets: projection.buckets.length
       },
       null,
       2

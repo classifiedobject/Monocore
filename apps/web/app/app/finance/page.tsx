@@ -155,6 +155,70 @@ type CounterpartyBalanceReport = {
   totalOutstanding: number;
 };
 
+type Budget = {
+  id: string;
+  name: string;
+  year: number;
+  currency: string;
+  isActive: boolean;
+  _count?: { lines: number };
+};
+
+type BudgetLine = {
+  id: string;
+  month: number;
+  direction: 'INCOME' | 'EXPENSE';
+  categoryId: string | null;
+  profitCenterId: string | null;
+  amount: string;
+  notes: string | null;
+};
+
+type BudgetVsActualReport = {
+  totals: {
+    budgetIncome: number;
+    budgetExpense: number;
+    budgetNet: number;
+    actualIncome: number;
+    actualExpense: number;
+    actualNet: number;
+    variance: number;
+    variancePercent: number | null;
+  };
+  byMonth: Array<{
+    month: string;
+    budgetIncome: number;
+    budgetExpense: number;
+    budgetNet: number;
+    actualIncome: number;
+    actualExpense: number;
+    actualNet: number;
+    variance: number;
+  }>;
+};
+
+type CashflowProjectionReport = {
+  totals: { inflow: number; outflow: number; net: number };
+  buckets: Array<{
+    bucketStart: string;
+    inflow: number;
+    outflow: number;
+    net: number;
+    sources: { invoices: number; recurring: number; manual: number };
+  }>;
+};
+
+type CashflowForecastItem = {
+  id: string;
+  direction: 'INFLOW' | 'OUTFLOW';
+  date: string;
+  amount: string;
+  currency: string;
+  description: string;
+  profitCenterId: string | null;
+  profitCenter: ProfitCenter | null;
+};
+
 type Capabilities = {
   manageCounterparty: boolean;
   manageAccount: boolean;
@@ -171,11 +235,16 @@ type Capabilities = {
   managePayment: boolean;
   readPayment: boolean;
   readAgingReport: boolean;
+  manageBudget: boolean;
+  readBudget: boolean;
+  readBudgetReports: boolean;
+  readCashflowProjection: boolean;
+  manageCashflowForecast: boolean;
   createEntry: boolean;
   deleteEntry: boolean;
 };
 
-type TabKey = 'entries' | 'counterparties' | 'accounts' | 'invoices' | 'payments' | 'profit-centers' | 'recurring' | 'allocation' | 'reports';
+type TabKey = 'entries' | 'counterparties' | 'accounts' | 'invoices' | 'payments' | 'profit-centers' | 'recurring' | 'allocation' | 'budgets' | 'reports';
 
 export default function FinancePage() {
   const [tab, setTab] = useState<TabKey>('entries');
@@ -206,6 +275,11 @@ export default function FinancePage() {
     managePayment: false,
     readPayment: false,
     readAgingReport: false,
+    manageBudget: false,
+    readBudget: false,
+    readBudgetReports: false,
+    readCashflowProjection: false,
+    manageCashflowForecast: false,
     createEntry: false,
     deleteEntry: false
   });
@@ -276,6 +350,22 @@ export default function FinancePage() {
   const [profitCenterDetail, setProfitCenterDetail] = useState<ProfitCenterPnlDetail | null>(null);
   const [agingReport, setAgingReport] = useState<AgingReport | null>(null);
   const [counterpartyBalanceReport, setCounterpartyBalanceReport] = useState<CounterpartyBalanceReport | null>(null);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [selectedBudgetId, setSelectedBudgetId] = useState('');
+  const [budgetYear, setBudgetYear] = useState(new Date().getFullYear());
+  const [budgetName, setBudgetName] = useState('');
+  const [budgetProfitCenterFilter, setBudgetProfitCenterFilter] = useState('');
+  const [budgetIncomeByMonth, setBudgetIncomeByMonth] = useState<Record<number, string>>({});
+  const [budgetExpenseByMonth, setBudgetExpenseByMonth] = useState<Record<number, string>>({});
+  const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
+  const [budgetVsActualReport, setBudgetVsActualReport] = useState<BudgetVsActualReport | null>(null);
+  const [cashflowProjectionReport, setCashflowProjectionReport] = useState<CashflowProjectionReport | null>(null);
+  const [cashflowForecastItems, setCashflowForecastItems] = useState<CashflowForecastItem[]>([]);
+  const [forecastDirection, setForecastDirection] = useState<'INFLOW' | 'OUTFLOW'>('INFLOW');
+  const [forecastDate, setForecastDate] = useState(today);
+  const [forecastAmount, setForecastAmount] = useState('');
+  const [forecastDescription, setForecastDescription] = useState('');
+  const [forecastProfitCenterId, setForecastProfitCenterId] = useState('');
 
   const [invoiceDirection, setInvoiceDirection] = useState<'PAYABLE' | 'RECEIVABLE'>('PAYABLE');
   const [invoiceCounterpartyId, setInvoiceCounterpartyId] = useState('');
@@ -423,6 +513,69 @@ export default function FinancePage() {
     }
   }
 
+  async function loadBudgets(caps?: Capabilities | null) {
+    try {
+      const canRead = Boolean(caps ? caps.readBudget || caps.manageBudget : capabilities.readBudget || capabilities.manageBudget);
+      if (!canRead) {
+        setBudgets([]);
+        setBudgetLines([]);
+        setBudgetVsActualReport(null);
+        setCashflowProjectionReport(null);
+        setCashflowForecastItems([]);
+        return;
+      }
+
+      const rows = (await apiFetch('/app-api/finance/budgets')) as Budget[];
+      setBudgets(rows);
+
+      const nextBudgetId = selectedBudgetId || rows[0]?.id || '';
+      if (nextBudgetId) {
+        if (nextBudgetId !== selectedBudgetId) setSelectedBudgetId(nextBudgetId);
+        await loadBudgetLines(nextBudgetId);
+      } else {
+        setBudgetLines([]);
+      }
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function loadBudgetLines(budgetId: string) {
+    try {
+      const rows = (await apiFetch(`/app-api/finance/budgets/${budgetId}/lines`)) as BudgetLine[];
+      setBudgetLines(rows);
+      const income: Record<number, string> = {};
+      const expense: Record<number, string> = {};
+      for (let month = 1; month <= 12; month += 1) {
+        const incomeLine = rows.find((line) => line.month === month && line.direction === 'INCOME' && !line.categoryId && !line.profitCenterId);
+        const expenseLine = rows.find((line) => line.month === month && line.direction === 'EXPENSE' && !line.categoryId && !line.profitCenterId);
+        income[month] = incomeLine ? String(incomeLine.amount) : '';
+        expense[month] = expenseLine ? String(expenseLine.amount) : '';
+      }
+      setBudgetIncomeByMonth(income);
+      setBudgetExpenseByMonth(expense);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function loadCashflowForecastItems(caps?: Capabilities | null) {
+    try {
+      const canRead = Boolean(
+        caps ? caps.readCashflowProjection || caps.manageCashflowForecast : capabilities.readCashflowProjection || capabilities.manageCashflowForecast
+      );
+      if (!canRead) {
+        setCashflowForecastItems([]);
+        return;
+      }
+
+      const rows = (await apiFetch('/app-api/finance/cashflow-forecast-items')) as CashflowForecastItem[];
+      setCashflowForecastItems(rows);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       const caps = await loadCapabilities();
@@ -431,6 +584,8 @@ export default function FinancePage() {
       await loadRecurring();
       if (caps?.readInvoice || caps?.manageInvoice) await loadInvoices(caps);
       if (caps?.readPayment || caps?.managePayment) await loadPayments(caps);
+      if (caps?.readBudget || caps?.manageBudget) await loadBudgets(caps);
+      if (caps?.readCashflowProjection || caps?.manageCashflowForecast) await loadCashflowForecastItems(caps);
       if (caps?.readAllocation || caps?.manageAllocation || caps?.applyAllocation) {
         const [rules, batches] = await Promise.all([
           apiFetch('/app-api/finance/allocation-rules') as Promise<AllocationRule[]>,
@@ -842,6 +997,116 @@ export default function FinancePage() {
     }
   }
 
+  async function createBudget(e: FormEvent) {
+    e.preventDefault();
+    try {
+      const budget = (await apiFetch('/app-api/finance/budgets', {
+        method: 'POST',
+        body: JSON.stringify({ name: budgetName, year: Number(budgetYear), currency: 'TRY' })
+      })) as Budget;
+      setBudgetName('');
+      setSelectedBudgetId(budget.id);
+      await loadBudgets();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function saveBudgetLines(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedBudgetId) {
+      window.alert('Select a budget first');
+      return;
+    }
+
+    try {
+      const lines: Array<{ month: number; direction: 'INCOME' | 'EXPENSE'; amount: number; categoryId: null; profitCenterId: string | null }> = [];
+      for (let month = 1; month <= 12; month += 1) {
+        const income = Number(budgetIncomeByMonth[month] || 0);
+        const expense = Number(budgetExpenseByMonth[month] || 0);
+        if (income > 0) {
+          lines.push({
+            month,
+            direction: 'INCOME',
+            amount: income,
+            categoryId: null,
+            profitCenterId: budgetProfitCenterFilter || null
+          });
+        }
+        if (expense > 0) {
+          lines.push({
+            month,
+            direction: 'EXPENSE',
+            amount: expense,
+            categoryId: null,
+            profitCenterId: budgetProfitCenterFilter || null
+          });
+        }
+      }
+
+      if (!lines.length) {
+        window.alert('Enter at least one monthly amount');
+        return;
+      }
+
+      await apiFetch(`/app-api/finance/budgets/${selectedBudgetId}/lines`, {
+        method: 'POST',
+        body: JSON.stringify({ lines })
+      });
+      await loadBudgetLines(selectedBudgetId);
+      await loadReports();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function activateBudget(id: string, active: boolean) {
+    try {
+      await apiFetch(`/app-api/finance/budgets/${id}/${active ? 'deactivate' : 'activate'}`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      await loadBudgets();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function duplicateBudget(id: string, year: number) {
+    try {
+      await apiFetch(`/app-api/finance/budgets/${id}/duplicate?year=${year}`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      await loadBudgets();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function createForecastItem(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await apiFetch('/app-api/finance/cashflow-forecast-items', {
+        method: 'POST',
+        body: JSON.stringify({
+          direction: forecastDirection,
+          date: forecastDate,
+          amount: Number(forecastAmount),
+          currency: 'TRY',
+          description: forecastDescription,
+          profitCenterId: forecastProfitCenterId || null
+        })
+      });
+      setForecastAmount('');
+      setForecastDescription('');
+      setForecastProfitCenterId('');
+      await Promise.all([loadCashflowForecastItems(), loadReports()]);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
   async function loadReports(e?: FormEvent) {
     e?.preventDefault();
     try {
@@ -879,6 +1144,26 @@ export default function FinancePage() {
       } else {
         setAgingReport(null);
         setCounterpartyBalanceReport(null);
+      }
+
+      if (capabilities.readBudgetReports && selectedBudgetId) {
+        const budgetRows = (await apiFetch(
+          `/app-api/finance/reports/budget-vs-actual?budgetId=${selectedBudgetId}&from=${reportFrom}&to=${reportTo}${
+            budgetProfitCenterFilter ? `&profitCenterId=${budgetProfitCenterFilter}` : ''
+          }`
+        )) as BudgetVsActualReport;
+        setBudgetVsActualReport(budgetRows);
+      } else {
+        setBudgetVsActualReport(null);
+      }
+
+      if (capabilities.readCashflowProjection) {
+        const projection = (await apiFetch(
+          `/app-api/finance/reports/cashflow-projection?from=${reportFrom}&to=${reportTo}`
+        )) as CashflowProjectionReport;
+        setCashflowProjectionReport(projection);
+      } else {
+        setCashflowProjectionReport(null);
       }
       setProfitCenterDetail(null);
     } catch (error) {
@@ -942,6 +1227,7 @@ export default function FinancePage() {
           ['profit-centers', 'Profit Centers'],
           ['recurring', 'Recurring'],
           ['allocation', 'Allocation'],
+          ['budgets', 'Budgets'],
           ['reports', 'Reports']
         ] as Array<[TabKey, string]>).map(([key, label]) => (
           <button
@@ -1644,17 +1930,190 @@ export default function FinancePage() {
         </div>
       ) : null}
 
+      {tab === 'budgets' ? (
+        <div className="space-y-4">
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">Budgets</h2>
+            {capabilities.manageBudget ? (
+              <form className="grid gap-2 md:grid-cols-4" onSubmit={createBudget}>
+                <input
+                  className="rounded border p-2"
+                  placeholder="Budget name"
+                  value={budgetName}
+                  onChange={(e) => setBudgetName(e.target.value)}
+                  required
+                />
+                <input className="rounded border p-2" type="number" value={budgetYear} onChange={(e) => setBudgetYear(Number(e.target.value))} min={2000} max={2100} />
+                <select className="rounded border p-2" value={selectedBudgetId} onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedBudgetId(id);
+                  if (id) void loadBudgetLines(id);
+                }}>
+                  <option value="">Select budget</option>
+                  {budgets.map((budget) => (
+                    <option key={budget.id} value={budget.id}>
+                      {budget.name} ({budget.year}) {budget.isActive ? '• active' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white">Create Budget</button>
+              </form>
+            ) : (
+              <div className="grid gap-2 md:grid-cols-2">
+                <select className="rounded border p-2" value={selectedBudgetId} onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedBudgetId(id);
+                  if (id) void loadBudgetLines(id);
+                }}>
+                  <option value="">Select budget</option>
+                  {budgets.map((budget) => (
+                    <option key={budget.id} value={budget.id}>
+                      {budget.name} ({budget.year}) {budget.isActive ? '• active' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </article>
+
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold">Monthly Budget Grid</h3>
+              <select className="rounded border p-2 text-sm" value={budgetProfitCenterFilter} onChange={(e) => setBudgetProfitCenterFilter(e.target.value)}>
+                <option value="">All profit centers</option>
+                {profitCenters.filter((p) => p.isActive).map((pc) => (
+                  <option key={pc.id} value={pc.id}>{pc.name}</option>
+                ))}
+              </select>
+              {selectedBudgetId && capabilities.manageBudget ? (
+                <>
+                  <button
+                    className="rounded bg-slate-900 px-3 py-2 text-xs text-white"
+                    onClick={() => {
+                      const selected = budgets.find((budget) => budget.id === selectedBudgetId);
+                      if (selected) void activateBudget(selected.id, selected.isActive);
+                    }}
+                  >
+                    {budgets.find((budget) => budget.id === selectedBudgetId)?.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button
+                    className="rounded bg-slate-700 px-3 py-2 text-xs text-white"
+                    onClick={() => {
+                      const selected = budgets.find((budget) => budget.id === selectedBudgetId);
+                      if (selected) void duplicateBudget(selected.id, selected.year + 1);
+                    }}
+                  >
+                    Duplicate +1 Year
+                  </button>
+                </>
+              ) : null}
+            </div>
+            <form onSubmit={saveBudgetLines}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-2">Month</th>
+                      <th className="py-2">Income Budget</th>
+                      <th className="py-2">Expense Budget</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 12 }).map((_, index) => {
+                      const month = index + 1;
+                      return (
+                        <tr key={month} className="border-b border-slate-100">
+                          <td className="py-2">{String(month).padStart(2, '0')}</td>
+                          <td className="py-2">
+                            <input
+                              className="w-full rounded border p-2"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              disabled={!capabilities.manageBudget || !selectedBudgetId}
+                              value={budgetIncomeByMonth[month] ?? ''}
+                              onChange={(e) => setBudgetIncomeByMonth((prev) => ({ ...prev, [month]: e.target.value }))}
+                            />
+                          </td>
+                          <td className="py-2">
+                            <input
+                              className="w-full rounded border p-2"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              disabled={!capabilities.manageBudget || !selectedBudgetId}
+                              value={budgetExpenseByMonth[month] ?? ''}
+                              onChange={(e) => setBudgetExpenseByMonth((prev) => ({ ...prev, [month]: e.target.value }))}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {capabilities.manageBudget ? (
+                <button className="mt-3 rounded bg-mono-500 px-3 py-2 text-sm text-white" disabled={!selectedBudgetId}>
+                  Save Monthly Budget
+                </button>
+              ) : null}
+            </form>
+            {selectedBudgetId ? (
+              <p className="mt-3 text-xs text-slate-500">Saved lines: {budgetLines.length}</p>
+            ) : null}
+          </article>
+
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-2 text-base font-semibold">Manual Cashflow Forecast Items</h3>
+            {capabilities.manageCashflowForecast ? (
+              <form className="grid gap-2 md:grid-cols-5" onSubmit={createForecastItem}>
+                <select className="rounded border p-2" value={forecastDirection} onChange={(e) => setForecastDirection(e.target.value as 'INFLOW' | 'OUTFLOW')}>
+                  <option value="INFLOW">Inflow</option>
+                  <option value="OUTFLOW">Outflow</option>
+                </select>
+                <input className="rounded border p-2" type="date" value={forecastDate} onChange={(e) => setForecastDate(e.target.value)} required />
+                <input className="rounded border p-2" type="number" step="0.01" min="0" placeholder="Amount" value={forecastAmount} onChange={(e) => setForecastAmount(e.target.value)} required />
+                <input className="rounded border p-2" placeholder="Description" value={forecastDescription} onChange={(e) => setForecastDescription(e.target.value)} required />
+                <select className="rounded border p-2" value={forecastProfitCenterId} onChange={(e) => setForecastProfitCenterId(e.target.value)}>
+                  <option value="">Profit center (optional)</option>
+                  {profitCenters.filter((p) => p.isActive).map((pc) => (
+                    <option key={pc.id} value={pc.id}>{pc.name}</option>
+                  ))}
+                </select>
+                <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white md:col-span-5">Add Forecast Item</button>
+              </form>
+            ) : null}
+            <div className="mt-3 space-y-1 text-sm">
+              {cashflowForecastItems.map((item) => (
+                <div key={item.id} className="rounded border border-slate-200 px-3 py-2">
+                  {item.date.slice(0, 10)} | {item.direction} | {Number(item.amount).toFixed(2)} | {item.description}
+                  {item.profitCenter ? ` | ${item.profitCenter.name}` : ''}
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
+      ) : null}
+
       {tab === 'reports' ? (
         <div className="space-y-4">
           <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold">Reports</h2>
             {capabilities.readReports || capabilities.readProfitCenterReports || capabilities.readAgingReport ? (
-              <form className="grid gap-2 md:grid-cols-5" onSubmit={loadReports}>
+              <form className="grid gap-2 md:grid-cols-6" onSubmit={loadReports}>
                 <input className="rounded border p-2" type="date" value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} required />
                 <input className="rounded border p-2" type="date" value={reportTo} onChange={(e) => setReportTo(e.target.value)} required />
                 <select className="rounded border p-2" value={reportAccountId} onChange={(e) => setReportAccountId(e.target.value)}>
                   <option value="">All accounts</option>
                   {accounts.map((acc) => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+                </select>
+                <select className="rounded border p-2" value={selectedBudgetId} onChange={(e) => setSelectedBudgetId(e.target.value)}>
+                  <option value="">Budget (optional)</option>
+                  {budgets.map((budget) => (
+                    <option key={budget.id} value={budget.id}>
+                      {budget.name} ({budget.year})
+                    </option>
+                  ))}
                 </select>
                 <select className="rounded border p-2" value={reportAgingDirection} onChange={(e) => setReportAgingDirection(e.target.value as 'PAYABLE' | 'RECEIVABLE')}>
                   <option value="RECEIVABLE">Aging Receivable</option>
@@ -1679,6 +2138,57 @@ export default function FinancePage() {
                 {cashflowReport.groupedByAccount.map((row) => (
                   <div key={row.accountId ?? 'unassigned'} className="rounded border border-slate-200 px-3 py-2">
                     {row.accountName}: income {row.income.toFixed(2)} | expense {row.expense.toFixed(2)} | net {row.net.toFixed(2)}
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
+          {budgetVsActualReport ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Budget vs Actual</h3>
+              <p className="mb-2 text-sm">
+                Budget Net: {budgetVsActualReport.totals.budgetNet.toFixed(2)} | Actual Net: {budgetVsActualReport.totals.actualNet.toFixed(2)} |
+                Variance: {budgetVsActualReport.totals.variance.toFixed(2)}
+                {budgetVsActualReport.totals.variancePercent !== null ? ` (${budgetVsActualReport.totals.variancePercent.toFixed(2)}%)` : ''}
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-2">Month</th>
+                      <th className="py-2">Budget Net</th>
+                      <th className="py-2">Actual Net</th>
+                      <th className="py-2">Variance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {budgetVsActualReport.byMonth.map((row) => (
+                      <tr key={row.month} className="border-b border-slate-100">
+                        <td className="py-2">{row.month}</td>
+                        <td className="py-2">{row.budgetNet.toFixed(2)}</td>
+                        <td className="py-2">{row.actualNet.toFixed(2)}</td>
+                        <td className={`py-2 ${row.variance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{row.variance.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          ) : null}
+
+          {cashflowProjectionReport ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Cashflow Projection (Weekly)</h3>
+              <p className="mb-2 text-sm">
+                Inflow: {cashflowProjectionReport.totals.inflow.toFixed(2)} | Outflow: {cashflowProjectionReport.totals.outflow.toFixed(2)} | Net:{' '}
+                {cashflowProjectionReport.totals.net.toFixed(2)}
+              </p>
+              <div className="space-y-1 text-sm">
+                {cashflowProjectionReport.buckets.map((bucket) => (
+                  <div key={bucket.bucketStart} className="rounded border border-slate-200 px-3 py-2">
+                    {bucket.bucketStart} | in {bucket.inflow.toFixed(2)} | out {bucket.outflow.toFixed(2)} | net {bucket.net.toFixed(2)} | src
+                    (inv {bucket.sources.invoices.toFixed(2)}, rec {bucket.sources.recurring.toFixed(2)}, man {bucket.sources.manual.toFixed(2)})
                   </div>
                 ))}
               </div>
