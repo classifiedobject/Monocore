@@ -44,7 +44,10 @@ const companyPermissions = [
   'module:finance-core.reports.read',
   'module:finance-core.profit-center.manage',
   'module:finance-core.profit-center.read',
-  'module:finance-core.reports.profit-center.read'
+  'module:finance-core.reports.profit-center.read',
+  'module:finance-core.allocation.manage',
+  'module:finance-core.allocation.apply',
+  'module:finance-core.allocation.read'
 ];
 
 async function upsertPlatformRole() {

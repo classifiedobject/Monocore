@@ -81,6 +81,9 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `FinanceCounterparty`
   - `FinanceAccount`
   - `FinanceProfitCenter`
+  - `FinanceAllocationRule`
+  - `FinanceAllocationTarget`
+  - `FinanceAllocationBatch`
   - `FinanceRecurringRule`
   - `FinanceEntry`
 - App API endpoints (all gated behind module installation + tenant RBAC):
@@ -89,8 +92,11 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `/app-api/finance/accounts`
   - `/app-api/finance/entries`
   - `/app-api/finance/recurring`
+  - `/app-api/finance/allocation-rules`
+  - `/app-api/finance/allocation-batches`
   - `/app-api/finance/reports/pnl`
   - `/app-api/finance/reports/cashflow`
+  - `/app-api/finance/reports/pnl-by-profit-center`
 - Recurring runs:
   - Manual per rule: `POST /app-api/finance/recurring/:id/run-now`
   - Batch due run: `POST /app-api/finance/recurring/run-due`
@@ -100,6 +106,11 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Create hierarchical centers such as `Vestiyer`, `Vale`, `Event`, `Department`.
   - Assign optional `profitCenterId` on each finance entry.
   - Profit center P&L report includes an `Unassigned` bucket for entries without center.
+- Cost Allocation Engine (percentage, v0):
+  - Create allocation rules with targets that total `%100`.
+  - Apply a rule on one expense entry via `POST /app-api/finance/allocation-rules/:id/apply`.
+  - System creates generated entries per target profit center and keeps original source entry unchanged.
+  - Same source entry cannot be allocated twice; income entries cannot be allocated.
 
 ## i18n Foundation
 - Language keys stored in `LanguagePack` table (`locale`, `namespace`, `key`, `value`).
