@@ -78,6 +78,20 @@ enum FinancePaymentDirection {
   INCOMING
 }
 
+enum InventoryMovementType {
+  IN
+  OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  POSTED
+  VOID
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -101,6 +115,8 @@ model User {
   financeAllocationBatchesCreated FinanceAllocationBatch[] @relation("finance_allocation_batch_creator")
   financeInvoicesCreated FinanceInvoice[] @relation("finance_invoice_creator")
   financePaymentsCreated FinancePayment[] @relation("finance_payment_creator")
+  inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
+  salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
 }
 
 model Session {
@@ -193,6 +209,14 @@ model Company {
   financeInvoices FinanceInvoice[]
   financePayments FinancePayment[]
   financePaymentAllocations FinancePaymentAllocation[]
+  inventoryWarehouses InventoryWarehouse[]
+  inventoryItems InventoryItem[]
+  inventoryStockMovements InventoryStockMovement[]
+  salesProducts   SalesProduct[]
+  recipes         Recipe[]
+  recipeLines     RecipeLine[]
+  salesOrders     SalesOrder[]
+  salesOrderLines SalesOrderLine[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -465,6 +489,8 @@ model FinanceEntry {
   isAllocationGenerated Boolean @default(false)
   invoiceId       String?
   paymentId       String?
+  relatedDocumentType String?
+  relatedDocumentId   String?
   amount          Decimal   @db.Decimal(14, 2)
   date            DateTime
   description     String?
@@ -491,6 +517,7 @@ model FinanceEntry {
   @@index([companyId, profitCenterId, date])
   @@index([companyId, invoiceId])
   @@index([companyId, paymentId])
+  @@index([companyId, relatedDocumentType, relatedDocumentId])
 }
 
 model FinanceCounterparty {
@@ -574,6 +601,7 @@ model FinanceProfitCenter {
   parent    FinanceProfitCenter? @relation("finance_profit_center_tree", fields: [parentId], references: [id], onDelete: SetNull)
   children  FinanceProfitCenter[] @relation("finance_profit_center_tree")
   entries   FinanceEntry[]
+  salesOrders SalesOrder[]
   allocationTargets FinanceAllocationTarget[]
 
   @@index([companyId, isActive])
@@ -712,4 +740,157 @@ model FinancePaymentAllocation {
 
   @@index([companyId, paymentId])
   @@index([companyId, invoiceId])
+}
+
+model InventoryWarehouse {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  location  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements InventoryStockMovement[]
+  salesOrders SalesOrder[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+}
+
+model InventoryItem {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  sku       String?
+  unit      String
+  lastPurchaseUnitCost Decimal? @db.Decimal(14, 4)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements InventoryStockMovement[]
+  recipeLines RecipeLine[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, isActive])
+  @@index([companyId, name])
+}
+
+model InventoryStockMovement {
+  id                  String   @id @default(uuid())
+  companyId           String
+  itemId              String
+  warehouseId         String
+  type                InventoryMovementType
+  quantity            Decimal  @db.Decimal(14, 4)
+  reference           String?
+  relatedDocumentType String?
+  relatedDocumentId   String?
+  createdByUserId     String
+  createdAt           DateTime @default(now())
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  item                InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  warehouse           InventoryWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdByUser       User @relation("inventory_movement_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, itemId])
+  @@index([companyId, warehouseId])
+  @@index([companyId, itemId, warehouseId])
+  @@index([companyId, createdAt])
+}
+
+model SalesProduct {
+  id         String   @id @default(uuid())
+  companyId  String
+  name       String
+  sku        String?
+  salesPrice Decimal? @db.Decimal(14, 2)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  recipe     Recipe?
+  lines      SalesOrderLine[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, isActive])
+}
+
+model Recipe {
+  id            String   @id @default(uuid())
+  companyId     String
+  productId     String
+  name          String?
+  yieldQuantity Decimal  @default(1) @db.Decimal(14, 4)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product       SalesProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  lines         RecipeLine[]
+
+  @@unique([companyId, productId])
+  @@unique([productId])
+  @@index([companyId, productId])
+}
+
+model RecipeLine {
+  id        String   @id @default(uuid())
+  companyId String
+  recipeId  String
+  itemId    String
+  quantity  Decimal  @db.Decimal(14, 4)
+  unit      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, recipeId])
+  @@index([companyId, itemId])
+}
+
+model SalesOrder {
+  id            String   @id @default(uuid())
+  companyId     String
+  orderNo       String?
+  orderDate     DateTime
+  profitCenterId String?
+  warehouseId   String?
+  status        SalesOrderStatus @default(DRAFT)
+  currency      String   @default("TRY")
+  totalRevenue  Decimal  @default(0) @db.Decimal(14, 2)
+  totalCogs     Decimal  @default(0) @db.Decimal(14, 2)
+  notes         String?
+  createdByUserId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  profitCenter  FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
+  warehouse     InventoryWarehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  createdByUser User @relation("sales_order_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  lines         SalesOrderLine[]
+
+  @@index([companyId, status, orderDate])
+  @@index([companyId, profitCenterId])
+  @@index([companyId, warehouseId])
+}
+
+model SalesOrderLine {
+  id           String   @id @default(uuid())
+  companyId    String
+  salesOrderId String
+  productId    String
+  quantity     Decimal  @db.Decimal(14, 4)
+  unitPrice    Decimal  @db.Decimal(14, 2)
+  lineTotal    Decimal  @db.Decimal(14, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  product      SalesProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, salesOrderId])
+  @@index([companyId, productId])
 }

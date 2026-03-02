@@ -17,6 +17,12 @@ import { CompanyRbacGuard } from './common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from './common/guards/module-installed.guard.js';
 import { FinanceController } from './finance/finance.controller.js';
 import { FinanceService } from './finance/finance.service.js';
+import { InventoryController } from './inventory/inventory.controller.js';
+import { InventoryService } from './inventory/inventory.service.js';
+import { RecipeController } from './recipe/recipe.controller.js';
+import { RecipeService } from './recipe/recipe.service.js';
+import { SalesController } from './sales/sales.controller.js';
+import { SalesService } from './sales/sales.service.js';
 import { HealthController } from './health.controller.js';
 
 @Module({
@@ -28,7 +34,17 @@ import { HealthController } from './health.controller.js';
       }
     ])
   ],
-  controllers: [AuthController, PlatformController, PlatformInviteAcceptController, AppApiController, FinanceController, HealthController],
+  controllers: [
+    AuthController,
+    PlatformController,
+    PlatformInviteAcceptController,
+    AppApiController,
+    FinanceController,
+    InventoryController,
+    RecipeController,
+    SalesController,
+    HealthController
+  ],
   providers: [
     PrismaService,
     SessionService,
@@ -36,6 +52,9 @@ import { HealthController } from './health.controller.js';
     PlatformService,
     AppApiService,
     FinanceService,
+    InventoryService,
+    RecipeService,
+    SalesService,
     AuditService,
     RedisService,
     AuthGuard,

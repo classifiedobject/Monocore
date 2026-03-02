@@ -70,6 +70,8 @@ export const financeEntrySchema = z.object({
   profitCenterId: z.string().uuid().nullable().optional(),
   invoiceId: z.string().uuid().nullable().optional(),
   paymentId: z.string().uuid().nullable().optional(),
+  relatedDocumentType: z.string().max(80).nullable().optional(),
+  relatedDocumentId: z.string().max(120).nullable().optional(),
   reference: z.string().max(120).nullable().optional(),
   amount: z.coerce.number().positive(),
   date: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
@@ -200,6 +202,97 @@ export const financeAgingQuerySchema = z.object({
 
 export const financeCounterpartyBalanceQuerySchema = z.object({
   direction: z.enum(['PAYABLE', 'RECEIVABLE'])
+});
+
+export const inventoryWarehouseSchema = z.object({
+  name: z.string().min(2).max(140),
+  location: z.string().max(300).nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const inventoryItemSchema = z.object({
+  name: z.string().min(2).max(160),
+  sku: z.string().max(80).nullable().optional(),
+  unit: z.string().min(1).max(20),
+  lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const inventoryItemCostSchema = z.object({
+  lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable()
+});
+
+export const inventoryMovementSchema = z.object({
+  itemId: z.string().uuid(),
+  warehouseId: z.string().uuid(),
+  type: z.enum(['IN', 'OUT', 'ADJUSTMENT']),
+  quantity: z.coerce.number().refine((value) => value !== 0, 'Quantity cannot be zero'),
+  reference: z.string().max(120).nullable().optional(),
+  relatedDocumentType: z.enum(['purchase', 'sale', 'manual', 'transfer']).nullable().optional(),
+  relatedDocumentId: z.string().max(120).nullable().optional()
+});
+
+export const inventoryTransferSchema = z.object({
+  itemId: z.string().uuid(),
+  fromWarehouseId: z.string().uuid(),
+  toWarehouseId: z.string().uuid(),
+  quantity: z.coerce.number().positive(),
+  reference: z.string().max(120).nullable().optional()
+});
+
+export const inventoryMovementQuerySchema = z.object({
+  itemId: z.string().uuid().optional(),
+  warehouseId: z.string().uuid().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+export const inventoryStockBalanceQuerySchema = z.object({
+  itemId: z.string().uuid().optional(),
+  warehouseId: z.string().uuid().optional()
+});
+
+export const salesProductSchema = z.object({
+  name: z.string().min(2).max(160),
+  sku: z.string().max(80).nullable().optional(),
+  salesPrice: z.coerce.number().nonnegative().nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const recipeLineSchema = z.object({
+  itemId: z.string().uuid(),
+  quantity: z.coerce.number().positive(),
+  unit: z.string().max(30).nullable().optional()
+});
+
+export const recipeSchema = z.object({
+  productId: z.string().uuid(),
+  name: z.string().max(160).nullable().optional(),
+  yieldQuantity: z.coerce.number().positive().default(1),
+  lines: z.array(recipeLineSchema).min(1)
+});
+
+export const salesOrderLineSchema = z.object({
+  productId: z.string().uuid(),
+  quantity: z.coerce.number().positive(),
+  unitPrice: z.coerce.number().nonnegative()
+});
+
+export const salesOrderSchema = z.object({
+  orderNo: z.string().max(80).nullable().optional(),
+  orderDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  profitCenterId: z.string().uuid().nullable().optional(),
+  warehouseId: z.string().uuid().nullable().optional(),
+  currency: z.string().min(3).max(8).default('TRY'),
+  notes: z.string().max(1000).nullable().optional(),
+  lines: z.array(salesOrderLineSchema).min(1)
+});
+
+export const salesOrderQuerySchema = z.object({
+  status: z.enum(['DRAFT', 'POSTED', 'VOID']).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  profitCenterId: z.string().uuid().optional()
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),

@@ -126,6 +126,53 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Aging report (`current`, `1-30`, `31-60`, `61-90`, `90+`) and counterparty outstanding balance list.
   - Fits cari flow: alacak/verecek takibi by counterparty with due-date buckets.
 
+## Inventory Core
+- Module key: `inventory-core`.
+- Tenant-owned entities:
+  - `InventoryWarehouse`
+  - `InventoryItem`
+  - `InventoryStockMovement`
+- App API endpoints (module installation + tenant RBAC enforced):
+  - `/app-api/inventory/capabilities`
+  - `/app-api/inventory/warehouses`
+  - `/app-api/inventory/items`
+  - `/app-api/inventory/movements`
+  - `/app-api/inventory/transfer`
+  - `/app-api/inventory/stock-balance`
+- Rules:
+  - Strict negative stock protection for `OUT` and `TRANSFER_OUT` operations.
+  - Transfer creates two linked movements (`TRANSFER_OUT` + `TRANSFER_IN`).
+  - Stock balance is derived from movement sums by item+warehouse.
+- UI route:
+  - `/app/inventory` with tabs: Items, Warehouses, Stock, Movements.
+- Smoke flow:
+  - `pnpm inventory:smoke` creates A/B warehouses + one item, stocks in 100, transfers 40, verifies `A=60`, `B=40`.
+
+## Recipe + Sales Core
+- Module keys:
+  - `recipe-core` for product + BOM management.
+  - `sales-core` for sales ledger posting.
+- Tenant-owned entities:
+  - `SalesProduct`
+  - `Recipe`
+  - `RecipeLine`
+  - `SalesOrder`
+  - `SalesOrderLine`
+- Posting flow:
+  - Sales post requires recipe for each product.
+  - Consumes ingredient stock from selected warehouse (`InventoryStockMovement` with `relatedDocumentType="sale"`).
+  - Computes COGS using `InventoryItem.lastPurchaseUnitCost` (v1 simple cost model).
+  - Creates finance entries linked to sales order:
+    - `Sales Revenue` (income)
+    - `COGS` (expense)
+  - Optional `profitCenterId` is forwarded to generated finance entries.
+- Endpoints:
+  - Recipe: `/app-api/recipes/products`, `/app-api/recipes/recipes`
+  - Sales: `/app-api/sales/orders`, `/app-api/sales/orders/:id/post`, `/app-api/sales/orders/:id/void`
+  - Inventory cost edit: `/app-api/inventory/items/:id/cost`
+- Smoke flow:
+  - `pnpm sales:smoke` validates: item cost=10, recipe consumption 2/unit, order 3x50, stock 100->94, revenue=150, cogs=60.
+
 ## i18n Foundation
 - Language keys stored in `LanguagePack` table (`locale`, `namespace`, `key`, `value`).
 - Platform UI page `/platform/i18n` supports editing translations for `en` and `tr`.
@@ -139,3 +186,5 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 6. Platform tenant/module/i18n management (`/platform/tenants`, `/platform/modules`, `/platform/i18n`)
 7. Invite lifecycle (`/platform-api/invites/*`, `/app-api/invites/*`, `/auth/accept-invite`)
 8. Finance smoke flow (`pnpm finance:smoke`)
+9. Inventory smoke flow (`pnpm inventory:smoke`)
+10. Sales/Recipe smoke flow (`pnpm sales:smoke`)
