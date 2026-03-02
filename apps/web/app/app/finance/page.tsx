@@ -106,6 +106,55 @@ type AllocationBatch = {
   generatedEntries: Array<{ id: string; amount: string; profitCenter: ProfitCenter | null }>;
 };
 
+type InvoiceLine = {
+  id?: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  taxRate: string;
+};
+
+type Invoice = {
+  id: string;
+  direction: 'PAYABLE' | 'RECEIVABLE';
+  invoiceNo: string;
+  issueDate: string;
+  dueDate: string;
+  status: 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'VOID';
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+  counterpartyId: string;
+  counterparty: Counterparty;
+  lines: Array<{ id: string; description: string; quantity: string; unitPrice: string; taxRate: string | null; lineTotal: string }>;
+  paymentAllocations: Array<{ id: string; amount: string; paymentId: string }>;
+};
+
+type Payment = {
+  id: string;
+  direction: 'OUTGOING' | 'INCOMING';
+  paymentDate: string;
+  amount: string;
+  counterpartyId: string;
+  counterparty: Counterparty;
+  account: Account | null;
+  allocations: Array<{ id: string; invoiceId: string; amount: string }>;
+};
+
+type AgingReport = {
+  totals: { current: number; b1_30: number; b31_60: number; b61_90: number; b90_plus: number; total: number };
+  items: Array<{
+    counterpartyId: string;
+    counterpartyName: string;
+    buckets: { current: number; b1_30: number; b31_60: number; b61_90: number; b90_plus: number; total: number };
+  }>;
+};
+
+type CounterpartyBalanceReport = {
+  items: Array<{ counterpartyId: string; counterpartyName: string; outstanding: number; invoiceCount: number }>;
+  totalOutstanding: number;
+};
+
 type Capabilities = {
   manageCounterparty: boolean;
   manageAccount: boolean;
@@ -117,11 +166,16 @@ type Capabilities = {
   manageAllocation: boolean;
   applyAllocation: boolean;
   readAllocation: boolean;
+  manageInvoice: boolean;
+  readInvoice: boolean;
+  managePayment: boolean;
+  readPayment: boolean;
+  readAgingReport: boolean;
   createEntry: boolean;
   deleteEntry: boolean;
 };
 
-type TabKey = 'entries' | 'counterparties' | 'accounts' | 'profit-centers' | 'recurring' | 'allocation' | 'reports';
+type TabKey = 'entries' | 'counterparties' | 'accounts' | 'invoices' | 'payments' | 'profit-centers' | 'recurring' | 'allocation' | 'reports';
 
 export default function FinancePage() {
   const [tab, setTab] = useState<TabKey>('entries');
@@ -134,6 +188,8 @@ export default function FinancePage() {
   const [recurring, setRecurring] = useState<RecurringRule[]>([]);
   const [allocationRules, setAllocationRules] = useState<AllocationRule[]>([]);
   const [allocationBatches, setAllocationBatches] = useState<AllocationBatch[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities>({
     manageCounterparty: false,
     manageAccount: false,
@@ -145,6 +201,11 @@ export default function FinancePage() {
     manageAllocation: false,
     applyAllocation: false,
     readAllocation: false,
+    manageInvoice: false,
+    readInvoice: false,
+    managePayment: false,
+    readPayment: false,
+    readAgingReport: false,
     createEntry: false,
     deleteEntry: false
   });
@@ -208,10 +269,34 @@ export default function FinancePage() {
   const [reportFrom, setReportFrom] = useState(monthStart);
   const [reportTo, setReportTo] = useState(today);
   const [reportAccountId, setReportAccountId] = useState('');
+  const [reportAgingDirection, setReportAgingDirection] = useState<'PAYABLE' | 'RECEIVABLE'>('RECEIVABLE');
   const [pnlReport, setPnlReport] = useState<PnlReport | null>(null);
   const [cashflowReport, setCashflowReport] = useState<CashflowReport | null>(null);
   const [profitCenterSummary, setProfitCenterSummary] = useState<ProfitCenterPnlSummary | null>(null);
   const [profitCenterDetail, setProfitCenterDetail] = useState<ProfitCenterPnlDetail | null>(null);
+  const [agingReport, setAgingReport] = useState<AgingReport | null>(null);
+  const [counterpartyBalanceReport, setCounterpartyBalanceReport] = useState<CounterpartyBalanceReport | null>(null);
+
+  const [invoiceDirection, setInvoiceDirection] = useState<'PAYABLE' | 'RECEIVABLE'>('PAYABLE');
+  const [invoiceCounterpartyId, setInvoiceCounterpartyId] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceIssueDate, setInvoiceIssueDate] = useState(today);
+  const [invoiceDueDate, setInvoiceDueDate] = useState(today);
+  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([{ description: '', quantity: '1', unitPrice: '', taxRate: '' }]);
+  const [invoiceFilterDirection, setInvoiceFilterDirection] = useState('');
+  const [invoiceFilterStatus, setInvoiceFilterStatus] = useState('');
+  const [invoiceFilterCounterpartyId, setInvoiceFilterCounterpartyId] = useState('');
+
+  const [paymentDirection, setPaymentDirection] = useState<'OUTGOING' | 'INCOMING'>('OUTGOING');
+  const [paymentCounterpartyId, setPaymentCounterpartyId] = useState('');
+  const [paymentAccountId, setPaymentAccountId] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentDate, setPaymentDate] = useState(today);
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentFilterDirection, setPaymentFilterDirection] = useState('');
+  const [paymentFilterCounterpartyId, setPaymentFilterCounterpartyId] = useState('');
+  const [allocationPaymentId, setAllocationPaymentId] = useState('');
+  const [paymentAllocations, setPaymentAllocations] = useState<Array<{ invoiceId: string; amount: string }>>([]);
 
   async function loadCapabilities() {
     try {
@@ -299,12 +384,53 @@ export default function FinancePage() {
     }
   }
 
+  async function loadInvoices(caps?: Capabilities | null) {
+    try {
+      const canRead = Boolean(caps ? caps.readInvoice || caps.manageInvoice : capabilities.readInvoice || capabilities.manageInvoice);
+      if (!canRead) {
+        setInvoices([]);
+        return;
+      }
+
+      const query = new URLSearchParams();
+      if (invoiceFilterDirection) query.set('direction', invoiceFilterDirection);
+      if (invoiceFilterStatus) query.set('status', invoiceFilterStatus);
+      if (invoiceFilterCounterpartyId) query.set('counterpartyId', invoiceFilterCounterpartyId);
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      const rows = (await apiFetch(`/app-api/finance/invoices${suffix}`)) as Invoice[];
+      setInvoices(rows);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function loadPayments(caps?: Capabilities | null) {
+    try {
+      const canRead = Boolean(caps ? caps.readPayment || caps.managePayment : capabilities.readPayment || capabilities.managePayment);
+      if (!canRead) {
+        setPayments([]);
+        return;
+      }
+
+      const query = new URLSearchParams();
+      if (paymentFilterDirection) query.set('direction', paymentFilterDirection);
+      if (paymentFilterCounterpartyId) query.set('counterpartyId', paymentFilterCounterpartyId);
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      const rows = (await apiFetch(`/app-api/finance/payments${suffix}`)) as Payment[];
+      setPayments(rows);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       const caps = await loadCapabilities();
       await loadMasterData(caps);
       await loadEntries();
       await loadRecurring();
+      if (caps?.readInvoice || caps?.manageInvoice) await loadInvoices(caps);
+      if (caps?.readPayment || caps?.managePayment) await loadPayments(caps);
       if (caps?.readAllocation || caps?.manageAllocation || caps?.applyAllocation) {
         const [rules, batches] = await Promise.all([
           apiFetch('/app-api/finance/allocation-rules') as Promise<AllocationRule[]>,
@@ -618,6 +744,104 @@ export default function FinancePage() {
     }
   }
 
+  function updateInvoiceLine(index: number, key: keyof InvoiceLine, value: string) {
+    setInvoiceLines((prev) => prev.map((line, i) => (i === index ? { ...line, [key]: value } : line)));
+  }
+
+  function addInvoiceLine() {
+    setInvoiceLines((prev) => [...prev, { description: '', quantity: '1', unitPrice: '', taxRate: '' }]);
+  }
+
+  function removeInvoiceLine(index: number) {
+    setInvoiceLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function createInvoice(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await apiFetch('/app-api/finance/invoices', {
+        method: 'POST',
+        body: JSON.stringify({
+          direction: invoiceDirection,
+          counterpartyId: invoiceCounterpartyId,
+          invoiceNo,
+          issueDate: invoiceIssueDate,
+          dueDate: invoiceDueDate,
+          lines: invoiceLines.map((line) => ({
+            description: line.description,
+            quantity: Number(line.quantity),
+            unitPrice: Number(line.unitPrice),
+            taxRate: line.taxRate ? Number(line.taxRate) : null
+          }))
+        })
+      });
+      setInvoiceNo('');
+      setInvoiceLines([{ description: '', quantity: '1', unitPrice: '', taxRate: '' }]);
+      await loadInvoices();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function voidInvoice(id: string) {
+    try {
+      await apiFetch(`/app-api/finance/invoices/${id}/void`, { method: 'POST', body: JSON.stringify({}) });
+      await loadInvoices();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  async function createPayment(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await apiFetch('/app-api/finance/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          direction: paymentDirection,
+          counterpartyId: paymentCounterpartyId,
+          accountId: paymentAccountId || null,
+          paymentDate,
+          amount: Number(paymentAmount),
+          reference: paymentReference || null
+        })
+      });
+      setPaymentAmount('');
+      setPaymentReference('');
+      await loadPayments();
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
+  function setPaymentAllocationAmount(invoiceId: string, amount: string) {
+    setPaymentAllocations((prev) => {
+      const found = prev.find((row) => row.invoiceId === invoiceId);
+      if (found) {
+        return prev.map((row) => (row.invoiceId === invoiceId ? { ...row, amount } : row));
+      }
+      return [...prev, { invoiceId, amount }];
+    });
+  }
+
+  async function allocatePayment(e: FormEvent) {
+    e.preventDefault();
+    try {
+      const allocations = paymentAllocations
+        .filter((row) => Number(row.amount) > 0)
+        .map((row) => ({ invoiceId: row.invoiceId, amount: Number(row.amount) }));
+
+      await apiFetch(`/app-api/finance/payments/${allocationPaymentId}/allocate`, {
+        method: 'POST',
+        body: JSON.stringify({ allocations })
+      });
+      setPaymentAllocations([]);
+      await Promise.all([loadPayments(), loadInvoices(), loadReports()]);
+    } catch (error) {
+      handleApiError(error);
+    }
+  }
+
   async function loadReports(e?: FormEvent) {
     e?.preventDefault();
     try {
@@ -643,6 +867,18 @@ export default function FinancePage() {
         setProfitCenterSummary(pcRows);
       } else {
         setProfitCenterSummary(null);
+      }
+
+      if (capabilities.readAgingReport) {
+        const [agingRows, balanceRows] = await Promise.all([
+          apiFetch(`/app-api/finance/reports/aging?direction=${reportAgingDirection}&asOf=${reportTo}`) as Promise<AgingReport>,
+          apiFetch(`/app-api/finance/reports/counterparty-balance?direction=${reportAgingDirection}`) as Promise<CounterpartyBalanceReport>
+        ]);
+        setAgingReport(agingRows);
+        setCounterpartyBalanceReport(balanceRows);
+      } else {
+        setAgingReport(null);
+        setCounterpartyBalanceReport(null);
       }
       setProfitCenterDetail(null);
     } catch (error) {
@@ -701,6 +937,8 @@ export default function FinancePage() {
           ['entries', 'Entries'],
           ['counterparties', 'Counterparties'],
           ['accounts', 'Accounts'],
+          ['invoices', 'Invoices'],
+          ['payments', 'Payments'],
           ['profit-centers', 'Profit Centers'],
           ['recurring', 'Recurring'],
           ['allocation', 'Allocation'],
@@ -899,6 +1137,231 @@ export default function FinancePage() {
               ))}
             </div>
           </article>
+        </div>
+      ) : null}
+
+      {tab === 'invoices' ? (
+        <div className="space-y-4">
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">Invoices</h2>
+            {capabilities.manageInvoice ? (
+              <form className="space-y-3" onSubmit={createInvoice}>
+                <div className="grid gap-2 md:grid-cols-5">
+                  <select className="rounded border p-2" value={invoiceDirection} onChange={(e) => setInvoiceDirection(e.target.value as 'PAYABLE' | 'RECEIVABLE')}>
+                    <option value="PAYABLE">Payable</option>
+                    <option value="RECEIVABLE">Receivable</option>
+                  </select>
+                  <select className="rounded border p-2" value={invoiceCounterpartyId} onChange={(e) => setInvoiceCounterpartyId(e.target.value)} required>
+                    <option value="">Counterparty</option>
+                    {counterparties.map((cp) => (
+                      <option key={cp.id} value={cp.id}>
+                        {cp.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input className="rounded border p-2" placeholder="Invoice No" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} required />
+                  <input className="rounded border p-2" type="date" value={invoiceIssueDate} onChange={(e) => setInvoiceIssueDate(e.target.value)} required />
+                  <input className="rounded border p-2" type="date" value={invoiceDueDate} onChange={(e) => setInvoiceDueDate(e.target.value)} required />
+                </div>
+                <div className="space-y-2">
+                  {invoiceLines.map((line, index) => (
+                    <div key={index} className="grid gap-2 md:grid-cols-5">
+                      <input
+                        className="rounded border p-2 md:col-span-2"
+                        placeholder="Line description"
+                        value={line.description}
+                        onChange={(e) => updateInvoiceLine(index, 'description', e.target.value)}
+                        required
+                      />
+                      <input className="rounded border p-2" type="number" min="0.0001" step="0.0001" placeholder="Qty" value={line.quantity} onChange={(e) => updateInvoiceLine(index, 'quantity', e.target.value)} required />
+                      <input className="rounded border p-2" type="number" min="0" step="0.01" placeholder="Unit Price" value={line.unitPrice} onChange={(e) => updateInvoiceLine(index, 'unitPrice', e.target.value)} required />
+                      <div className="flex gap-2">
+                        <input className="w-full rounded border p-2" type="number" min="0" step="0.01" placeholder="Tax %" value={line.taxRate} onChange={(e) => updateInvoiceLine(index, 'taxRate', e.target.value)} />
+                        <button type="button" className="rounded bg-red-600 px-3 text-xs text-white" onClick={() => removeInvoiceLine(index)} disabled={invoiceLines.length === 1}>
+                          X
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={addInvoiceLine}>
+                    Add Line
+                  </button>
+                  <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white">Create Invoice</button>
+                </div>
+              </form>
+            ) : (
+              <p className="text-sm text-slate-500">You do not have permission to manage invoices.</p>
+            )}
+          </article>
+
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 grid gap-2 md:grid-cols-4">
+              <select className="rounded border p-2" value={invoiceFilterDirection} onChange={(e) => setInvoiceFilterDirection(e.target.value)}>
+                <option value="">All directions</option>
+                <option value="PAYABLE">Payable</option>
+                <option value="RECEIVABLE">Receivable</option>
+              </select>
+              <select className="rounded border p-2" value={invoiceFilterStatus} onChange={(e) => setInvoiceFilterStatus(e.target.value)}>
+                <option value="">All statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="ISSUED">Issued</option>
+                <option value="PARTIALLY_PAID">Partially Paid</option>
+                <option value="PAID">Paid</option>
+                <option value="VOID">Void</option>
+              </select>
+              <select className="rounded border p-2" value={invoiceFilterCounterpartyId} onChange={(e) => setInvoiceFilterCounterpartyId(e.target.value)}>
+                <option value="">All counterparties</option>
+                {counterparties.map((cp) => (
+                  <option key={cp.id} value={cp.id}>
+                    {cp.name}
+                  </option>
+                ))}
+              </select>
+              <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => loadInvoices().catch(handleApiError)}>
+                Load
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              {invoices.map((invoice) => {
+                const allocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+                const remaining = Number(invoice.total) - allocated;
+                return (
+                  <div key={invoice.id} className="rounded border border-slate-200 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <p>
+                        {invoice.invoiceNo} | {invoice.direction} | {invoice.counterparty.name} | total {invoice.total} | remaining {remaining.toFixed(2)} | {invoice.status}
+                      </p>
+                      {capabilities.manageInvoice ? (
+                        <button className="rounded bg-amber-600 px-2 py-1 text-xs text-white" onClick={() => voidInvoice(invoice.id)}>
+                          Void
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {tab === 'payments' ? (
+        <div className="space-y-4">
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">Payments</h2>
+            {capabilities.managePayment ? (
+              <form className="grid gap-2 md:grid-cols-6" onSubmit={createPayment}>
+                <select className="rounded border p-2" value={paymentDirection} onChange={(e) => setPaymentDirection(e.target.value as 'OUTGOING' | 'INCOMING')}>
+                  <option value="OUTGOING">Outgoing</option>
+                  <option value="INCOMING">Incoming</option>
+                </select>
+                <select className="rounded border p-2" value={paymentCounterpartyId} onChange={(e) => setPaymentCounterpartyId(e.target.value)} required>
+                  <option value="">Counterparty</option>
+                  {counterparties.map((cp) => (
+                    <option key={cp.id} value={cp.id}>
+                      {cp.name}
+                    </option>
+                  ))}
+                </select>
+                <select className="rounded border p-2" value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                  <option value="">Account</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name}
+                    </option>
+                  ))}
+                </select>
+                <input className="rounded border p-2" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} required />
+                <input className="rounded border p-2" type="number" min="0.01" step="0.01" placeholder="Amount" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} required />
+                <input className="rounded border p-2" placeholder="Reference" value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} />
+                <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white md:col-span-6">Create Payment</button>
+              </form>
+            ) : (
+              <p className="text-sm text-slate-500">You do not have permission to manage payments.</p>
+            )}
+          </article>
+
+          <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 grid gap-2 md:grid-cols-3">
+              <select className="rounded border p-2" value={paymentFilterDirection} onChange={(e) => setPaymentFilterDirection(e.target.value)}>
+                <option value="">All directions</option>
+                <option value="OUTGOING">Outgoing</option>
+                <option value="INCOMING">Incoming</option>
+              </select>
+              <select className="rounded border p-2" value={paymentFilterCounterpartyId} onChange={(e) => setPaymentFilterCounterpartyId(e.target.value)}>
+                <option value="">All counterparties</option>
+                {counterparties.map((cp) => (
+                  <option key={cp.id} value={cp.id}>
+                    {cp.name}
+                  </option>
+                ))}
+              </select>
+              <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white" onClick={() => loadPayments().catch(handleApiError)}>
+                Load
+              </button>
+            </div>
+
+            <div className="space-y-2 text-sm">
+              {payments.map((payment) => {
+                const allocated = payment.allocations.reduce((sum, row) => sum + Number(row.amount), 0);
+                const remaining = Number(payment.amount) - allocated;
+                return (
+                  <div key={payment.id} className="rounded border border-slate-200 px-3 py-2">
+                    <p>
+                      {payment.paymentDate.slice(0, 10)} | {payment.direction} | {payment.counterparty.name} | amount {payment.amount} | remaining {remaining.toFixed(2)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+
+          {capabilities.managePayment ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-base font-semibold">Allocate Payment</h3>
+              <form className="space-y-3" onSubmit={allocatePayment}>
+                <select className="w-full rounded border p-2" value={allocationPaymentId} onChange={(e) => setAllocationPaymentId(e.target.value)} required>
+                  <option value="">Select payment</option>
+                  {payments.map((payment) => (
+                    <option key={payment.id} value={payment.id}>
+                      {payment.paymentDate.slice(0, 10)} | {payment.counterparty.name} | {payment.amount}
+                    </option>
+                  ))}
+                </select>
+                <div className="space-y-2">
+                  {invoices
+                    .filter((invoice) => {
+                      const payment = payments.find((item) => item.id === allocationPaymentId);
+                      if (!payment) return false;
+                      const expectedInvoiceDirection = payment.direction === 'INCOMING' ? 'RECEIVABLE' : 'PAYABLE';
+                      return invoice.counterpartyId === payment.counterpartyId && invoice.direction === expectedInvoiceDirection && invoice.status !== 'VOID';
+                    })
+                    .map((invoice) => {
+                      const alreadyAllocated = invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+                      const outstanding = Number(invoice.total) - alreadyAllocated;
+                      return (
+                        <div key={invoice.id} className="grid gap-2 md:grid-cols-4">
+                          <p className="rounded border border-slate-200 px-2 py-2">{invoice.invoiceNo}</p>
+                          <p className="rounded border border-slate-200 px-2 py-2">Outstanding: {outstanding.toFixed(2)}</p>
+                          <input
+                            className="rounded border p-2"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Allocate amount"
+                            value={paymentAllocations.find((row) => row.invoiceId === invoice.id)?.amount ?? ''}
+                            onChange={(e) => setPaymentAllocationAmount(invoice.id, e.target.value)}
+                          />
+                        </div>
+                      );
+                    })}
+                </div>
+                <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white">Allocate</button>
+              </form>
+            </article>
+          ) : null}
         </div>
       ) : null}
 
@@ -1185,13 +1648,17 @@ export default function FinancePage() {
         <div className="space-y-4">
           <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold">Reports</h2>
-            {capabilities.readReports || capabilities.readProfitCenterReports ? (
-              <form className="grid gap-2 md:grid-cols-4" onSubmit={loadReports}>
+            {capabilities.readReports || capabilities.readProfitCenterReports || capabilities.readAgingReport ? (
+              <form className="grid gap-2 md:grid-cols-5" onSubmit={loadReports}>
                 <input className="rounded border p-2" type="date" value={reportFrom} onChange={(e) => setReportFrom(e.target.value)} required />
                 <input className="rounded border p-2" type="date" value={reportTo} onChange={(e) => setReportTo(e.target.value)} required />
                 <select className="rounded border p-2" value={reportAccountId} onChange={(e) => setReportAccountId(e.target.value)}>
                   <option value="">All accounts</option>
                   {accounts.map((acc) => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+                </select>
+                <select className="rounded border p-2" value={reportAgingDirection} onChange={(e) => setReportAgingDirection(e.target.value as 'PAYABLE' | 'RECEIVABLE')}>
+                  <option value="RECEIVABLE">Aging Receivable</option>
+                  <option value="PAYABLE">Aging Payable</option>
                 </select>
                 <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white">Load Reports</button>
               </form>
@@ -1248,6 +1715,36 @@ export default function FinancePage() {
               <div className="space-y-1 text-sm">
                 {profitCenterDetail.byCategory.map((row) => (
                   <div key={row.categoryId} className="rounded border border-slate-200 px-3 py-2">{row.categoryName} ({row.type}) : {row.total.toFixed(2)}</div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
+          {agingReport ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Aging Report</h3>
+              <p className="mb-2 text-sm">
+                Current: {agingReport.totals.current.toFixed(2)} | 1-30: {agingReport.totals.b1_30.toFixed(2)} | 31-60: {agingReport.totals.b31_60.toFixed(2)} | 61-90: {agingReport.totals.b61_90.toFixed(2)} | 90+: {agingReport.totals.b90_plus.toFixed(2)} | Total: {agingReport.totals.total.toFixed(2)}
+              </p>
+              <div className="space-y-1 text-sm">
+                {agingReport.items.map((row) => (
+                  <div key={row.counterpartyId} className="rounded border border-slate-200 px-3 py-2">
+                    {row.counterpartyName}: {row.buckets.total.toFixed(2)}
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
+          {counterpartyBalanceReport ? (
+            <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-2 text-base font-semibold">Counterparty Balance</h3>
+              <p className="mb-2 text-sm">Total Outstanding: {counterpartyBalanceReport.totalOutstanding.toFixed(2)}</p>
+              <div className="space-y-1 text-sm">
+                {counterpartyBalanceReport.items.map((row) => (
+                  <div key={row.counterpartyId} className="rounded border border-slate-200 px-3 py-2">
+                    {row.counterpartyName}: {row.outstanding.toFixed(2)} ({row.invoiceCount} invoices)
+                  </div>
                 ))}
               </div>
             </article>

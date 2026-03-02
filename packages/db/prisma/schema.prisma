@@ -60,6 +60,24 @@ enum FinanceAllocationMethod {
   PERCENTAGE
 }
 
+enum FinanceInvoiceDirection {
+  PAYABLE
+  RECEIVABLE
+}
+
+enum FinanceInvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum FinancePaymentDirection {
+  OUTGOING
+  INCOMING
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -81,6 +99,8 @@ model User {
   financeEntriesCreated FinanceEntry[]  @relation("finance_entry_creator")
   financeRecurringRulesCreated FinanceRecurringRule[] @relation("finance_recurring_rule_creator")
   financeAllocationBatchesCreated FinanceAllocationBatch[] @relation("finance_allocation_batch_creator")
+  financeInvoicesCreated FinanceInvoice[] @relation("finance_invoice_creator")
+  financePaymentsCreated FinancePayment[] @relation("finance_payment_creator")
 }
 
 model Session {
@@ -170,6 +190,9 @@ model Company {
   financeProfitCenters FinanceProfitCenter[]
   financeAllocationRules FinanceAllocationRule[]
   financeAllocationBatches FinanceAllocationBatch[]
+  financeInvoices FinanceInvoice[]
+  financePayments FinancePayment[]
+  financePaymentAllocations FinancePaymentAllocation[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -440,6 +463,8 @@ model FinanceEntry {
   recurringRuleId String?
   allocationBatchId String?
   isAllocationGenerated Boolean @default(false)
+  invoiceId       String?
+  paymentId       String?
   amount          Decimal   @db.Decimal(14, 2)
   date            DateTime
   description     String?
@@ -455,6 +480,8 @@ model FinanceEntry {
   allocationBatch FinanceAllocationBatch? @relation("allocation_batch_entries", fields: [allocationBatchId], references: [id], onDelete: SetNull)
   sourceAllocationBatch FinanceAllocationBatch? @relation("allocation_batch_source_entry")
   sourceForAllocationRules FinanceAllocationRule[] @relation("allocation_rule_source_entry")
+  invoice         FinanceInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  payment         FinancePayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
   createdByUser   User      @relation("finance_entry_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([companyId, date])
@@ -462,6 +489,8 @@ model FinanceEntry {
   @@index([companyId, counterpartyId])
   @@index([companyId, accountId])
   @@index([companyId, profitCenterId, date])
+  @@index([companyId, invoiceId])
+  @@index([companyId, paymentId])
 }
 
 model FinanceCounterparty {
@@ -478,6 +507,8 @@ model FinanceCounterparty {
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   entries   FinanceEntry[]
   recurringRules FinanceRecurringRule[]
+  invoices  FinanceInvoice[]
+  payments  FinancePayment[]
 
   @@index([companyId, type])
   @@index([companyId, name])
@@ -495,6 +526,7 @@ model FinanceAccount {
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   entries   FinanceEntry[]
   recurringRules FinanceRecurringRule[]
+  payments  FinancePayment[]
 
   @@index([companyId, isActive])
   @@index([companyId, name])
@@ -596,4 +628,88 @@ model FinanceAllocationBatch {
   generatedEntries FinanceEntry[] @relation("allocation_batch_entries")
 
   @@index([companyId, createdAt])
+}
+
+model FinanceInvoice {
+  id              String   @id @default(uuid())
+  companyId       String
+  direction       FinanceInvoiceDirection
+  counterpartyId  String
+  invoiceNo       String
+  issueDate       DateTime
+  dueDate         DateTime
+  currency        String   @default("TRY")
+  status          FinanceInvoiceStatus @default(DRAFT)
+  subtotal        Decimal  @db.Decimal(14, 2)
+  taxTotal        Decimal  @default(0) @db.Decimal(14, 2)
+  total           Decimal  @db.Decimal(14, 2)
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  counterparty    FinanceCounterparty @relation(fields: [counterpartyId], references: [id], onDelete: Restrict)
+  createdByUser   User     @relation("finance_invoice_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  lines           FinanceInvoiceLine[]
+  entries         FinanceEntry[]
+  paymentAllocations FinancePaymentAllocation[]
+
+  @@unique([companyId, invoiceNo])
+  @@index([companyId, direction, dueDate])
+  @@index([companyId, counterpartyId])
+}
+
+model FinanceInvoiceLine {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Decimal  @default(1) @db.Decimal(14, 4)
+  unitPrice   Decimal  @db.Decimal(14, 2)
+  taxRate     Decimal? @db.Decimal(6, 4)
+  lineTotal   Decimal  @db.Decimal(14, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  invoice     FinanceInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model FinancePayment {
+  id              String   @id @default(uuid())
+  companyId       String
+  direction       FinancePaymentDirection
+  counterpartyId  String
+  accountId       String?
+  paymentDate     DateTime
+  amount          Decimal  @db.Decimal(14, 2)
+  currency        String   @default("TRY")
+  reference       String?
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  counterparty    FinanceCounterparty @relation(fields: [counterpartyId], references: [id], onDelete: Restrict)
+  account         FinanceAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("finance_payment_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  entries         FinanceEntry[]
+  allocations     FinancePaymentAllocation[]
+
+  @@index([companyId, paymentDate])
+  @@index([companyId, counterpartyId])
+}
+
+model FinancePaymentAllocation {
+  id         String   @id @default(uuid())
+  companyId  String
+  paymentId  String
+  invoiceId  String
+  amount     Decimal  @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payment    FinancePayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice    FinanceInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, paymentId])
+  @@index([companyId, invoiceId])
 }

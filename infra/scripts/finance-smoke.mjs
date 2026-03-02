@@ -205,6 +205,49 @@ async function main() {
   assert(Array.isArray(allocationBatches), 'Allocation batches response is invalid');
   assert(allocationBatches.some((item) => item.sourceEntryId === allocationSourceEntry.id), 'Allocation batch not found');
 
+  const receivableInvoice = await request('/app-api/finance/invoices', {
+    method: 'POST',
+    body: JSON.stringify({
+      direction: 'RECEIVABLE',
+      counterpartyId: counterparty.id,
+      invoiceNo: `INV-${nonce}`,
+      issueDate: new Date().toISOString().slice(0, 10),
+      dueDate: new Date().toISOString().slice(0, 10),
+      lines: [{ description: 'Smoke invoice line', quantity: 1, unitPrice: 1000, taxRate: 0 }]
+    })
+  }, auth);
+
+  const incomingPayment = await request('/app-api/finance/payments', {
+    method: 'POST',
+    body: JSON.stringify({
+      direction: 'INCOMING',
+      counterpartyId: counterparty.id,
+      accountId: account.id,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      amount: 600,
+      reference: `PAY-${nonce}`
+    })
+  }, auth);
+
+  await request(`/app-api/finance/payments/${incomingPayment.id}/allocate`, {
+    method: 'POST',
+    body: JSON.stringify({ allocations: [{ invoiceId: receivableInvoice.id, amount: 600 }] })
+  }, auth);
+
+  const invoiceAfterAllocation = await request(`/app-api/finance/invoices/${receivableInvoice.id}`, { method: 'GET' }, auth);
+  assert(invoiceAfterAllocation.status === 'PARTIALLY_PAID', 'Invoice should be partially paid');
+
+  const invoiceAllocated = invoiceAfterAllocation.paymentAllocations.reduce((sum, row) => sum + Number(row.amount), 0);
+  const invoiceRemaining = Number(invoiceAfterAllocation.total) - invoiceAllocated;
+  assert(invoiceRemaining === 400, 'Invoice remaining should be 400');
+
+  const aging = await request(
+    `/app-api/finance/reports/aging?direction=RECEIVABLE&asOf=${new Date().toISOString().slice(0, 10)}`,
+    { method: 'GET' },
+    auth
+  );
+  assert(aging?.totals?.total >= 400, 'Aging totals should include remaining receivable');
+
   console.log(
     JSON.stringify(
       {
@@ -220,7 +263,9 @@ async function main() {
           recurringGeneratedEntryId: runNow?.entry?.id,
           allocationRuleId: allocationRule.id,
           allocationSourceEntryId: allocationSourceEntry.id,
-          allocationGeneratedEntryIds: allocationResult.generatedEntries.map((item) => item.id)
+          allocationGeneratedEntryIds: allocationResult.generatedEntries.map((item) => item.id),
+          receivableInvoiceId: receivableInvoice.id,
+          incomingPaymentId: incomingPayment.id
         },
         totals: pnl.totals,
         profitCenterNet: profitCenterDetail?.totals?.net ?? null

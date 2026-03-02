@@ -206,6 +206,84 @@ export class FinanceController {
     return this.finance.listAllocationBatches(req.companyId);
   }
 
+  @Get('invoices')
+  @RequirePermissions('module:finance-core.invoice.read')
+  listInvoices(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.listInvoices(req.companyId, query);
+  }
+
+  @Post('invoices')
+  @RequirePermissions('module:finance-core.invoice.manage')
+  createInvoice(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createInvoice(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('invoices/:id')
+  @RequirePermissions('module:finance-core.invoice.read')
+  getInvoice(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.finance.getInvoice(req.companyId, id);
+  }
+
+  @Patch('invoices/:id')
+  @RequirePermissions('module:finance-core.invoice.manage')
+  updateInvoice(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updateInvoice(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('invoices/:id/void')
+  @RequirePermissions('module:finance-core.invoice.manage')
+  voidInvoice(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.voidInvoice(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('invoices/:id')
+  @RequirePermissions('module:finance-core.invoice.manage')
+  deleteInvoice(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.deleteInvoice(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('payments')
+  @RequirePermissions('module:finance-core.payment.read')
+  listPayments(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.listPayments(req.companyId, query);
+  }
+
+  @Post('payments')
+  @RequirePermissions('module:finance-core.payment.manage')
+  createPayment(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.finance.createPayment(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('payments/:id')
+  @RequirePermissions('module:finance-core.payment.read')
+  getPayment(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.finance.getPayment(req.companyId, id);
+  }
+
+  @Patch('payments/:id')
+  @RequirePermissions('module:finance-core.payment.manage')
+  updatePayment(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.updatePayment(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('payments/:id/allocate')
+  @RequirePermissions('module:finance-core.payment.manage')
+  allocatePayment(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.finance.allocatePayment(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
   @Get('recurring')
   @RequirePermissions('module:finance-core.entry.read')
   listRecurring(@Req() req: Request & { companyId: string }) {
@@ -268,5 +346,17 @@ export class FinanceController {
   @RequirePermissions('module:finance-core.reports.profit-center.read')
   profitCenterComparison(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
     return this.finance.profitCenterComparison(req.companyId, query);
+  }
+
+  @Get('reports/aging')
+  @RequirePermissions('module:finance-core.reports.aging.read')
+  agingReport(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.agingReport(req.companyId, query);
+  }
+
+  @Get('reports/counterparty-balance')
+  @RequirePermissions('module:finance-core.payment.read')
+  counterpartyBalance(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.finance.counterpartyBalanceReport(req.companyId, query);
   }
 }
