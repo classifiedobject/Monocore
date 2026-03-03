@@ -50,6 +50,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     if (installedModuleKeys.includes('sales-core')) {
       list.push({ href: '/app/sales', label: 'Sales' });
     }
+    if (installedModuleKeys.includes('task-core')) {
+      list.push({ href: '/app/tasks', label: 'Tasks' });
+    }
     return list;
   }, [installedModuleKeys]);
 
