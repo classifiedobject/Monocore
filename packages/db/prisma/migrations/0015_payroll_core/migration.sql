@@ -3,14 +3,14 @@ CREATE TYPE "PayrollPeriodStatus" AS ENUM ('DRAFT', 'CALCULATED', 'POSTED');
 CREATE TYPE "TipDistributionMethod" AS ENUM ('EQUAL', 'HOURS_WEIGHTED');
 
 CREATE TABLE "Employee" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
   "firstName" TEXT NOT NULL,
   "lastName" TEXT NOT NULL,
   "email" TEXT,
   "phone" TEXT,
-  "roleId" TEXT,
-  "profitCenterId" TEXT,
+  "roleId" UUID,
+  "profitCenterId" UUID,
   "hireDate" TIMESTAMP(3) NOT NULL,
   "salaryType" "SalaryType" NOT NULL,
   "baseSalary" DECIMAL(14,2),
@@ -22,9 +22,9 @@ CREATE TABLE "Employee" (
 );
 
 CREATE TABLE "WorkLog" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
-  "employeeId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
+  "employeeId" UUID NOT NULL,
   "date" TIMESTAMP(3) NOT NULL,
   "hoursWorked" DECIMAL(8,2) NOT NULL,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -32,8 +32,8 @@ CREATE TABLE "WorkLog" (
 );
 
 CREATE TABLE "PayrollPeriod" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
   "startDate" TIMESTAMP(3) NOT NULL,
   "endDate" TIMESTAMP(3) NOT NULL,
   "status" "PayrollPeriodStatus" NOT NULL DEFAULT 'DRAFT',
@@ -44,10 +44,10 @@ CREATE TABLE "PayrollPeriod" (
 );
 
 CREATE TABLE "PayrollLine" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
-  "payrollPeriodId" TEXT NOT NULL,
-  "employeeId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
+  "payrollPeriodId" UUID NOT NULL,
+  "employeeId" UUID NOT NULL,
   "grossAmount" DECIMAL(14,2) NOT NULL,
   "notes" TEXT,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -55,8 +55,8 @@ CREATE TABLE "PayrollLine" (
 );
 
 CREATE TABLE "TipPool" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
   "periodStart" TIMESTAMP(3) NOT NULL,
   "periodEnd" TIMESTAMP(3) NOT NULL,
   "totalTips" DECIMAL(14,2) NOT NULL,
@@ -66,10 +66,10 @@ CREATE TABLE "TipPool" (
 );
 
 CREATE TABLE "TipDistribution" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
-  "tipPoolId" TEXT NOT NULL,
-  "employeeId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
+  "tipPoolId" UUID NOT NULL,
+  "employeeId" UUID NOT NULL,
   "amount" DECIMAL(14,2) NOT NULL,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "TipDistribution_pkey" PRIMARY KEY ("id")
