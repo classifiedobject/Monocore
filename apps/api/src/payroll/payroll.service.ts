@@ -309,7 +309,21 @@ export class PayrollService {
       'company.payroll.period.post',
       'payroll_period',
       period.id,
-      { financeEntryCount: result.financeEntryCount },
+      {
+        context: {
+          payrollPeriodId: period.id,
+          startDate: this.toYmd(period.startDate),
+          endDate: this.toYmd(period.endDate)
+        },
+        totals: {
+          totalGross: Number(period.totalGross),
+          totalNet: Number(period.totalNet)
+        },
+        counts: {
+          payrollLineCount: result.updated.lines.length,
+          financeEntryCount: result.financeEntryCount
+        }
+      },
       ip,
       userAgent
     );
@@ -504,6 +518,9 @@ export class PayrollService {
     return Math.round(value * 100) / 100;
   }
 
+  private toYmd(value: Date) {
+    return value.toISOString().slice(0, 10);
+  }
   private async logCompany(
     actorUserId: string,
     companyId: string,

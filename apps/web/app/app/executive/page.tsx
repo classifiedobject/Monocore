@@ -10,7 +10,9 @@ type DashboardData = {
     revenue: number;
     cogs: number;
     grossProfit: number;
+    grossMarginPct: number;
     netProfit: number;
+    netMarginPct: number;
     cashPosition: number;
     outstandingReceivables: number;
     outstandingPayables: number;
@@ -23,7 +25,9 @@ type DashboardData = {
     netProfitTrend: TrendPoint[];
     cashflowTrend: TrendPoint[];
   };
-  alerts: Array<{ type: string; severity: 'info' | 'warning' | 'critical'; message: string }>;
+  alerts: Array<{ type: string; severity: 'info' | 'warning' | 'critical' | 'good'; severityColor: 'green' | 'yellow' | 'red'; message: string }>;
+  topRisks: Array<{ type: string; severity: 'info' | 'warning' | 'critical' | 'good'; severityColor: 'green' | 'yellow' | 'red'; message: string }>;
+  recommendedActions: string[];
   lowStockItems: Array<{ itemId: string; name: string; quantity: number; threshold: number }>;
   overdueTasks: Array<{ id: string; title: string; dueDate: string; assignee: string | null }>;
 };
@@ -77,8 +81,8 @@ export default function ExecutivePage() {
         <>
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Revenue</p><p className="text-xl font-semibold">{money(data.summary.revenue)}</p></div>
-            <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Gross Profit</p><p className="text-xl font-semibold">{money(data.summary.grossProfit)}</p></div>
-            <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Net Profit</p><p className="text-xl font-semibold">{money(data.summary.netProfit)}</p></div>
+            <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Gross Profit</p><p className="text-xl font-semibold">{money(data.summary.grossProfit)}</p><p className="text-xs text-slate-500">{data.summary.grossMarginPct.toFixed(1)}% margin</p></div>
+            <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Net Profit</p><p className="text-xl font-semibold">{money(data.summary.netProfit)}</p><p className="text-xs text-slate-500">{data.summary.netMarginPct.toFixed(1)}% margin</p></div>
             <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Cash Position</p><p className="text-xl font-semibold">{money(data.summary.cashPosition)}</p></div>
             <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Receivables</p><p className="text-xl font-semibold">{money(data.summary.outstandingReceivables)}</p></div>
             <div className="rounded bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">Payables</p><p className="text-xl font-semibold">{money(data.summary.outstandingPayables)}</p></div>
@@ -157,7 +161,16 @@ export default function ExecutivePage() {
               {data.alerts.length === 0 ? <p className="text-sm text-slate-500">No alerts.</p> : null}
               <ul className="space-y-2 text-sm">
                 {data.alerts.map((alert) => (
-                  <li key={alert.type} className="rounded border p-2">
+                  <li
+                    key={alert.type}
+                    className={`rounded border p-2 ${
+                      alert.severityColor === 'red'
+                        ? 'border-red-300 bg-red-50'
+                        : alert.severityColor === 'yellow'
+                        ? 'border-yellow-300 bg-yellow-50'
+                        : 'border-green-300 bg-green-50'
+                    }`}
+                  >
                     <p className="font-medium">{alert.severity.toUpperCase()}</p>
                     <p>{alert.message}</p>
                   </li>
@@ -189,6 +202,28 @@ export default function ExecutivePage() {
                   </li>
                 ))}
               </ul>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded bg-white p-4 shadow-sm">
+              <h2 className="mb-2 text-lg font-semibold">Top 3 Risks</h2>
+              <ul className="space-y-2 text-sm">
+                {data.topRisks.map((risk) => (
+                  <li key={risk.type} className="rounded border p-2">
+                    <p className="font-medium">{risk.type}</p>
+                    <p>{risk.message}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded bg-white p-4 shadow-sm">
+              <h2 className="mb-2 text-lg font-semibold">Recommended Actions</h2>
+              <ol className="list-decimal space-y-2 pl-6 text-sm">
+                {data.recommendedActions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ol>
             </div>
           </div>
         </>

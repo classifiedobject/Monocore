@@ -18,6 +18,59 @@ export const createCompanySchema = z.object({
   name: z.string().min(2).max(120)
 });
 
+export const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20)
+});
+
+export const companyRoleTemplateSchema = z.enum([
+  'owner',
+  'finance_manager',
+  'operations_manager',
+  'floor_manager',
+  'staff'
+]);
+
+export const applyRoleTemplateSchema = z.object({
+  membershipId: z.string().uuid(),
+  template: companyRoleTemplateSchema
+});
+
+export const onboardingCompanyBasicsSchema = z.object({
+  name: z.string().min(2).max(120),
+  locale: z.string().min(2).max(8).optional()
+});
+
+export const onboardingProfitCentersSchema = z.object({
+  names: z.array(z.string().min(2).max(120)).min(1).max(10)
+});
+
+export const onboardingInventoryBootstrapSchema = z.object({
+  warehouseName: z.string().min(2).max(120),
+  itemName: z.string().min(2).max(140),
+  unit: z.string().min(1).max(20).default('piece'),
+  initialStock: z.coerce.number().positive().default(10)
+});
+
+export const onboardingEmployeeSchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  salaryType: z.enum(['fixed', 'hourly']).default('fixed'),
+  baseSalary: z.coerce.number().nonnegative().default(10000),
+  hourlyRate: z.coerce.number().nonnegative().default(150)
+});
+
+export const onboardingFirstSalesOrderSchema = z.object({
+  productName: z.string().min(2).max(160).default('Starter Product'),
+  quantity: z.coerce.number().positive().default(1),
+  unitPrice: z.coerce.number().positive().default(100),
+  notes: z.string().max(500).optional()
+});
+
+export const demoGenerateSchema = z.object({
+  tag: z.string().min(3).max(40).optional()
+});
+
 export const inviteUserSchema = z.object({
   email: emailSchema,
   roleIds: z.array(z.string().uuid()).default([])

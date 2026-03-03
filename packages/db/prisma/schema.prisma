@@ -260,6 +260,8 @@ model Company {
   name           String
   plan           String               @default("free")
   locale         String               @default("en")
+  onboardingCompleted Boolean         @default(false)
+  onboardingStep Int                  @default(1)
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   memberships    CompanyMembership[]
@@ -777,6 +779,7 @@ model FinanceInvoice {
 
   @@unique([companyId, invoiceNo])
   @@index([companyId, direction, dueDate])
+  @@index([companyId, dueDate, status])
   @@index([companyId, counterpartyId])
 }
 
@@ -1188,6 +1191,7 @@ model SalesOrder {
   lines         SalesOrderLine[]
 
   @@index([companyId, status, orderDate])
+  @@index([companyId, orderDate])
   @@index([companyId, profitCenterId])
   @@index([companyId, warehouseId])
   @@index([companyId, reservationId])
