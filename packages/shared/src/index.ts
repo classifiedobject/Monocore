@@ -473,7 +473,6 @@ export const tipPoolSchema = z.object({
   totalTips: z.coerce.number().nonnegative(),
   distributionMethod: z.enum(['equal', 'hours_weighted'])
 });
-
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
   namespace: z.string().min(1).max(80),
