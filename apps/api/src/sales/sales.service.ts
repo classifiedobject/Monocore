@@ -335,10 +335,10 @@ export class SalesService {
       'sales_order',
       existing.id,
       {
-        totalRevenue,
-        totalCogs,
-        movementCount: result.movementIds.length,
-        financeEntryIds: result.financeEntryIds
+        context: { orderId: existing.id, orderNo: existing.orderNo ?? null },
+        totals: { revenue: totalRevenue, cogs: totalCogs, grossProfit: totalRevenue - totalCogs },
+        counts: { movementCount: result.movementIds.length, financeEntryCount: result.financeEntryIds.length },
+        ids: { movementIds: result.movementIds, financeEntryIds: result.financeEntryIds }
       },
       ip,
       userAgent

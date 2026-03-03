@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { Shell } from '../../components/shell';
 import { apiFetch, handleApiError } from '../../lib/api';
 import type { Route } from 'next';
@@ -15,7 +16,10 @@ const baseLinks: Array<{ href: Route; label: string }> = [
 ];
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const [installedModuleKeys, setInstalledModuleKeys] = useState<string[]>([]);
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
 
   useEffect(() => {
     apiFetch('/app-api/modules')
@@ -33,8 +37,45 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       .catch(handleApiError);
   }, []);
 
+  useEffect(() => {
+    apiFetch('/app-api/companies')
+      .then((rows: unknown) => {
+        const items = Array.isArray(rows) ? rows : [];
+        const stored = window.localStorage.getItem('activeCompanyId') ?? '';
+        const selected = items.find((row) => {
+          if (!row || typeof row !== 'object') return false;
+          const entry = row as { company?: { id?: string } };
+          return entry.company?.id === stored;
+        }) as { company?: { onboardingCompleted?: boolean } } | undefined;
+        if (selected?.company && typeof selected.company.onboardingCompleted === 'boolean') {
+          setOnboardingCompleted(selected.company.onboardingCompleted);
+        } else {
+          setOnboardingCompleted(null);
+        }
+      })
+      .catch(handleApiError);
+  }, []);
+
+  useEffect(() => {
+    if (onboardingCompleted === null) return;
+    if (!pathname.startsWith('/app/')) return;
+    if (pathname.startsWith('/app/company')) return;
+
+    if (!onboardingCompleted && !pathname.startsWith('/app/onboarding')) {
+      router.push('/app/onboarding');
+      return;
+    }
+
+    if (onboardingCompleted && pathname.startsWith('/app/onboarding')) {
+      router.push('/app/home');
+    }
+  }, [onboardingCompleted, pathname, router]);
+
   const links = useMemo(() => {
     const list = [...baseLinks];
+    if (onboardingCompleted !== true) {
+      list.push({ href: '/app/onboarding', label: 'Onboarding' });
+    }
     if (installedModuleKeys.length > 0) {
       list.push({ href: '/app/modules', label: 'Modules' });
     }
@@ -63,7 +104,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       list.push({ href: '/app/payroll', label: 'Payroll' });
     }
     return list;
-  }, [installedModuleKeys]);
+  }, [installedModuleKeys, onboardingCompleted]);
 
   return <Shell title="Customer App" links={links}>{children}</Shell>;
 }

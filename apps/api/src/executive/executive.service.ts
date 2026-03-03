@@ -10,7 +10,9 @@ type DashboardSummary = {
   revenue: number;
   cogs: number;
   grossProfit: number;
+  grossMarginPct: number;
   netProfit: number;
+  netMarginPct: number;
   cashPosition: number;
   outstandingReceivables: number;
   outstandingPayables: number;
@@ -114,11 +116,18 @@ export class ExecutiveService {
       financeEntries.filter((row) => row.category.type === 'EXPENSE').map((r) => r.amount)
     );
 
+    const grossProfit = revenue - cogs;
+    const netProfit = totalIncome - totalExpense;
+    const grossMarginPct = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    const netMarginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
+
     const summary: DashboardSummary = {
       revenue,
       cogs,
-      grossProfit: revenue - cogs,
-      netProfit: totalIncome - totalExpense,
+      grossProfit,
+      grossMarginPct,
+      netProfit,
+      netMarginPct,
       cashPosition,
       outstandingReceivables,
       outstandingPayables,
@@ -143,6 +152,8 @@ export class ExecutiveService {
       overdueInvoices,
       lowStockItems: inventory.lowStockItems.length
     });
+    const topRisks = this.topRisks(alerts, 3);
+    const recommendedActions = this.recommendedActions(topRisks);
 
     await this.audit.logCompany({
       actorUserId,
@@ -154,7 +165,8 @@ export class ExecutiveService {
         from: this.toYmd(from),
         to: this.toYmd(to),
         alerts: alerts.length,
-        bucket
+        bucket,
+        topRisks: topRisks.map((risk) => risk.type)
       },
       ip,
       userAgent
@@ -164,6 +176,8 @@ export class ExecutiveService {
       summary,
       trends,
       alerts,
+      topRisks,
+      recommendedActions,
       lowStockItems: inventory.lowStockItems,
       overdueTasks: overdueTasks.map((row) => ({
         id: row.id,
@@ -282,12 +296,18 @@ export class ExecutiveService {
   }
 
   private buildAlerts(input: { summary: DashboardSummary; overdueInvoices: number; lowStockItems: number }) {
-    const alerts: Array<{ type: string; severity: 'info' | 'warning' | 'critical'; message: string }> = [];
+    const alerts: Array<{
+      type: string;
+      severity: 'info' | 'warning' | 'critical' | 'good';
+      severityColor: 'green' | 'yellow' | 'red';
+      message: string;
+    }> = [];
 
     if (input.overdueInvoices > 5) {
       alerts.push({
         type: 'overdue_invoices',
         severity: 'warning',
+        severityColor: 'yellow',
         message: `Overdue invoice count is ${input.overdueInvoices} (threshold: 5).`
       });
     }
@@ -296,25 +316,25 @@ export class ExecutiveService {
       alerts.push({
         type: 'cash_negative',
         severity: 'critical',
+        severityColor: 'red',
         message: `Cash position is negative (${input.summary.cashPosition.toFixed(2)}).`
       });
     }
 
-    if (input.summary.revenue > 0) {
-      const margin = (input.summary.grossProfit / input.summary.revenue) * 100;
-      if (margin < 20) {
-        alerts.push({
-          type: 'gross_margin_low',
-          severity: 'warning',
-          message: `Gross margin is ${margin.toFixed(1)}%, below target 20%.`
-        });
-      }
+    if (input.summary.revenue > 0 && input.summary.grossMarginPct < 20) {
+      alerts.push({
+        type: 'gross_margin_low',
+        severity: 'warning',
+        severityColor: 'yellow',
+        message: `Gross margin is ${input.summary.grossMarginPct.toFixed(1)}%, below target 20%.`
+      });
     }
 
     if (input.lowStockItems > 0) {
       alerts.push({
         type: 'inventory_low_stock',
         severity: 'warning',
+        severityColor: 'yellow',
         message: `${input.lowStockItems} inventory items are below low-stock threshold.`
       });
     }
@@ -323,11 +343,43 @@ export class ExecutiveService {
       alerts.push({
         type: 'tasks_overdue',
         severity: 'info',
+        severityColor: 'yellow',
         message: `${input.summary.taskOverdueCount} tasks are overdue.`
       });
     }
 
+    if (alerts.length === 0) {
+      alerts.push({
+        type: 'healthy',
+        severity: 'good',
+        severityColor: 'green',
+        message: 'No critical or warning risks detected in selected period.'
+      });
+    }
+
     return alerts;
+  }
+
+  private topRisks(
+    alerts: Array<{ type: string; severity: 'info' | 'warning' | 'critical' | 'good'; severityColor: 'green' | 'yellow' | 'red'; message: string }>,
+    take: number
+  ) {
+    const order = { critical: 3, warning: 2, info: 1, good: 0 } as const;
+    return [...alerts].sort((a, b) => order[b.severity] - order[a.severity]).slice(0, take);
+  }
+
+  private recommendedActions(
+    risks: Array<{ type: string; severity: 'info' | 'warning' | 'critical' | 'good'; severityColor: 'green' | 'yellow' | 'red'; message: string }>
+  ) {
+    const actions: string[] = [];
+    const types = new Set(risks.map((row) => row.type));
+    if (types.has('cash_negative')) actions.push('Freeze non-critical spending and accelerate receivable collections this week.');
+    if (types.has('overdue_invoices')) actions.push('Trigger follow-up workflow for overdue invoices and call top debtors today.');
+    if (types.has('gross_margin_low')) actions.push('Review pricing and COGS drivers for low-margin products and channels.');
+    if (types.has('inventory_low_stock')) actions.push('Place replenishment orders for low-stock SKUs before next peak period.');
+    if (types.has('tasks_overdue')) actions.push('Rebalance task assignments and close aging operational tasks in daily standup.');
+    if (actions.length === 0) actions.push('Maintain current operating plan and monitor KPI trends daily.');
+    return actions.slice(0, 4);
   }
 
   private resolveDateRange(fromRaw?: string, toRaw?: string) {
