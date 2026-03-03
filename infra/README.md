@@ -255,6 +255,34 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 9. Inventory smoke flow (`pnpm inventory:smoke`)
 10. Sales/Recipe smoke flow (`pnpm sales:smoke`)
 11. Task Core smoke flow (`pnpm tasks:smoke`)
+12. Reservation Core smoke flow (`pnpm reservations:smoke`)
+13. Reservation operations (`/app/reservations`)
+
+## Reservation & CRM Core
+- Module key: `reservation-core`.
+- Tenant-owned entities:
+  - `Customer`
+  - `CustomerTag`
+  - `CustomerTagLink`
+  - `Reservation`
+- App API endpoints (module installation + tenant RBAC enforced):
+  - `/app-api/reservations/capabilities`
+  - `/app-api/reservations/customers`
+  - `/app-api/reservations/customer-tags`
+  - `/app-api/reservations/reservations`
+  - `/app-api/reservations/reports/reservation-summary`
+- Reservation lifecycle:
+  - `BOOKED -> CONFIRMED -> SEATED -> COMPLETED`
+  - terminal statuses: `CANCELED`, `NO_SHOW`
+  - On completion, customer visit count increments and last visit date updates.
+- Sales linkage (v0):
+  - `SalesOrder.reservationId` can reference reservation.
+  - When linked order is posted, customer `totalSpend` is incremented by order revenue.
+  - If posted order is voided, that amount is decremented.
+- UI route:
+  - `/app/reservations` with tabs: Calendar/List, Customers, Reports.
+- Smoke flow:
+  - `pnpm reservations:smoke` creates customer+reservation, marks completed, verifies visit count increment.
 
 ## Task & Workforce Core
 - Module key: `task-core`.

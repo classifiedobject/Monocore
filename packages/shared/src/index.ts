@@ -292,6 +292,53 @@ export const taskGenerateQuerySchema = z.object({
 export const taskCommentSchema = z.object({
   message: z.string().min(1).max(2000)
 });
+
+export const reservationCustomerSchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  phone: z.string().max(40).nullable().optional(),
+  email: z.string().email().max(140).nullable().optional(),
+  birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional()
+});
+
+export const reservationCustomerQuerySchema = z.object({
+  search: z.string().min(1).optional()
+});
+
+export const reservationTagSchema = z.object({
+  name: z.string().min(1).max(80)
+});
+
+export const reservationTagLinkSchema = z.object({
+  tagIds: z.array(z.string().uuid()).min(1)
+});
+
+export const reservationSchema = z.object({
+  customerId: z.string().uuid().nullable().optional(),
+  name: z.string().min(1).max(160),
+  phone: z.string().max(40).nullable().optional(),
+  reservationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reservationTime: z.string().regex(/^\d{2}:\d{2}$/),
+  guestCount: z.coerce.number().int().positive(),
+  status: z.enum(['BOOKED', 'CONFIRMED', 'SEATED', 'COMPLETED', 'CANCELED', 'NO_SHOW']).optional(),
+  tableRef: z.string().max(80).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional()
+});
+
+export const reservationQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  status: z.enum(['BOOKED', 'CONFIRMED', 'SEATED', 'COMPLETED', 'CANCELED', 'NO_SHOW']).optional()
+});
+
+export const reservationStatusSchema = z.object({
+  newStatus: z.enum(['BOOKED', 'CONFIRMED', 'SEATED', 'COMPLETED', 'CANCELED', 'NO_SHOW'])
+});
+
+export const reservationSummaryQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
 export const inventoryWarehouseSchema = z.object({
   name: z.string().min(2).max(140),
   location: z.string().max(300).nullable().optional(),
@@ -371,6 +418,7 @@ export const salesOrderSchema = z.object({
   orderDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
   profitCenterId: z.string().uuid().nullable().optional(),
   warehouseId: z.string().uuid().nullable().optional(),
+  reservationId: z.string().uuid().nullable().optional(),
   currency: z.string().min(3).max(8).default('TRY'),
   notes: z.string().max(1000).nullable().optional(),
   lines: z.array(salesOrderLineSchema).min(1)
