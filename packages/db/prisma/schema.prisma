@@ -137,6 +137,22 @@ enum ReservationStatus {
   NO_SHOW
 }
 
+enum SalaryType {
+  FIXED
+  HOURLY
+}
+
+enum PayrollPeriodStatus {
+  DRAFT
+  CALCULATED
+  POSTED
+}
+
+enum TipDistributionMethod {
+  EQUAL
+  HOURS_WEIGHTED
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -281,6 +297,12 @@ model Company {
   recipeLines     RecipeLine[]
   salesOrders     SalesOrder[]
   salesOrderLines SalesOrderLine[]
+  employees       Employee[]
+  workLogs        WorkLog[]
+  payrollPeriods  PayrollPeriod[]
+  payrollLines    PayrollLine[]
+  tipPools        TipPool[]
+  tipDistributions TipDistribution[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -325,6 +347,7 @@ model CompanyRole {
   invites      CompanyInvite[]
   taskTemplatesDefault TaskTemplate[] @relation("task_template_default_assignee_role")
   taskInstancesAssigned TaskInstance[] @relation("task_instance_assignee_role")
+  employees      Employee[]
 
   @@unique([companyId, key])
   @@index([companyId])
@@ -672,6 +695,7 @@ model FinanceProfitCenter {
   allocationTargets FinanceAllocationTarget[]
   budgetLines FinanceBudgetLine[]
   cashflowForecastItems FinanceCashflowForecastItem[]
+  employees    Employee[]
 
   @@index([companyId, isActive])
   @@index([companyId, parentId])
@@ -1185,4 +1209,107 @@ model SalesOrderLine {
 
   @@index([companyId, salesOrderId])
   @@index([companyId, productId])
+}
+
+model Employee {
+  id             String   @id @default(uuid())
+  companyId      String
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String?
+  roleId         String?
+  profitCenterId String?
+  hireDate       DateTime
+  salaryType     SalaryType
+  baseSalary     Decimal?  @db.Decimal(14, 2)
+  hourlyRate     Decimal?  @db.Decimal(14, 2)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role           CompanyRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  profitCenter   FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
+  workLogs       WorkLog[]
+  payrollLines   PayrollLine[]
+  tipDistributions TipDistribution[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, roleId])
+  @@index([companyId, profitCenterId])
+}
+
+model WorkLog {
+  id          String   @id @default(uuid())
+  companyId   String
+  employeeId  String
+  date        DateTime
+  hoursWorked Decimal  @db.Decimal(8, 2)
+  createdAt   DateTime @default(now())
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, employeeId, date])
+  @@index([companyId, date])
+}
+
+model PayrollPeriod {
+  id         String   @id @default(uuid())
+  companyId  String
+  startDate  DateTime
+  endDate    DateTime
+  status     PayrollPeriodStatus @default(DRAFT)
+  totalGross Decimal  @default(0) @db.Decimal(14, 2)
+  totalNet   Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines      PayrollLine[]
+
+  @@index([companyId, status])
+  @@index([companyId, startDate, endDate])
+}
+
+model PayrollLine {
+  id              String   @id @default(uuid())
+  companyId       String
+  payrollPeriodId String
+  employeeId      String
+  grossAmount     Decimal  @db.Decimal(14, 2)
+  notes           String?
+  createdAt       DateTime @default(now())
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([payrollPeriodId, employeeId])
+  @@index([companyId, payrollPeriodId])
+}
+
+model TipPool {
+  id                 String   @id @default(uuid())
+  companyId          String
+  periodStart        DateTime
+  periodEnd          DateTime
+  totalTips          Decimal  @db.Decimal(14, 2)
+  distributionMethod TipDistributionMethod
+  createdAt          DateTime @default(now())
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  distributions      TipDistribution[]
+
+  @@index([companyId, periodStart, periodEnd])
+}
+
+model TipDistribution {
+  id         String   @id @default(uuid())
+  companyId  String
+  tipPoolId  String
+  employeeId String
+  amount     Decimal  @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tipPool    TipPool  @relation(fields: [tipPoolId], references: [id], onDelete: Cascade)
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([tipPoolId, employeeId])
+  @@index([companyId, tipPoolId])
 }

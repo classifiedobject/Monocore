@@ -59,6 +59,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     if (installedModuleKeys.includes('executive-core')) {
       list.push({ href: '/app/executive', label: 'Executive' });
     }
+    if (installedModuleKeys.includes('payroll-core')) {
+      list.push({ href: '/app/payroll', label: 'Payroll' });
+    }
     return list;
   }, [installedModuleKeys]);
 

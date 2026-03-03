@@ -243,6 +243,34 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 - Language keys stored in `LanguagePack` table (`locale`, `namespace`, `key`, `value`).
 - Platform UI page `/platform/i18n` supports editing translations for `en` and `tr`.
 
+## Payroll Core
+- Module key: `payroll-core`.
+- Tenant-owned entities:
+  - `Employee`
+  - `WorkLog`
+  - `PayrollPeriod`
+  - `PayrollLine`
+  - `TipPool`
+  - `TipDistribution`
+- App API endpoints (module installation + tenant RBAC enforced):
+  - `/app-api/payroll/employees`
+  - `/app-api/payroll/worklogs`
+  - `/app-api/payroll/periods`
+  - `/app-api/payroll/tips`
+- Calculation flow:
+  - Fixed employee: `gross = baseSalary`
+  - Hourly employee: `gross = period worklog hours * hourlyRate`
+  - `POST /app-api/payroll/periods/:id/calculate` writes `PayrollLine` rows and updates period totals.
+- Posting flow:
+  - `POST /app-api/payroll/periods/:id/post` writes finance expense entries for payroll lines.
+  - Tip pools in the period are also posted as finance expenses.
+  - Employee `profitCenterId` is copied to generated finance entries when present.
+- Tips:
+  - Distribution methods: `equal`, `hours_weighted`
+  - `hours_weighted` uses worklog hours between tip pool start/end dates.
+- Smoke flow:
+  - `pnpm payroll:smoke` verifies fixed+hourly payroll totals, post action, tip distribution sum, and finance impact.
+
 ## Base Flows
 1. Register/login (`/auth/register`, `/auth/login`)
 2. Create/select company (`/app/company`)
@@ -258,6 +286,7 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 12. Reservation Core smoke flow (`pnpm reservations:smoke`)
 13. Reservation operations (`/app/reservations`)
 14. Executive Core smoke flow (`pnpm executive:smoke`)
+15. Payroll Core smoke flow (`pnpm payroll:smoke`)
 
 ## Reservation & CRM Core
 - Module key: `reservation-core`.
