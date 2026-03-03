@@ -254,3 +254,32 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 8. Finance smoke flow (`pnpm finance:smoke`)
 9. Inventory smoke flow (`pnpm inventory:smoke`)
 10. Sales/Recipe smoke flow (`pnpm sales:smoke`)
+11. Task Core smoke flow (`pnpm tasks:smoke`)
+
+## Task & Workforce Core
+- Module key: `task-core`.
+- Tenant-owned entities:
+  - `TaskBoard`
+  - `TaskTemplate`
+  - `TaskInstance`
+  - `TaskComment`
+- App API endpoints (module installation + tenant RBAC enforced):
+  - `/app-api/tasks/capabilities`
+  - `/app-api/tasks/boards`
+  - `/app-api/tasks/templates`
+  - `/app-api/tasks`
+  - `/app-api/tasks/:id/complete`
+  - `/app-api/tasks/:id/reopen`
+  - `/app-api/tasks/generate`
+  - `/app-api/tasks/reports/summary`
+  - `/app-api/tasks/reports/overdue-by-assignee`
+- Assignment model:
+  - Task template/instance assignment can target either a company user or a company role.
+  - Role-based assignment reuses existing company RBAC role definitions for lightweight workforce mapping.
+- Recurring generation:
+  - `POST /app-api/tasks/generate?from=YYYY-MM-DD&to=YYYY-MM-DD`
+  - Generation is idempotent per template/date, so running the same range twice does not duplicate tasks.
+- UI route:
+  - `/app/tasks` with tabs: My Tasks, Team Tasks, Templates, Reports.
+- Smoke flow:
+  - `pnpm tasks:smoke` creates a daily template, generates 7-day tasks, verifies idempotency, completes one task, and checks summary reporting.

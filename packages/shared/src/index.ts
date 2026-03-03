@@ -245,6 +245,54 @@ export const financeCashflowProjectionQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 });
+
+export const taskBoardSchema = z.object({
+  name: z.string().min(2).max(140)
+});
+
+export const taskTemplateSchema = z.object({
+  boardId: z.string().uuid().nullable().optional(),
+  title: z.string().min(2).max(200),
+  description: z.string().max(4000).nullable().optional(),
+  priority: z.enum(['LOW', 'NORMAL', 'HIGH', 'URGENT']).default('NORMAL'),
+  scheduleType: z.enum(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']).default('NONE'),
+  scheduleMeta: z.record(z.any()).nullable().optional(),
+  defaultAssigneeType: z.enum(['USER', 'ROLE']),
+  defaultAssigneeUserId: z.string().uuid().nullable().optional(),
+  defaultAssigneeRoleId: z.string().uuid().nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const taskInstanceSchema = z.object({
+  templateId: z.string().uuid().nullable().optional(),
+  boardId: z.string().uuid().nullable().optional(),
+  title: z.string().min(2).max(200),
+  description: z.string().max(4000).nullable().optional(),
+  priority: z.enum(['LOW', 'NORMAL', 'HIGH', 'URGENT']).default('NORMAL'),
+  dueDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'DONE', 'CANCELED']).optional(),
+  assigneeUserId: z.string().uuid().nullable().optional(),
+  assigneeRoleId: z.string().uuid().nullable().optional()
+});
+
+export const taskQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'DONE', 'CANCELED']).optional(),
+  assigneeUserId: z.string().uuid().optional(),
+  assigneeRoleId: z.string().uuid().optional(),
+  overdue: z.union([z.literal('true'), z.literal('false')]).optional()
+});
+
+export const taskGenerateQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
+
+export const taskCommentSchema = z.object({
+  message: z.string().min(1).max(2000)
+});
+
 export const inventoryWarehouseSchema = z.object({
   name: z.string().min(2).max(140),
   location: z.string().max(300).nullable().optional(),

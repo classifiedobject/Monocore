@@ -68,7 +68,12 @@ const companyPermissions = [
   'module:recipe-core.recipe.read',
   'module:sales-core.order.manage',
   'module:sales-core.order.read',
-  'module:sales-core.order.post'
+  'module:sales-core.order.post',
+  'module:task-core.template.manage',
+  'module:task-core.task.manage',
+  'module:task-core.task.read',
+  'module:task-core.task.complete',
+  'module:task-core.reports.read'
 ];
 
 async function upsertPlatformRole() {
@@ -318,6 +323,25 @@ async function main() {
     }
   });
 
+  await prisma.module.upsert({
+    where: { key: 'task-core' },
+    create: {
+      key: 'task-core',
+      name: 'Task & Workforce Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Operational tasks with templates, assignees, recurring generation and completion reporting.',
+      dependencies: { modules: ['core'] }
+    },
+    update: {
+      name: 'Task & Workforce Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Operational tasks with templates, assignees, recurring generation and completion reporting.',
+      dependencies: { modules: ['core'] }
+    }
+  });
+
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -347,6 +371,40 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
+  });
+
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'task-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'task-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'task-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'task-core',
       limits: {}
     },
     update: {}

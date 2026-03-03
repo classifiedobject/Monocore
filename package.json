@@ -21,7 +21,8 @@
     "health:check": "sh infra/scripts/health-check.sh",
     "finance:smoke": "node infra/scripts/finance-smoke.mjs",
     "inventory:smoke": "node infra/scripts/inventory-smoke.mjs",
-    "sales:smoke": "node infra/scripts/sales-recipe-smoke.mjs"
+    "sales:smoke": "node infra/scripts/sales-recipe-smoke.mjs",
+    "tasks:smoke": "node infra/scripts/tasks-smoke.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "7.4.4",

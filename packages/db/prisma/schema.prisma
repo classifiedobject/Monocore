@@ -87,6 +87,34 @@ enum FinanceCashflowDirection {
   INFLOW
   OUTFLOW
 }
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskScheduleType {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum TaskAssigneeType {
+  USER
+  ROLE
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
 enum InventoryMovementType {
   IN
   OUT
@@ -126,6 +154,11 @@ model User {
   financePaymentsCreated FinancePayment[] @relation("finance_payment_creator")
   financeBudgetsCreated FinanceBudget[] @relation("finance_budget_creator")
   financeCashflowForecastItemsCreated FinanceCashflowForecastItem[] @relation("finance_cashflow_forecast_creator")
+  taskTemplatesCreated TaskTemplate[] @relation("task_template_creator")
+  taskTemplatesDefaultAssignee TaskTemplate[] @relation("task_template_default_assignee_user")
+  taskInstancesCreated TaskInstance[] @relation("task_instance_creator")
+  taskInstancesAssigned TaskInstance[] @relation("task_instance_assignee_user")
+  taskCommentsAuthored TaskComment[] @relation("task_comment_author")
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
 }
@@ -223,6 +256,10 @@ model Company {
   financeBudgets FinanceBudget[]
   financeBudgetLines FinanceBudgetLine[]
   financeCashflowForecastItems FinanceCashflowForecastItem[]
+  taskBoards TaskBoard[]
+  taskTemplates TaskTemplate[]
+  taskInstances TaskInstance[]
+  taskComments TaskComment[]
   inventoryWarehouses InventoryWarehouse[]
   inventoryItems InventoryItem[]
   inventoryStockMovements InventoryStockMovement[]
@@ -273,6 +310,8 @@ model CompanyRole {
   permissions  CompanyRolePermission[]
   members      CompanyMemberRole[]
   invites      CompanyInvite[]
+  taskTemplatesDefault TaskTemplate[] @relation("task_template_default_assignee_role")
+  taskInstancesAssigned TaskInstance[] @relation("task_instance_assignee_role")
 
   @@unique([companyId, key])
   @@index([companyId])
@@ -817,6 +856,95 @@ model FinanceCashflowForecastItem {
   @@index([companyId, date])
   @@index([companyId, direction, date])
 }
+
+model TaskBoard {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  templates TaskTemplate[]
+  tasks     TaskInstance[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model TaskTemplate {
+  id                    String   @id @default(uuid())
+  companyId             String
+  boardId               String?
+  title                 String
+  description           String?
+  priority              TaskPriority     @default(NORMAL)
+  scheduleType          TaskScheduleType @default(NONE)
+  scheduleMeta          Json?
+  defaultAssigneeType   TaskAssigneeType
+  defaultAssigneeUserId String?
+  defaultAssigneeRoleId String?
+  isActive              Boolean @default(true)
+  createdByUserId       String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  company               Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  board                 TaskBoard?   @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  defaultAssigneeUser   User?        @relation("task_template_default_assignee_user", fields: [defaultAssigneeUserId], references: [id], onDelete: SetNull)
+  defaultAssigneeRole   CompanyRole? @relation("task_template_default_assignee_role", fields: [defaultAssigneeRoleId], references: [id], onDelete: SetNull)
+  createdByUser         User         @relation("task_template_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  taskInstances         TaskInstance[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, scheduleType, isActive])
+  @@index([companyId, defaultAssigneeUserId])
+  @@index([companyId, defaultAssigneeRoleId])
+}
+
+model TaskInstance {
+  id              String   @id @default(uuid())
+  companyId       String
+  templateId      String?
+  boardId         String?
+  title           String
+  description     String?
+  priority        TaskPriority @default(NORMAL)
+  dueDate         DateTime
+  status          TaskStatus   @default(OPEN)
+  assigneeUserId  String?
+  assigneeRoleId  String?
+  createdByUserId String
+  completedAt     DateTime?
+  generatedDate   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template        TaskTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  board           TaskBoard?  @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  assigneeUser    User?       @relation("task_instance_assignee_user", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  assigneeRole    CompanyRole? @relation("task_instance_assignee_role", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
+  createdByUser   User        @relation("task_instance_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  comments        TaskComment[]
+
+  @@index([companyId, dueDate, status])
+  @@index([companyId, assigneeUserId, status])
+  @@index([companyId, assigneeRoleId, status])
+  @@index([companyId, templateId, generatedDate])
+}
+
+model TaskComment {
+  id           String   @id @default(uuid())
+  companyId    String
+  taskId       String
+  authorUserId String
+  message      String
+  createdAt    DateTime @default(now())
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  task         TaskInstance @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorUser   User         @relation("task_comment_author", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, taskId, createdAt])
+}
+
 model InventoryWarehouse {
   id        String   @id @default(uuid())
   companyId String
