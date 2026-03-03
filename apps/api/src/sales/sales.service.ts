@@ -62,6 +62,7 @@ export class SalesService {
       include: {
         warehouse: true,
         profitCenter: true,
+        reservation: { include: { customer: true } },
         lines: { include: { product: true }, orderBy: { createdAt: 'asc' } }
       },
       orderBy: [{ orderDate: 'desc' }, { createdAt: 'desc' }]
@@ -82,6 +83,7 @@ export class SalesService {
           orderDate: this.parseDateValue(body.orderDate, false),
           profitCenterId: body.profitCenterId ?? null,
           warehouseId: body.warehouseId ?? null,
+          reservationId: body.reservationId ?? null,
           currency: body.currency,
           notes: body.notes ?? null,
           totalRevenue: new Prisma.Decimal(totalRevenue),
@@ -108,6 +110,7 @@ export class SalesService {
         include: {
           warehouse: true,
           profitCenter: true,
+          reservation: { include: { customer: true } },
           lines: { include: { product: true }, orderBy: { createdAt: 'asc' } }
         }
       });
@@ -130,6 +133,7 @@ export class SalesService {
 
     if (body.profitCenterId) await this.requireProfitCenter(companyId, body.profitCenterId);
     if (body.warehouseId) await this.requireWarehouse(companyId, body.warehouseId);
+    if (body.reservationId) await this.requireReservation(companyId, body.reservationId);
     if (body.lines) {
       for (const line of body.lines) {
         await this.requireProduct(companyId, line.productId);
@@ -144,6 +148,7 @@ export class SalesService {
           ...(body.orderDate !== undefined ? { orderDate: this.parseDateValue(body.orderDate, false) } : {}),
           ...(body.profitCenterId !== undefined ? { profitCenterId: body.profitCenterId } : {}),
           ...(body.warehouseId !== undefined ? { warehouseId: body.warehouseId } : {}),
+          ...(body.reservationId !== undefined ? { reservationId: body.reservationId } : {}),
           ...(body.currency !== undefined ? { currency: body.currency } : {}),
           ...(body.notes !== undefined ? { notes: body.notes } : {})
         }
@@ -176,6 +181,7 @@ export class SalesService {
         include: {
           warehouse: true,
           profitCenter: true,
+          reservation: { include: { customer: true } },
           lines: { include: { product: true }, orderBy: { createdAt: 'asc' } }
         }
       });
@@ -303,6 +309,18 @@ export class SalesService {
         }
       });
 
+      if (order.reservationId) {
+        const reservation = await tx.reservation.findUnique({ where: { id: order.reservationId } });
+        if (reservation?.customerId) {
+          await tx.customer.update({
+            where: { id: reservation.customerId },
+            data: {
+              totalSpend: { increment: new Prisma.Decimal(totalRevenue) }
+            }
+          });
+        }
+      }
+
       return {
         order,
         movementIds,
@@ -402,6 +420,18 @@ export class SalesService {
         data: { status: 'VOID' }
       });
 
+      if (order.reservationId) {
+        const reservation = await tx.reservation.findUnique({ where: { id: order.reservationId } });
+        if (reservation?.customerId) {
+          await tx.customer.update({
+            where: { id: reservation.customerId },
+            data: {
+              totalSpend: { decrement: new Prisma.Decimal(Number(existing.totalRevenue)) }
+            }
+          });
+        }
+      }
+
       return { order, reversalMovementIds, reversalFinanceIds };
     });
 
@@ -437,11 +467,13 @@ export class SalesService {
     body: {
       profitCenterId?: string | null;
       warehouseId?: string | null;
+      reservationId?: string | null;
       lines: Array<{ productId: string; quantity: number; unitPrice: number }>;
     }
   ) {
     if (body.profitCenterId) await this.requireProfitCenter(companyId, body.profitCenterId);
     if (body.warehouseId) await this.requireWarehouse(companyId, body.warehouseId);
+    if (body.reservationId) await this.requireReservation(companyId, body.reservationId);
     for (const line of body.lines) {
       await this.requireProduct(companyId, line.productId);
     }
@@ -453,6 +485,7 @@ export class SalesService {
       include: {
         warehouse: true,
         profitCenter: true,
+        reservation: { include: { customer: true } },
         lines: { include: { product: true }, orderBy: { createdAt: 'asc' } }
       }
     });
@@ -482,6 +515,14 @@ export class SalesService {
     const row = await this.prisma.financeProfitCenter.findUnique({ where: { id } });
     if (!row || row.companyId !== companyId) {
       throw new NotFoundException('Profit center not found');
+    }
+    return row;
+  }
+
+  private async requireReservation(companyId: string, id: string) {
+    const row = await this.prisma.reservation.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Reservation not found');
     }
     return row;
   }

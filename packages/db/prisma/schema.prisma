@@ -128,6 +128,15 @@ enum SalesOrderStatus {
   VOID
 }
 
+enum ReservationStatus {
+  BOOKED
+  CONFIRMED
+  SEATED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -160,6 +169,7 @@ model User {
   taskCommentsAuthored TaskComment[] @relation("task_comment_author")
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
+  reservationsCreated Reservation[] @relation("reservation_creator")
 }
 
 model Session {
@@ -259,6 +269,10 @@ model Company {
   taskTemplates TaskTemplate[]
   taskInstances TaskInstance[]
   taskComments TaskComment[]
+  customers Customer[]
+  customerTags CustomerTag[]
+  customerTagLinks CustomerTagLink[]
+  reservations Reservation[]
   inventoryWarehouses InventoryWarehouse[]
   inventoryItems InventoryItem[]
   inventoryStockMovements InventoryStockMovement[]
@@ -942,6 +956,82 @@ model TaskComment {
 
   @@index([companyId, taskId, createdAt])
 }
+
+model Customer {
+  id          String   @id @default(uuid())
+  companyId   String
+  firstName   String
+  lastName    String
+  phone       String?
+  email       String?
+  birthDate   DateTime?
+  notes       String?
+  visitCount  Int      @default(0)
+  totalSpend  Decimal  @default(0) @db.Decimal(14, 2)
+  lastVisitAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tags        CustomerTagLink[]
+  reservations Reservation[]
+
+  @@index([companyId, phone])
+  @@index([companyId, email])
+  @@index([companyId, lastVisitAt])
+}
+
+model CustomerTag {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  links     CustomerTagLink[]
+
+  @@unique([companyId, name])
+  @@index([companyId, createdAt])
+}
+
+model CustomerTagLink {
+  id         String   @id @default(uuid())
+  companyId  String
+  customerId String
+  tagId      String
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tag        CustomerTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, tagId])
+  @@index([companyId, customerId])
+  @@index([companyId, tagId])
+}
+
+model Reservation {
+  id              String   @id @default(uuid())
+  companyId       String
+  customerId      String?
+  name            String
+  phone           String?
+  reservationDate DateTime
+  reservationTime DateTime
+  guestCount      Int
+  status          ReservationStatus @default(BOOKED)
+  tableRef        String?
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdByUser   User @relation("reservation_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  salesOrders     SalesOrder[]
+
+  @@index([companyId, reservationDate])
+  @@index([companyId, status])
+  @@index([companyId, customerId])
+}
+
 model InventoryWarehouse {
   id        String   @id @default(uuid())
   companyId String
@@ -1058,6 +1148,7 @@ model SalesOrder {
   orderDate     DateTime
   profitCenterId String?
   warehouseId   String?
+  reservationId String?
   status        SalesOrderStatus @default(DRAFT)
   currency      String   @default("TRY")
   totalRevenue  Decimal  @default(0) @db.Decimal(14, 2)
@@ -1069,12 +1160,14 @@ model SalesOrder {
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   profitCenter  FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
   warehouse     InventoryWarehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  reservation   Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
   createdByUser User @relation("sales_order_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   lines         SalesOrderLine[]
 
   @@index([companyId, status, orderDate])
   @@index([companyId, profitCenterId])
   @@index([companyId, warehouseId])
+  @@index([companyId, reservationId])
 }
 
 model SalesOrderLine {

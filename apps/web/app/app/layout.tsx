@@ -53,6 +53,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     if (installedModuleKeys.includes('task-core')) {
       list.push({ href: '/app/tasks', label: 'Tasks' });
     }
+    if (installedModuleKeys.includes('reservation-core')) {
+      list.push({ href: '/app/reservations', label: 'Reservations' });
+    }
     return list;
   }, [installedModuleKeys]);
 

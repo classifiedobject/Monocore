@@ -73,7 +73,11 @@ const companyPermissions = [
   'module:task-core.task.manage',
   'module:task-core.task.read',
   'module:task-core.task.complete',
-  'module:task-core.reports.read'
+  'module:task-core.reports.read',
+  'module:reservation-core.customer.manage',
+  'module:reservation-core.reservation.manage',
+  'module:reservation-core.reservation.read',
+  'module:reservation-core.reports.read'
 ];
 
 async function upsertPlatformRole() {
@@ -342,6 +346,25 @@ async function main() {
     }
   });
 
+  await prisma.module.upsert({
+    where: { key: 'reservation-core' },
+    create: {
+      key: 'reservation-core',
+      name: 'Reservation & CRM Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Customer profiles, reservations lifecycle and reservation analytics foundation.',
+      dependencies: { modules: ['core'] }
+    },
+    update: {
+      name: 'Reservation & CRM Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Customer profiles, reservations lifecycle and reservation analytics foundation.',
+      dependencies: { modules: ['core'] }
+    }
+  });
+
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -405,6 +428,40 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'task-core',
+      limits: {}
+    },
+    update: {}
+  });
+
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'reservation-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'reservation-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'reservation-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'reservation-core',
       limits: {}
     },
     update: {}

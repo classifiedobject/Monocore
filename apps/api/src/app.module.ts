@@ -25,6 +25,8 @@ import { SalesController } from './sales/sales.controller.js';
 import { SalesService } from './sales/sales.service.js';
 import { TasksController } from './tasks/tasks.controller.js';
 import { TasksService } from './tasks/tasks.service.js';
+import { ReservationsController } from './reservations/reservations.controller.js';
+import { ReservationsService } from './reservations/reservations.service.js';
 import { HealthController } from './health.controller.js';
 
 @Module({
@@ -46,6 +48,7 @@ import { HealthController } from './health.controller.js';
     RecipeController,
     SalesController,
     TasksController,
+    ReservationsController,
     HealthController
   ],
   providers: [
@@ -59,6 +62,7 @@ import { HealthController } from './health.controller.js';
     RecipeService,
     SalesService,
     TasksService,
+    ReservationsService,
     AuditService,
     RedisService,
     AuthGuard,
