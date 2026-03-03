@@ -430,6 +430,12 @@ export const salesOrderQuerySchema = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   profitCenterId: z.string().uuid().optional()
 });
+
+export const executiveDashboardQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
   namespace: z.string().min(1).max(80),

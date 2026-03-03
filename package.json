@@ -23,7 +23,8 @@
     "inventory:smoke": "node infra/scripts/inventory-smoke.mjs",
     "sales:smoke": "node infra/scripts/sales-recipe-smoke.mjs",
     "tasks:smoke": "node infra/scripts/tasks-smoke.mjs",
-    "reservations:smoke": "node infra/scripts/reservations-smoke.mjs"
+    "reservations:smoke": "node infra/scripts/reservations-smoke.mjs",
+    "executive:smoke": "node infra/scripts/executive-smoke.mjs"
   },
   "devDependencies": {
     "dotenv-cli": "7.4.4",

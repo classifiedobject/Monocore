@@ -257,6 +257,7 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
 11. Task Core smoke flow (`pnpm tasks:smoke`)
 12. Reservation Core smoke flow (`pnpm reservations:smoke`)
 13. Reservation operations (`/app/reservations`)
+14. Executive Core smoke flow (`pnpm executive:smoke`)
 
 ## Reservation & CRM Core
 - Module key: `reservation-core`.
@@ -311,3 +312,19 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `/app/tasks` with tabs: My Tasks, Team Tasks, Templates, Reports.
 - Smoke flow:
   - `pnpm tasks:smoke` creates a daily template, generates 7-day tasks, verifies idempotency, completes one task, and checks summary reporting.
+
+## Executive Intelligence Core
+- Module key: `executive-core`.
+- App API endpoint (module installation + tenant RBAC enforced):
+  - `/app-api/executive/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- Dashboard aggregates cross-module KPIs:
+  - Finance and sales: revenue, COGS, gross/net profit, trend lines.
+  - AP/AR: outstanding receivables and payables.
+  - Inventory: current inventory value (`lastPurchaseUnitCost * stock`).
+  - Reservations/tasks: reservation volume and overdue task count.
+- Rule-based alerts (v1):
+  - overdue invoices, negative cash, low gross margin, low stock, overdue tasks.
+- UI route:
+  - `/app/executive` (summary cards, trend data, alerts, low stock list, overdue tasks).
+- Smoke flow:
+  - `pnpm executive:smoke` prepares sample finance/inventory/AP data and validates dashboard output + alert generation.
