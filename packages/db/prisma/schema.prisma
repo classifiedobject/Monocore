@@ -114,7 +114,6 @@ enum TaskStatus {
   DONE
   CANCELED
 }
-
 enum InventoryMovementType {
   IN
   OUT
@@ -856,7 +855,6 @@ model FinanceCashflowForecastItem {
   @@index([companyId, date])
   @@index([companyId, direction, date])
 }
-
 model TaskBoard {
   id        String   @id @default(uuid())
   companyId String
@@ -944,7 +942,6 @@ model TaskComment {
 
   @@index([companyId, taskId, createdAt])
 }
-
 model InventoryWarehouse {
   id        String   @id @default(uuid())
   companyId String

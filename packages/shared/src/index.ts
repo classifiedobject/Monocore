@@ -292,7 +292,6 @@ export const taskGenerateQuerySchema = z.object({
 export const taskCommentSchema = z.object({
   message: z.string().min(1).max(2000)
 });
-
 export const inventoryWarehouseSchema = z.object({
   name: z.string().min(2).max(140),
   location: z.string().max(300).nullable().optional(),
