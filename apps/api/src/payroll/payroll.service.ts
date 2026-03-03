@@ -521,7 +521,6 @@ export class PayrollService {
   private toYmd(value: Date) {
     return value.toISOString().slice(0, 10);
   }
-
   private async logCompany(
     actorUserId: string,
     companyId: string,
