@@ -436,6 +436,44 @@ export const executiveDashboardQuerySchema = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 
+export const payrollEmployeeSchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  email: z.string().email().max(140).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  roleId: z.string().uuid().nullable().optional(),
+  profitCenterId: z.string().uuid().nullable().optional(),
+  hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  salaryType: z.enum(['fixed', 'hourly']),
+  baseSalary: z.coerce.number().nonnegative().nullable().optional(),
+  hourlyRate: z.coerce.number().nonnegative().nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const payrollWorkLogSchema = z.object({
+  employeeId: z.string().uuid(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  hoursWorked: z.coerce.number().positive()
+});
+
+export const payrollWorkLogQuerySchema = z.object({
+  employeeId: z.string().uuid().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+export const payrollPeriodSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
+
+export const tipPoolSchema = z.object({
+  periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  totalTips: z.coerce.number().nonnegative(),
+  distributionMethod: z.enum(['equal', 'hours_weighted'])
+});
+
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
   namespace: z.string().min(1).max(80),

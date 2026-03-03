@@ -79,7 +79,11 @@ const companyPermissions = [
   'module:reservation-core.reservation.read',
   'module:reservation-core.reports.read',
   'module:executive-core.dashboard.read',
-  'module:executive-core.alerts.read'
+  'module:executive-core.alerts.read',
+  'module:payroll-core.employee.manage',
+  'module:payroll-core.payroll.manage',
+  'module:payroll-core.payroll.post',
+  'module:payroll-core.tip.manage'
 ];
 
 async function upsertPlatformRole() {
@@ -383,6 +387,24 @@ async function main() {
       dependencies: { modules: ['core', 'finance-core', 'inventory-core', 'sales-core', 'reservation-core', 'task-core'] }
     }
   });
+  await prisma.module.upsert({
+    where: { key: 'payroll-core' },
+    create: {
+      key: 'payroll-core',
+      name: 'Payroll Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Employee payroll periods, worklogs and tip distribution with finance posting.',
+      dependencies: { modules: ['core', 'finance-core'] }
+    },
+    update: {
+      name: 'Payroll Core',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Employee payroll periods, worklogs and tip distribution with finance posting.',
+      dependencies: { modules: ['core', 'finance-core'] }
+    }
+  });
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -412,6 +434,39 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
+  });
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'payroll-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'payroll-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'payroll-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'payroll-core',
       limits: {}
     },
     update: {}
