@@ -345,7 +345,6 @@ async function main() {
       dependencies: { modules: ['core'] }
     }
   });
-
   await prisma.module.upsert({
     where: { key: 'reservation-core' },
     create: {
@@ -364,7 +363,6 @@ async function main() {
       dependencies: { modules: ['core'] }
     }
   });
-
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {

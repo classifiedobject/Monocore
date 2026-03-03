@@ -339,7 +339,6 @@ export const reservationSummaryQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 });
-
 export const inventoryWarehouseSchema = z.object({
   name: z.string().min(2).max(140),
   location: z.string().max(300).nullable().optional(),

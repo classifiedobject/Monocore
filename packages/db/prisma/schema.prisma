@@ -1031,7 +1031,6 @@ model Reservation {
   @@index([companyId, status])
   @@index([companyId, customerId])
 }
-
 model InventoryWarehouse {
   id        String   @id @default(uuid())
   companyId String
