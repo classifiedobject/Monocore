@@ -77,7 +77,9 @@ const companyPermissions = [
   'module:reservation-core.customer.manage',
   'module:reservation-core.reservation.manage',
   'module:reservation-core.reservation.read',
-  'module:reservation-core.reports.read'
+  'module:reservation-core.reports.read',
+  'module:executive-core.dashboard.read',
+  'module:executive-core.alerts.read'
 ];
 
 async function upsertPlatformRole() {
@@ -363,6 +365,24 @@ async function main() {
       dependencies: { modules: ['core'] }
     }
   });
+  await prisma.module.upsert({
+    where: { key: 'executive-core' },
+    create: {
+      key: 'executive-core',
+      name: 'Executive Intelligence',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Cross-module executive KPIs, trends and smart alerts.',
+      dependencies: { modules: ['core', 'finance-core', 'inventory-core', 'sales-core', 'reservation-core', 'task-core'] }
+    },
+    update: {
+      name: 'Executive Intelligence',
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      description: 'Cross-module executive KPIs, trends and smart alerts.',
+      dependencies: { modules: ['core', 'finance-core', 'inventory-core', 'sales-core', 'reservation-core', 'task-core'] }
+    }
+  });
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -392,6 +412,39 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'core',
+      limits: {}
+    },
+    update: {}
+  });
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'executive-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'executive-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'executive-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'executive-core',
       limits: {}
     },
     update: {}

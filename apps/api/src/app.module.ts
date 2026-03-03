@@ -27,6 +27,8 @@ import { TasksController } from './tasks/tasks.controller.js';
 import { TasksService } from './tasks/tasks.service.js';
 import { ReservationsController } from './reservations/reservations.controller.js';
 import { ReservationsService } from './reservations/reservations.service.js';
+import { ExecutiveController } from './executive/executive.controller.js';
+import { ExecutiveService } from './executive/executive.service.js';
 import { HealthController } from './health.controller.js';
 
 @Module({
@@ -49,6 +51,7 @@ import { HealthController } from './health.controller.js';
     SalesController,
     TasksController,
     ReservationsController,
+    ExecutiveController,
     HealthController
   ],
   providers: [
@@ -63,6 +66,7 @@ import { HealthController } from './health.controller.js';
     SalesService,
     TasksService,
     ReservationsService,
+    ExecutiveService,
     AuditService,
     RedisService,
     AuthGuard,
