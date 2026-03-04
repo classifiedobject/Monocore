@@ -153,6 +153,21 @@ enum TipDistributionMethod {
   HOURS_WEIGHTED
 }
 
+enum EmployeeDepartment {
+  SERVICE
+  BAR
+  KITCHEN
+  SUPPORT
+  OTHER
+}
+
+enum TipWeekStatus {
+  DRAFT
+  CALCULATED
+  LOCKED
+  PAID
+}
+
 model User {
   id               String               @id @default(uuid())
   email            String               @unique
@@ -186,6 +201,7 @@ model User {
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
   reservationsCreated Reservation[] @relation("reservation_creator")
+  tipAdvancesApproved TipAdvance[] @relation("tip_advance_approver")
 }
 
 model Session {
@@ -305,6 +321,12 @@ model Company {
   payrollLines    PayrollLine[]
   tipPools        TipPool[]
   tipDistributions TipDistribution[]
+  tipConfigurations TipConfiguration[]
+  tipWeeks         TipWeek[]
+  tipDailyInputs   TipDailyInput[]
+  tipAdvances      TipAdvance[]
+  tipDepartmentOverrides TipDepartmentOverride[]
+  tipWeekDistributions TipWeekDistribution[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -1228,6 +1250,8 @@ model Employee {
   salaryType     SalaryType
   baseSalary     Decimal?  @db.Decimal(14, 2)
   hourlyRate     Decimal?  @db.Decimal(14, 2)
+  tipWeight      Decimal   @default(1) @db.Decimal(8, 2)
+  department     EmployeeDepartment @default(SERVICE)
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -1237,6 +1261,8 @@ model Employee {
   workLogs       WorkLog[]
   payrollLines   PayrollLine[]
   tipDistributions TipDistribution[]
+  tipAdvances    TipAdvance[]
+  tipWeekDistributions TipWeekDistribution[]
 
   @@index([companyId, isActive])
   @@index([companyId, roleId])
@@ -1316,4 +1342,113 @@ model TipDistribution {
 
   @@unique([tipPoolId, employeeId])
   @@index([companyId, tipPoolId])
+}
+
+model TipConfiguration {
+  id                       String   @id @default(uuid())
+  companyId                String
+  serviceRate              Decimal  @db.Decimal(6, 4)
+  serviceTaxDeductionRate  Decimal  @default(0.4) @db.Decimal(6, 4)
+  visaTaxDeductionRate     Decimal  @default(0.4) @db.Decimal(6, 4)
+  defaultWastePoints       Decimal  @default(0) @db.Decimal(10, 2)
+  allowDepartmentSubPool   Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  company                  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId])
+}
+
+model TipWeek {
+  id               String   @id @default(uuid())
+  companyId        String
+  periodStart      DateTime
+  periodEnd        DateTime
+  serviceRateUsed  Decimal  @db.Decimal(6, 4)
+  wastePointsUsed  Decimal  @default(0) @db.Decimal(10, 2)
+  totalPoolGross   Decimal  @default(0) @db.Decimal(14, 2)
+  totalPoolNet     Decimal  @default(0) @db.Decimal(14, 2)
+  totalDistributed Decimal  @default(0) @db.Decimal(14, 2)
+  status           TipWeekStatus @default(DRAFT)
+  payableDate      DateTime?
+  createdAt        DateTime @default(now())
+  company          Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  advances         TipAdvance[]
+  departmentOverrides TipDepartmentOverride[]
+  distributions    TipWeekDistribution[]
+
+  @@index([companyId, periodStart, periodEnd])
+  @@index([companyId, status])
+}
+
+model TipDailyInput {
+  id                      String   @id @default(uuid())
+  companyId               String
+  date                    DateTime
+  grossRevenue            Decimal  @default(0) @db.Decimal(14, 2)
+  discounts               Decimal  @default(0) @db.Decimal(14, 2)
+  comps                   Decimal  @default(0) @db.Decimal(14, 2)
+  wastageSales            Decimal  @default(0) @db.Decimal(14, 2)
+  serviceRevenueCalculated Decimal @default(0) @db.Decimal(14, 2)
+  netServiceRevenue       Decimal  @default(0) @db.Decimal(14, 2)
+  netServiceFee           Decimal  @default(0) @db.Decimal(14, 2)
+  cashTips                Decimal  @default(0) @db.Decimal(14, 2)
+  visaTipsGross           Decimal  @default(0) @db.Decimal(14, 2)
+  visaTipsNet             Decimal  @default(0) @db.Decimal(14, 2)
+  expenseAdjustments      Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt               DateTime @default(now())
+  company                 Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, date])
+  @@index([companyId, date])
+}
+
+model TipAdvance {
+  id               String   @id @default(uuid())
+  companyId        String
+  employeeId       String
+  tipWeekId        String
+  amount           Decimal  @db.Decimal(14, 2)
+  approvedByUserId String
+  createdAt        DateTime @default(now())
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  tipWeek          TipWeek  @relation(fields: [tipWeekId], references: [id], onDelete: Cascade)
+  approvedBy       User     @relation("tip_advance_approver", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, tipWeekId])
+  @@index([companyId, employeeId])
+}
+
+model TipDepartmentOverride {
+  id             String   @id @default(uuid())
+  companyId      String
+  tipWeekId      String
+  department     EmployeeDepartment
+  overrideWeight Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tipWeek        TipWeek  @relation(fields: [tipWeekId], references: [id], onDelete: Cascade)
+
+  @@unique([tipWeekId, department])
+  @@index([companyId, tipWeekId])
+}
+
+model TipWeekDistribution {
+  id          String   @id @default(uuid())
+  companyId   String
+  tipWeekId   String
+  employeeId  String
+  tipWeightUsed Decimal @db.Decimal(10, 2)
+  grossShare  Decimal  @db.Decimal(14, 2)
+  advanceDeducted Decimal @default(0) @db.Decimal(14, 2)
+  netShare    Decimal  @db.Decimal(14, 2)
+  createdAt   DateTime @default(now())
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tipWeek     TipWeek  @relation(fields: [tipWeekId], references: [id], onDelete: Cascade)
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([tipWeekId, employeeId])
+  @@index([companyId, tipWeekId])
+  @@index([companyId, employeeId])
 }
