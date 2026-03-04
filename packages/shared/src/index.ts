@@ -500,6 +500,8 @@ export const payrollEmployeeSchema = z.object({
   salaryType: z.enum(['fixed', 'hourly']),
   baseSalary: z.coerce.number().nonnegative().nullable().optional(),
   hourlyRate: z.coerce.number().nonnegative().nullable().optional(),
+  tipWeight: z.coerce.number().positive().max(1000).optional(),
+  department: z.enum(['service', 'bar', 'kitchen', 'support', 'other']).optional(),
   isActive: z.boolean().optional()
 });
 
@@ -525,6 +527,44 @@ export const tipPoolSchema = z.object({
   periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   totalTips: z.coerce.number().nonnegative(),
   distributionMethod: z.enum(['equal', 'hours_weighted'])
+});
+
+export const tipConfigurationSchema = z.object({
+  serviceRate: z.coerce.number().nonnegative().max(1),
+  serviceTaxDeductionRate: z.coerce.number().nonnegative().max(1).default(0.4),
+  visaTaxDeductionRate: z.coerce.number().nonnegative().max(1).default(0.4),
+  defaultWastePoints: z.coerce.number().nonnegative().default(0),
+  allowDepartmentSubPool: z.boolean().default(false)
+});
+
+export const tipWeekSchema = z.object({
+  periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  serviceRateUsed: z.coerce.number().nonnegative().max(1).optional(),
+  wastePointsUsed: z.coerce.number().nonnegative().optional(),
+  payableDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional()
+});
+
+export const tipDailyInputSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  grossRevenue: z.coerce.number().nonnegative().default(0),
+  discounts: z.coerce.number().nonnegative().default(0),
+  comps: z.coerce.number().nonnegative().default(0),
+  wastageSales: z.coerce.number().nonnegative().default(0),
+  cashTips: z.coerce.number().nonnegative().default(0),
+  visaTipsGross: z.coerce.number().nonnegative().default(0),
+  expenseAdjustments: z.coerce.number().nonnegative().default(0)
+});
+
+export const tipAdvanceSchema = z.object({
+  tipWeekId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  amount: z.coerce.number().positive()
+});
+
+export const tipDepartmentOverrideSchema = z.object({
+  department: z.enum(['service', 'bar', 'kitchen', 'support', 'other']),
+  overrideWeight: z.coerce.number().nonnegative()
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),
