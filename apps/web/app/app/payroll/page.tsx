@@ -37,29 +37,13 @@ type PayrollPeriod = {
   lines: PayrollLine[];
 };
 
-type TipDistribution = {
-  id: string;
-  amount: string;
-  employee: Employee;
-};
-
-type TipPool = {
-  id: string;
-  periodStart: string;
-  periodEnd: string;
-  totalTips: string;
-  distributionMethod: 'EQUAL' | 'HOURS_WEIGHTED';
-  distributions: TipDistribution[];
-};
-
-type Tab = 'employees' | 'worklogs' | 'periods' | 'tips';
+type Tab = 'employees' | 'worklogs' | 'periods';
 
 export default function PayrollPage() {
   const [tab, setTab] = useState<Tab>('employees');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [worklogs, setWorklogs] = useState<WorkLog[]>([]);
   const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
-  const [tips, setTips] = useState<TipPool[]>([]);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -75,24 +59,17 @@ export default function PayrollPage() {
   const [periodStart, setPeriodStart] = useState(new Date().toISOString().slice(0, 10));
   const [periodEnd, setPeriodEnd] = useState(new Date().toISOString().slice(0, 10));
 
-  const [tipStart, setTipStart] = useState(new Date().toISOString().slice(0, 10));
-  const [tipEnd, setTipEnd] = useState(new Date().toISOString().slice(0, 10));
-  const [totalTips, setTotalTips] = useState('');
-  const [tipMethod, setTipMethod] = useState<'equal' | 'hours_weighted'>('equal');
-
   const employeeOptions = useMemo(() => employees.filter((row) => row.isActive), [employees]);
 
   async function loadAll() {
-    const [employeeRows, worklogRows, periodRows, tipRows] = await Promise.all([
+    const [employeeRows, worklogRows, periodRows] = await Promise.all([
       apiFetch('/app-api/payroll/employees') as Promise<Employee[]>,
       apiFetch('/app-api/payroll/worklogs') as Promise<WorkLog[]>,
-      apiFetch('/app-api/payroll/periods') as Promise<PayrollPeriod[]>,
-      apiFetch('/app-api/payroll/tips') as Promise<TipPool[]>
+      apiFetch('/app-api/payroll/periods') as Promise<PayrollPeriod[]>
     ]);
     setEmployees(employeeRows);
     setWorklogs(worklogRows);
     setPeriods(periodRows);
-    setTips(tipRows);
 
     if (!workEmployeeId && employeeRows.length > 0) {
       setWorkEmployeeId(employeeRows[0].id);
@@ -157,33 +134,18 @@ export default function PayrollPage() {
     await loadAll();
   }
 
-  async function createTipPool(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await apiFetch('/app-api/payroll/tips', {
-      method: 'POST',
-      body: JSON.stringify({
-        periodStart: tipStart,
-        periodEnd: tipEnd,
-        totalTips: Number(totalTips),
-        distributionMethod: tipMethod
-      })
-    });
-    setTotalTips('');
-    await loadAll();
-  }
-
   return (
     <section className="space-y-6">
       <header>
         <h1 className="text-3xl font-bold">Payroll Core</h1>
-        <p className="text-sm text-slate-600">Employees, worklogs, payroll periods and tip distribution.</p>
-        <a href="/app/payroll/tips" className="mt-2 inline-block text-sm text-blue-700 underline">
-          Open Advanced Tip Engine v2
+        <p className="text-sm text-slate-600">Employees, worklogs and payroll period posting.</p>
+        <a href="/app/tips" className="mt-2 inline-block text-sm text-blue-700 underline">
+          Open Tip Core (Advanced Tip Engine v2)
         </a>
       </header>
 
       <div className="flex flex-wrap gap-2">
-        {(['employees', 'worklogs', 'periods', 'tips'] as Tab[]).map((item) => (
+        {(['employees', 'worklogs', 'periods'] as Tab[]).map((item) => (
           <button
             key={item}
             className={`rounded px-3 py-2 text-sm ${tab === item ? 'bg-slate-900 text-white' : 'bg-white'}`}
@@ -262,7 +224,7 @@ export default function PayrollPage() {
               <tbody>
                 {worklogs.map((row) => (
                   <tr key={row.id} className="border-t">
-                    <td className="px-3 py-2">{new Date(row.date).toISOString().slice(0, 10)}</td>
+                    <td className="px-3 py-2">{row.date.slice(0, 10)}</td>
                     <td className="px-3 py-2">{row.employee.firstName} {row.employee.lastName}</td>
                     <td className="px-3 py-2">{row.hoursWorked}</td>
                   </tr>
@@ -283,97 +245,45 @@ export default function PayrollPage() {
 
           <div className="space-y-3">
             {periods.map((row) => (
-              <div key={row.id} className="rounded bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-semibold">{row.startDate.slice(0, 10)} - {row.endDate.slice(0, 10)}</p>
-                  <span className="rounded bg-slate-100 px-2 py-1 text-xs">{row.status}</span>
+              <article key={row.id} className="rounded bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="font-semibold">{row.startDate.slice(0, 10)} - {row.endDate.slice(0, 10)}</h2>
+                  <span className="text-xs uppercase tracking-wide">{row.status}</span>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">Gross: {row.totalGross} | Net: {row.totalNet}</p>
+                <div className="mt-3 flex gap-2">
                   {row.status !== 'POSTED' ? (
-                    <button className="rounded bg-slate-900 px-2 py-1 text-xs text-white" onClick={() => calculatePeriod(row.id).catch(handleApiError)}>
+                    <button className="rounded bg-slate-900 px-3 py-1 text-sm text-white" onClick={() => calculatePeriod(row.id).catch(handleApiError)}>
                       Calculate
                     </button>
                   ) : null}
                   {row.status === 'CALCULATED' ? (
-                    <button className="rounded bg-emerald-700 px-2 py-1 text-xs text-white" onClick={() => postPeriod(row.id).catch(handleApiError)}>
+                    <button className="rounded bg-mono-500 px-3 py-1 text-sm text-white" onClick={() => postPeriod(row.id).catch(handleApiError)}>
                       Post
                     </button>
                   ) : null}
                 </div>
-                <p className="mt-1 text-sm text-slate-600">Gross: {row.totalGross} | Net: {row.totalNet}</p>
-                <div className="mt-2 overflow-hidden rounded border border-slate-200">
-                  <table className="w-full text-xs">
+                <div className="mt-3 overflow-hidden rounded border">
+                  <table className="w-full text-sm">
                     <thead className="bg-slate-50">
                       <tr>
-                        <th className="px-2 py-1 text-left">Employee</th>
-                        <th className="px-2 py-1 text-left">Gross</th>
-                        <th className="px-2 py-1 text-left">Notes</th>
+                        <th className="px-3 py-2 text-left">Employee</th>
+                        <th className="px-3 py-2 text-left">Gross</th>
+                        <th className="px-3 py-2 text-left">Notes</th>
                       </tr>
                     </thead>
                     <tbody>
                       {row.lines.map((line) => (
                         <tr key={line.id} className="border-t">
-                          <td className="px-2 py-1">{line.employee.firstName} {line.employee.lastName}</td>
-                          <td className="px-2 py-1">{line.grossAmount}</td>
-                          <td className="px-2 py-1">{line.notes ?? '-'}</td>
+                          <td className="px-3 py-2">{line.employee.firstName} {line.employee.lastName}</td>
+                          <td className="px-3 py-2">{line.grossAmount}</td>
+                          <td className="px-3 py-2">{line.notes ?? '-'}</td>
                         </tr>
                       ))}
-                      {row.lines.length === 0 ? (
-                        <tr>
-                          <td className="px-2 py-2 text-slate-500" colSpan={3}>No payroll lines yet.</td>
-                        </tr>
-                      ) : null}
                     </tbody>
                   </table>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {tab === 'tips' ? (
-        <div className="space-y-4">
-          <form className="grid gap-2 rounded bg-white p-4 shadow-sm md:grid-cols-5" onSubmit={(event) => createTipPool(event).catch(handleApiError)}>
-            <input className="rounded border px-3 py-2" type="date" value={tipStart} onChange={(event) => setTipStart(event.target.value)} required />
-            <input className="rounded border px-3 py-2" type="date" value={tipEnd} onChange={(event) => setTipEnd(event.target.value)} required />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" placeholder="Total tips" value={totalTips} onChange={(event) => setTotalTips(event.target.value)} required />
-            <select className="rounded border px-3 py-2" value={tipMethod} onChange={(event) => setTipMethod(event.target.value as 'equal' | 'hours_weighted')}>
-              <option value="equal">Equal</option>
-              <option value="hours_weighted">Hours weighted</option>
-            </select>
-            <button className="rounded bg-mono-500 px-3 py-2 text-white">Create Tip Pool</button>
-          </form>
-
-          <div className="space-y-3">
-            {tips.map((tip) => (
-              <div key={tip.id} className="rounded bg-white p-4 shadow-sm">
-                <p className="font-semibold">
-                  {new Date(tip.periodStart).toISOString().slice(0, 10)} - {new Date(tip.periodEnd).toISOString().slice(0, 10)}
-                </p>
-                <p className="text-sm text-slate-600">Total: {tip.totalTips} | Method: {tip.distributionMethod}</p>
-                <div className="mt-2 overflow-hidden rounded border border-slate-200">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        <th className="px-2 py-1 text-left">Employee</th>
-                        <th className="px-2 py-1 text-left">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tip.distributions.map((row) => (
-                        <tr key={row.id} className="border-t">
-                          <td className="px-2 py-1">{row.employee.firstName} {row.employee.lastName}</td>
-                          <td className="px-2 py-1">{row.amount}</td>
-                        </tr>
-                      ))}
-                      {tip.distributions.length === 0 ? (
-                        <tr>
-                          <td className="px-2 py-2 text-slate-500" colSpan={2}>No distribution rows.</td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              </article>
             ))}
           </div>
         </div>

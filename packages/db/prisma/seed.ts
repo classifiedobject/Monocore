@@ -83,7 +83,8 @@ const companyPermissions = [
   'module:payroll-core.employee.manage',
   'module:payroll-core.payroll.manage',
   'module:payroll-core.payroll.post',
-  'module:payroll-core.tip.manage'
+  'module:payroll-core.tip.manage',
+  'module:tip-core.manage'
 ];
 
 const roleTemplates: Array<{
@@ -122,7 +123,7 @@ const roleTemplates: Array<{
       'module:payroll-core.employee.manage',
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
-      'module:payroll-core.tip.manage',
+      'module:tip-core.manage',
       'module:executive-core.dashboard.read',
       'module:executive-core.alerts.read'
     ]
@@ -539,6 +540,24 @@ async function main() {
       dependencies: { modules: ['core', 'finance-core'] }
     }
   });
+  await prisma.module.upsert({
+    where: { key: 'tip-core' },
+    create: {
+      key: 'tip-core',
+      name: 'Tip Core',
+      version: '2.0.0',
+      status: 'PUBLISHED',
+      description: 'Advanced tip engine with weekly pools, overrides and advance tracking.',
+      dependencies: { modules: ['core'] }
+    },
+    update: {
+      name: 'Tip Core',
+      version: '2.0.0',
+      status: 'PUBLISHED',
+      description: 'Advanced tip engine with weekly pools, overrides and advance tracking.',
+      dependencies: { modules: ['core'] }
+    }
+  });
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {
@@ -601,6 +620,39 @@ async function main() {
     create: {
       companyId: company.id,
       moduleKey: 'payroll-core',
+      limits: {}
+    },
+    update: {}
+  });
+  await prisma.moduleInstallation.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'tip-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'tip-core',
+      status: 'ACTIVE',
+      installedAt: new Date()
+    },
+    update: {
+      status: 'ACTIVE',
+      installedAt: new Date()
+    }
+  });
+
+  await prisma.companyEntitlement.upsert({
+    where: {
+      companyId_moduleKey: {
+        companyId: company.id,
+        moduleKey: 'tip-core'
+      }
+    },
+    create: {
+      companyId: company.id,
+      moduleKey: 'tip-core',
       limits: {}
     },
     update: {}
