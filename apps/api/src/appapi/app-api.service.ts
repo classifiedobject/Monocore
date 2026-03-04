@@ -29,7 +29,8 @@ const PILOT_MODULE_KEYS = [
   'reservation-core',
   'task-core',
   'executive-core',
-  'payroll-core'
+  'payroll-core',
+  'tip-core'
 ] as const;
 
 type RoleTemplateKey = 'owner' | 'finance_manager' | 'operations_manager' | 'floor_manager' | 'staff';
@@ -78,7 +79,7 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'module:payroll-core.employee.manage',
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
-      'module:payroll-core.tip.manage',
+      'module:tip-core.manage',
       'module:executive-core.dashboard.read',
       'module:executive-core.alerts.read'
     ]

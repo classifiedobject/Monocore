@@ -256,7 +256,7 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `/app-api/payroll/employees`
   - `/app-api/payroll/worklogs`
   - `/app-api/payroll/periods`
-  - `/app-api/payroll/tips`
+  - Tip engine moved to `/app-api/tips/*` under `tip-core`
 - Calculation flow:
   - Fixed employee: `gross = baseSalary`
   - Hourly employee: `gross = period worklog hours * hourlyRate`
@@ -266,8 +266,19 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Tip pools in the period are also posted as finance expenses.
   - Employee `profitCenterId` is copied to generated finance entries when present.
 - Tips:
-  - Distribution methods: `equal`, `hours_weighted`
-  - `hours_weighted` uses worklog hours between tip pool start/end dates.
+  - Tip engine moved to standalone module `tip-core`.
+
+## Tip Core
+- Module key: `tip-core`.
+- App API endpoints (module installation + tenant RBAC enforced):
+  - `/app-api/tips/config`
+  - `/app-api/tips/daily-inputs`
+  - `/app-api/tips/weeks`
+  - `/app-api/tips/advance`
+  - `/app-api/tips/employees`
+- UI routes:
+  - `/app/tips` (main page)
+  - `/app/payroll/tips` redirects to `/app/tips` for backward compatibility.
 - Smoke flow:
   - `pnpm payroll:smoke` verifies fixed+hourly payroll totals, post action, tip distribution sum, and finance impact.
 

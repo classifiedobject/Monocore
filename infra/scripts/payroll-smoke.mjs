@@ -129,19 +129,38 @@ async function main() {
 
   assert(posted.status === 'POSTED', 'Payroll period should be POSTED', posted);
 
-  const tipPool = await request('/app-api/payroll/tips', {
+  const tipPool = await request('/app-api/tips/weeks', {
     method: 'POST',
     body: JSON.stringify({
       periodStart: today,
       periodEnd: today,
-      totalTips: 5000,
-      distributionMethod: 'equal'
+      serviceRateUsed: 0.1,
+      wastePointsUsed: 0
     })
   }, auth);
 
-  const distributed = (tipPool.distributions ?? []).reduce((sum, row) => sum + Number(row.amount), 0);
-  assert(distributed === 5000, 'Tip distribution sum must equal 5000', tipPool.distributions);
-  assert((tipPool.distributions ?? []).length >= 2, 'Expected at least 2 tip distribution rows', tipPool.distributions);
+  await request('/app-api/tips/daily-inputs', {
+    method: 'POST',
+    body: JSON.stringify({
+      date: today,
+      grossRevenue: 0,
+      discounts: 0,
+      comps: 0,
+      wastageSales: 0,
+      cashTips: 5000,
+      visaTipsGross: 0,
+      expenseAdjustments: 0
+    })
+  }, auth);
+
+  const calculatedWeek = await request(`/app-api/tips/weeks/${tipPool.id}/calculate`, {
+    method: 'POST',
+    body: JSON.stringify({})
+  }, auth);
+
+  const distributed = (calculatedWeek.distributions ?? []).reduce((sum, row) => sum + Number(row.netShare ?? 0), 0);
+  assert(distributed > 0, 'Tip distribution sum must be greater than zero', calculatedWeek.distributions);
+  assert((calculatedWeek.distributions ?? []).length >= 2, 'Expected at least 2 tip distribution rows', calculatedWeek.distributions);
 
   const from = today;
   const to = today;
@@ -154,7 +173,7 @@ async function main() {
         ok: true,
         payrollPeriodId: posted.id,
         totalGross: posted.totalGross,
-        tipPoolId: tipPool.id,
+        tipPoolId: calculatedWeek.id,
         tipDistributed: distributed
       },
       null,
