@@ -13,6 +13,8 @@ type CompanyMembership = {
     name: string;
     plan: string;
     locale: string;
+    onboardingCompleted: boolean;
+    onboardingStep: number;
   };
 };
 
@@ -42,6 +44,11 @@ export default function CompanyPage() {
   function selectCompany(companyId: string) {
     window.localStorage.setItem('activeCompanyId', companyId);
     setActiveCompanyId(companyId);
+    const selected = memberships.find((row) => row.company.id === companyId);
+    if (selected && !selected.company.onboardingCompleted) {
+      router.push('/app/onboarding');
+      return;
+    }
     router.push('/app/home');
   }
 
@@ -88,6 +95,9 @@ export default function CompanyPage() {
                 <h2 className="text-lg font-semibold">{membership.company.name}</h2>
                 <p className="text-sm text-slate-600">
                   Plan: {membership.company.plan} | Locale: {membership.company.locale}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Onboarding: {membership.company.onboardingCompleted ? 'Completed' : `Step ${membership.company.onboardingStep}/5`}
                 </p>
               </div>
               <button

@@ -86,6 +86,106 @@ const companyPermissions = [
   'module:payroll-core.tip.manage'
 ];
 
+const roleTemplates: Array<{
+  key: string;
+  name: string;
+  description: string;
+  permissionKeys: string[];
+}> = [
+  {
+    key: 'finance_manager',
+    name: 'Finance Manager',
+    description: 'Finance, payroll and executive reporting authority.',
+    permissionKeys: [
+      'company:team.read',
+      'company:audit.read',
+      'company:modules.read',
+      'module:finance-core.entry.create',
+      'module:finance-core.entry.read',
+      'module:finance-core.entry.delete',
+      'module:finance-core.counterparty.manage',
+      'module:finance-core.account.manage',
+      'module:finance-core.recurring.manage',
+      'module:finance-core.reports.read',
+      'module:finance-core.profit-center.read',
+      'module:finance-core.allocation.read',
+      'module:finance-core.invoice.manage',
+      'module:finance-core.invoice.read',
+      'module:finance-core.payment.manage',
+      'module:finance-core.payment.read',
+      'module:finance-core.reports.aging.read',
+      'module:finance-core.budget.manage',
+      'module:finance-core.budget.read',
+      'module:finance-core.reports.budget.read',
+      'module:finance-core.reports.cashflow.read',
+      'module:finance-core.cashflow-forecast.manage',
+      'module:payroll-core.employee.manage',
+      'module:payroll-core.payroll.manage',
+      'module:payroll-core.payroll.post',
+      'module:payroll-core.tip.manage',
+      'module:executive-core.dashboard.read',
+      'module:executive-core.alerts.read'
+    ]
+  },
+  {
+    key: 'operations_manager',
+    name: 'Operations Manager',
+    description: 'Inventory, sales, reservation and task operations manager.',
+    permissionKeys: [
+      'company:team.read',
+      'company:modules.read',
+      'module:inventory-core.item.manage',
+      'module:inventory-core.item.cost.manage',
+      'module:inventory-core.warehouse.manage',
+      'module:inventory-core.movement.manage',
+      'module:inventory-core.movement.read',
+      'module:recipe-core.product.manage',
+      'module:recipe-core.recipe.manage',
+      'module:recipe-core.recipe.read',
+      'module:sales-core.order.manage',
+      'module:sales-core.order.read',
+      'module:sales-core.order.post',
+      'module:reservation-core.customer.manage',
+      'module:reservation-core.reservation.manage',
+      'module:reservation-core.reservation.read',
+      'module:reservation-core.reports.read',
+      'module:task-core.template.manage',
+      'module:task-core.task.manage',
+      'module:task-core.task.read',
+      'module:task-core.task.complete',
+      'module:task-core.reports.read'
+    ]
+  },
+  {
+    key: 'floor_manager',
+    name: 'Floor Manager',
+    description: 'Floor-level reservation, service and task execution.',
+    permissionKeys: [
+      'company:team.read',
+      'module:reservation-core.customer.manage',
+      'module:reservation-core.reservation.manage',
+      'module:reservation-core.reservation.read',
+      'module:reservation-core.reports.read',
+      'module:task-core.task.manage',
+      'module:task-core.task.read',
+      'module:task-core.task.complete',
+      'module:sales-core.order.read'
+    ]
+  },
+  {
+    key: 'staff',
+    name: 'Staff',
+    description: 'Daily execution access for assigned tasks and reservations.',
+    permissionKeys: [
+      'module:task-core.task.read',
+      'module:task-core.task.complete',
+      'module:reservation-core.reservation.read',
+      'module:sales-core.order.read',
+      'module:inventory-core.movement.read'
+    ]
+  }
+];
+
 async function upsertPlatformRole() {
   const adminRole = await prisma.platformRole.upsert({
     where: { key: 'platform_admin' },
@@ -158,6 +258,36 @@ async function upsertCompanyDefaults(companyId: string) {
     });
   }
 
+  const permissionByKey = new Map(
+    (await prisma.companyPermission.findMany({ select: { id: true, key: true } })).map((row) => [row.key, row.id])
+  );
+
+  for (const template of roleTemplates) {
+    const role = await prisma.companyRole.upsert({
+      where: { companyId_key: { companyId, key: template.key } },
+      create: {
+        companyId,
+        key: template.key,
+        name: template.name,
+        description: template.description
+      },
+      update: {
+        name: template.name,
+        description: template.description
+      }
+    });
+
+    for (const permissionKey of template.permissionKeys) {
+      const permissionId = permissionByKey.get(permissionKey);
+      if (!permissionId) continue;
+      await prisma.companyRolePermission.upsert({
+        where: { roleId_permissionId: { roleId: role.id, permissionId } },
+        create: { roleId: role.id, permissionId },
+        update: {}
+      });
+    }
+  }
+
   return ownerRole;
 }
 
@@ -207,11 +337,15 @@ async function main() {
     create: {
       id: '00000000-0000-0000-0000-000000000001',
       name: 'Acme Corp',
-      plan: 'starter'
+      plan: 'starter',
+      onboardingCompleted: true,
+      onboardingStep: 6
     },
     update: {
       name: 'Acme Corp',
-      plan: 'starter'
+      plan: 'starter',
+      onboardingCompleted: true,
+      onboardingStep: 6
     }
   });
 

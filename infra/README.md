@@ -357,3 +357,57 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - `/app/executive` (summary cards, trend data, alerts, low stock list, overdue tasks).
 - Smoke flow:
   - `pnpm executive:smoke` prepares sample finance/inventory/AP data and validates dashboard output + alert generation.
+
+## Pilot Readiness (Sprint 16)
+- Company role presets are generated automatically for each tenant:
+  - `owner`
+  - `finance_manager`
+  - `operations_manager`
+  - `floor_manager`
+  - `staff`
+- Apply preset to membership:
+  - `POST /app-api/company/apply-role-template`
+- List presets:
+  - `GET /app-api/company/role-templates`
+
+### Onboarding Wizard
+- UI route: `/app/onboarding`
+- Company onboarding state fields:
+  - `Company.onboardingCompleted`
+  - `Company.onboardingStep`
+- Until onboarding is complete, customer area redirects to onboarding.
+- Step endpoints:
+  - `POST /app-api/onboarding/company-basics`
+  - `POST /app-api/onboarding/profit-centers`
+  - `POST /app-api/onboarding/inventory-bootstrap`
+  - `POST /app-api/onboarding/employee`
+  - `POST /app-api/onboarding/first-sales-order`
+  - `GET /app-api/onboarding/status`
+
+### Demo Data Generator
+- Endpoint: `POST /app-api/demo/generate`
+- Generates pilot dataset for selected company:
+  - 3 profit centers
+  - 20 inventory items
+  - 50 sales orders
+  - 30 reservations
+  - 5 employees
+  - 1 payroll period
+  - 3 allocation rules
+  - random finance entries
+- Demo records are tagged in notes/reference/description with a `demo-*` tag.
+
+### Executive Dashboard Polish
+- Dashboard now returns and renders:
+  - gross/net margin percentages
+  - severity color mapping (`green`, `yellow`, `red`)
+  - top 3 risks
+  - recommended actions
+
+### Pagination
+- Added opt-in pagination support (`page`, `limit`) for common App API list endpoints:
+  - `/app-api/team`
+  - `/app-api/invites`
+  - `/app-api/audit-logs`
+  - `/app-api/modules`
+  - `/app-api/modules/catalog`

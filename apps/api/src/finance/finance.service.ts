@@ -701,10 +701,19 @@ export class FinanceService {
       'finance_allocation_batch',
       generated.batch.id,
       {
-        allocationRuleId: rule.id,
-        sourceEntryId: sourceEntry.id,
-        generatedEntriesCount: generated.entries.length,
-        generatedEntryIds: generated.entries.map((entry) => entry.id)
+        context: {
+          allocationRuleId: rule.id,
+          sourceEntryId: sourceEntry.id
+        },
+        counts: {
+          generatedEntriesCount: generated.entries.length
+        },
+        ids: {
+          generatedEntryIds: generated.entries.map((entry) => entry.id)
+        },
+        totals: {
+          sourceAmount: Number(sourceEntry.amount)
+        }
       },
       ip,
       userAgent

@@ -177,6 +177,9 @@ export default function PayrollPage() {
       <header>
         <h1 className="text-3xl font-bold">Payroll Core</h1>
         <p className="text-sm text-slate-600">Employees, worklogs, payroll periods and tip distribution.</p>
+        <a href="/app/payroll/tips" className="mt-2 inline-block text-sm text-blue-700 underline">
+          Open Advanced Tip Engine v2
+        </a>
       </header>
 
       <div className="flex flex-wrap gap-2">
@@ -209,7 +212,28 @@ export default function PayrollPage() {
             <button className="rounded bg-mono-500 px-3 py-2 text-white">Add Employee</button>
           </form>
 
-          <pre className="rounded bg-white p-4 text-xs shadow-sm">{JSON.stringify(employees, null, 2)}</pre>
+          <div className="overflow-hidden rounded bg-white shadow-sm">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-3 py-2 text-left">Employee</th>
+                  <th className="px-3 py-2 text-left">Type</th>
+                  <th className="px-3 py-2 text-left">Salary</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((row) => (
+                  <tr key={row.id} className="border-t">
+                    <td className="px-3 py-2">{row.firstName} {row.lastName}</td>
+                    <td className="px-3 py-2">{row.salaryType}</td>
+                    <td className="px-3 py-2">{row.salaryType === 'FIXED' ? (row.baseSalary ?? '-') : (row.hourlyRate ?? '-')}</td>
+                    <td className="px-3 py-2">{row.isActive ? 'Active' : 'Inactive'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
@@ -226,7 +250,26 @@ export default function PayrollPage() {
             <button className="rounded bg-mono-500 px-3 py-2 text-white">Add Worklog</button>
           </form>
 
-          <pre className="rounded bg-white p-4 text-xs shadow-sm">{JSON.stringify(worklogs, null, 2)}</pre>
+          <div className="overflow-hidden rounded bg-white shadow-sm">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Employee</th>
+                  <th className="px-3 py-2 text-left">Hours</th>
+                </tr>
+              </thead>
+              <tbody>
+                {worklogs.map((row) => (
+                  <tr key={row.id} className="border-t">
+                    <td className="px-3 py-2">{new Date(row.date).toISOString().slice(0, 10)}</td>
+                    <td className="px-3 py-2">{row.employee.firstName} {row.employee.lastName}</td>
+                    <td className="px-3 py-2">{row.hoursWorked}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
@@ -256,7 +299,31 @@ export default function PayrollPage() {
                   ) : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-600">Gross: {row.totalGross} | Net: {row.totalNet}</p>
-                <pre className="mt-2 rounded bg-slate-50 p-2 text-xs">{JSON.stringify(row.lines, null, 2)}</pre>
+                <div className="mt-2 overflow-hidden rounded border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Employee</th>
+                        <th className="px-2 py-1 text-left">Gross</th>
+                        <th className="px-2 py-1 text-left">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {row.lines.map((line) => (
+                        <tr key={line.id} className="border-t">
+                          <td className="px-2 py-1">{line.employee.firstName} {line.employee.lastName}</td>
+                          <td className="px-2 py-1">{line.grossAmount}</td>
+                          <td className="px-2 py-1">{line.notes ?? '-'}</td>
+                        </tr>
+                      ))}
+                      {row.lines.length === 0 ? (
+                        <tr>
+                          <td className="px-2 py-2 text-slate-500" colSpan={3}>No payroll lines yet.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ))}
           </div>
@@ -276,7 +343,39 @@ export default function PayrollPage() {
             <button className="rounded bg-mono-500 px-3 py-2 text-white">Create Tip Pool</button>
           </form>
 
-          <pre className="rounded bg-white p-4 text-xs shadow-sm">{JSON.stringify(tips, null, 2)}</pre>
+          <div className="space-y-3">
+            {tips.map((tip) => (
+              <div key={tip.id} className="rounded bg-white p-4 shadow-sm">
+                <p className="font-semibold">
+                  {new Date(tip.periodStart).toISOString().slice(0, 10)} - {new Date(tip.periodEnd).toISOString().slice(0, 10)}
+                </p>
+                <p className="text-sm text-slate-600">Total: {tip.totalTips} | Method: {tip.distributionMethod}</p>
+                <div className="mt-2 overflow-hidden rounded border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Employee</th>
+                        <th className="px-2 py-1 text-left">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tip.distributions.map((row) => (
+                        <tr key={row.id} className="border-t">
+                          <td className="px-2 py-1">{row.employee.firstName} {row.employee.lastName}</td>
+                          <td className="px-2 py-1">{row.amount}</td>
+                        </tr>
+                      ))}
+                      {tip.distributions.length === 0 ? (
+                        <tr>
+                          <td className="px-2 py-2 text-slate-500" colSpan={2}>No distribution rows.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
     </section>

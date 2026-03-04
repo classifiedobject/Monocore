@@ -1,11 +1,154 @@
 import crypto from 'crypto';
 import { Injectable, ForbiddenException, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, SalaryType } from '@prisma/client';
+import {
+  acceptInviteSchema,
+  applyRoleTemplateSchema,
+  createCompanySchema,
+  createInviteSchema,
+  demoGenerateSchema,
+  installModuleSchema,
+  onboardingCompanyBasicsSchema,
+  onboardingEmployeeSchema,
+  onboardingFirstSalesOrderSchema,
+  onboardingInventoryBootstrapSchema,
+  onboardingProfitCentersSchema,
+  paginationQuerySchema,
+  roleSchema
+} from '@monocore/shared';
 import { PrismaService } from '../common/prisma.service.js';
-import { createCompanySchema, roleSchema, createInviteSchema, acceptInviteSchema, installModuleSchema } from '@monocore/shared';
 import { AuditService } from '../common/audit.service.js';
 
 const INVITE_TTL_DAYS = 7;
+const PILOT_MODULE_KEYS = [
+  'core',
+  'finance-core',
+  'inventory-core',
+  'recipe-core',
+  'sales-core',
+  'reservation-core',
+  'task-core',
+  'executive-core',
+  'payroll-core'
+] as const;
+
+type RoleTemplateKey = 'owner' | 'finance_manager' | 'operations_manager' | 'floor_manager' | 'staff';
+
+type RoleTemplate = {
+  key: RoleTemplateKey;
+  name: string;
+  description: string;
+  permissionKeys: string[];
+};
+
+const ROLE_TEMPLATES: RoleTemplate[] = [
+  {
+    key: 'owner',
+    name: 'Owner',
+    description: 'Full access to all company and module features.',
+    permissionKeys: []
+  },
+  {
+    key: 'finance_manager',
+    name: 'Finance Manager',
+    description: 'Finance, payroll and executive reporting authority.',
+    permissionKeys: [
+      'company:team.read',
+      'company:audit.read',
+      'company:modules.read',
+      'module:finance-core.entry.create',
+      'module:finance-core.entry.read',
+      'module:finance-core.entry.delete',
+      'module:finance-core.counterparty.manage',
+      'module:finance-core.account.manage',
+      'module:finance-core.recurring.manage',
+      'module:finance-core.reports.read',
+      'module:finance-core.profit-center.read',
+      'module:finance-core.allocation.read',
+      'module:finance-core.invoice.manage',
+      'module:finance-core.invoice.read',
+      'module:finance-core.payment.manage',
+      'module:finance-core.payment.read',
+      'module:finance-core.reports.aging.read',
+      'module:finance-core.budget.manage',
+      'module:finance-core.budget.read',
+      'module:finance-core.reports.budget.read',
+      'module:finance-core.reports.cashflow.read',
+      'module:finance-core.cashflow-forecast.manage',
+      'module:payroll-core.employee.manage',
+      'module:payroll-core.payroll.manage',
+      'module:payroll-core.payroll.post',
+      'module:payroll-core.tip.manage',
+      'module:executive-core.dashboard.read',
+      'module:executive-core.alerts.read'
+    ]
+  },
+  {
+    key: 'operations_manager',
+    name: 'Operations Manager',
+    description: 'Inventory, sales, reservation and task operations manager.',
+    permissionKeys: [
+      'company:team.read',
+      'company:modules.read',
+      'module:inventory-core.item.manage',
+      'module:inventory-core.item.cost.manage',
+      'module:inventory-core.warehouse.manage',
+      'module:inventory-core.movement.manage',
+      'module:inventory-core.movement.read',
+      'module:recipe-core.product.manage',
+      'module:recipe-core.recipe.manage',
+      'module:recipe-core.recipe.read',
+      'module:sales-core.order.manage',
+      'module:sales-core.order.read',
+      'module:sales-core.order.post',
+      'module:reservation-core.customer.manage',
+      'module:reservation-core.reservation.manage',
+      'module:reservation-core.reservation.read',
+      'module:reservation-core.reports.read',
+      'module:task-core.template.manage',
+      'module:task-core.task.manage',
+      'module:task-core.task.read',
+      'module:task-core.task.complete',
+      'module:task-core.reports.read'
+    ]
+  },
+  {
+    key: 'floor_manager',
+    name: 'Floor Manager',
+    description: 'Floor-level reservation, service and task execution.',
+    permissionKeys: [
+      'company:team.read',
+      'module:reservation-core.customer.manage',
+      'module:reservation-core.reservation.manage',
+      'module:reservation-core.reservation.read',
+      'module:reservation-core.reports.read',
+      'module:task-core.task.manage',
+      'module:task-core.task.read',
+      'module:task-core.task.complete',
+      'module:sales-core.order.read'
+    ]
+  },
+  {
+    key: 'staff',
+    name: 'Staff',
+    description: 'Daily execution access for assigned tasks and reservations.',
+    permissionKeys: [
+      'module:task-core.task.read',
+      'module:task-core.task.complete',
+      'module:reservation-core.reservation.read',
+      'module:sales-core.order.read',
+      'module:inventory-core.movement.read'
+    ]
+  }
+];
+
+type Paginated<T> = {
+  items: T[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
 
 @Injectable()
 export class AppApiService {
@@ -17,44 +160,37 @@ export class AppApiService {
   async createCompany(userId: string, payload: unknown, ip?: string, userAgent?: string) {
     const body = createCompanySchema.parse(payload);
 
-    const company = await this.prisma.company.create({
-      data: {
-        name: body.name,
-        plan: 'free'
-      }
-    });
-
-    const membership = await this.prisma.companyMembership.create({
-      data: {
-        companyId: company.id,
-        userId,
-        status: 'active'
-      }
-    });
-
-    const ownerRole = await this.prisma.companyRole.create({
-      data: {
-        companyId: company.id,
-        key: 'owner',
-        name: 'Owner'
-      }
-    });
-
-    const permissions = await this.prisma.companyPermission.findMany();
-    for (const permission of permissions) {
-      await this.prisma.companyRolePermission.create({
+    const company = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.company.create({
         data: {
-          roleId: ownerRole.id,
-          permissionId: permission.id
+          name: body.name,
+          plan: 'free',
+          onboardingCompleted: false,
+          onboardingStep: 1
         }
       });
-    }
 
-    await this.prisma.companyMemberRole.create({
-      data: {
-        membershipId: membership.id,
-        roleId: ownerRole.id
-      }
+      const membership = await tx.companyMembership.create({
+        data: {
+          companyId: created.id,
+          userId,
+          status: 'active'
+        }
+      });
+
+      await this.ensureRoleTemplates(tx, created.id);
+      const ownerRole = await tx.companyRole.findUniqueOrThrow({
+        where: { companyId_key: { companyId: created.id, key: 'owner' } }
+      });
+
+      await tx.companyMemberRole.upsert({
+        where: { membershipId_roleId: { membershipId: membership.id, roleId: ownerRole.id } },
+        create: { membershipId: membership.id, roleId: ownerRole.id },
+        update: {}
+      });
+
+      await this.ensurePilotModulesInstalled(tx, created.id);
+      return created;
     });
 
     await this.audit.logCompany({
@@ -63,7 +199,7 @@ export class AppApiService {
       action: 'company.create',
       entityType: 'company',
       entityId: company.id,
-      metadata: { name: company.name },
+      metadata: { name: company.name, onboardingStep: 1 },
       ip,
       userAgent
     });
@@ -76,6 +212,35 @@ export class AppApiService {
       where: { userId, status: 'active' },
       include: { company: true },
       orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async companyContext(userId: string, companyId: string) {
+    const membership = await this.prisma.companyMembership.findUnique({
+      where: { companyId_userId: { companyId, userId } },
+      include: {
+        company: true,
+        roles: { include: { role: true } }
+      }
+    });
+
+    if (!membership || membership.status !== 'active') {
+      throw new ForbiddenException('Company membership required');
+    }
+
+    return membership;
+  }
+
+  onboardingStatus(companyId: string) {
+    return this.prisma.company.findUniqueOrThrow({
+      where: { id: companyId },
+      select: {
+        id: true,
+        name: true,
+        locale: true,
+        onboardingCompleted: true,
+        onboardingStep: true
+      }
     });
   }
 
@@ -94,20 +259,53 @@ export class AppApiService {
     };
   }
 
-  listTeam(companyId: string) {
-    return this.prisma.companyMembership.findMany({
-      where: { companyId },
-      include: { user: true, roles: { include: { role: true } } }
-    });
+  async listTeam(companyId: string, query?: Record<string, string | undefined>) {
+    const pagination = this.parsePagination(query);
+    if (!pagination) {
+      return this.prisma.companyMembership.findMany({
+        where: { companyId },
+        include: { user: true, roles: { include: { role: true } } },
+        orderBy: { createdAt: 'desc' }
+      });
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.companyMembership.findMany({
+        where: { companyId },
+        include: { user: true, roles: { include: { role: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit
+      }),
+      this.prisma.companyMembership.count({ where: { companyId } })
+    ]);
+
+    return this.toPage(items, pagination.page, pagination.limit, total);
   }
 
-  listInvites(companyId: string) {
-    return this.prisma.companyInvite.findMany({
-      where: { companyId },
-      include: { role: true, createdByUser: true },
-      orderBy: { createdAt: 'desc' },
-      take: 100
-    });
+  async listInvites(companyId: string, query?: Record<string, string | undefined>) {
+    const pagination = this.parsePagination(query);
+    if (!pagination) {
+      return this.prisma.companyInvite.findMany({
+        where: { companyId },
+        include: { role: true, createdByUser: true },
+        orderBy: { createdAt: 'desc' },
+        take: 100
+      });
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.companyInvite.findMany({
+        where: { companyId },
+        include: { role: true, createdByUser: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit
+      }),
+      this.prisma.companyInvite.count({ where: { companyId } })
+    ]);
+
+    return this.toPage(items, pagination.page, pagination.limit, total);
   }
 
   async createInvite(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
@@ -268,6 +466,15 @@ export class AppApiService {
     });
   }
 
+  listRoleTemplates() {
+    return ROLE_TEMPLATES.map((template) => ({
+      key: template.key,
+      name: template.name,
+      description: template.description,
+      permissionCount: template.permissionKeys.length
+    }));
+  }
+
   async createRole(actorUserId: string, companyId: string, payload: unknown) {
     const body = roleSchema.parse(payload);
     const role = await this.prisma.companyRole.create({
@@ -345,28 +552,99 @@ export class AppApiService {
     return { success: true };
   }
 
-  listAuditLogs(companyId: string) {
-    return this.prisma.companyAuditLog.findMany({
-      where: { companyId },
-      orderBy: { createdAt: 'desc' },
-      take: 100
+  async applyRoleTemplate(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = applyRoleTemplateSchema.parse(payload);
+
+    const membership = await this.prisma.companyMembership.findUnique({ where: { id: body.membershipId } });
+    if (!membership || membership.companyId !== companyId) {
+      throw new NotFoundException('Membership not found');
+    }
+
+    await this.ensureRoleTemplates(this.prisma, companyId);
+
+    const role = await this.prisma.companyRole.findUnique({
+      where: { companyId_key: { companyId, key: body.template } }
     });
+
+    if (!role) {
+      throw new NotFoundException('Role template not found');
+    }
+
+    await this.prisma.companyMemberRole.upsert({
+      where: { membershipId_roleId: { membershipId: membership.id, roleId: role.id } },
+      create: { membershipId: membership.id, roleId: role.id },
+      update: {}
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.role_template.apply',
+      entityType: 'company_membership',
+      entityId: membership.id,
+      metadata: {
+        template: body.template,
+        roleId: role.id,
+        membershipId: membership.id
+      },
+      ip,
+      userAgent
+    });
+
+    return { success: true, roleId: role.id };
   }
 
-  listInstalledModules(companyId: string) {
-    return this.prisma.moduleInstallation.findMany({
-      where: { companyId, status: 'ACTIVE' },
-      include: { module: true },
-      orderBy: { createdAt: 'asc' }
-    });
-  }
+  async listAuditLogs(companyId: string, query?: Record<string, string | undefined>) {
+    const pagination = this.parsePagination(query);
+    if (!pagination) {
+      return this.prisma.companyAuditLog.findMany({
+        where: { companyId },
+        orderBy: { createdAt: 'desc' },
+        take: 100
+      });
+    }
 
-  async listModuleCatalog(companyId: string) {
-    const [catalog, installations, entitlements] = await Promise.all([
-      this.prisma.module.findMany({
-        where: { status: 'PUBLISHED' },
-        orderBy: { createdAt: 'asc' }
+    const [items, total] = await Promise.all([
+      this.prisma.companyAuditLog.findMany({
+        where: { companyId },
+        orderBy: { createdAt: 'desc' },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit
       }),
+      this.prisma.companyAuditLog.count({ where: { companyId } })
+    ]);
+
+    return this.toPage(items, pagination.page, pagination.limit, total);
+  }
+
+  async listInstalledModules(companyId: string, query?: Record<string, string | undefined>) {
+    const pagination = this.parsePagination(query);
+    if (!pagination) {
+      return this.prisma.moduleInstallation.findMany({
+        where: { companyId, status: 'ACTIVE' },
+        include: { module: true },
+        orderBy: { createdAt: 'asc' }
+      });
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.moduleInstallation.findMany({
+        where: { companyId, status: 'ACTIVE' },
+        include: { module: true },
+        orderBy: { createdAt: 'asc' },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit
+      }),
+      this.prisma.moduleInstallation.count({ where: { companyId, status: 'ACTIVE' } })
+    ]);
+
+    return this.toPage(items, pagination.page, pagination.limit, total);
+  }
+
+  async listModuleCatalog(companyId: string, query?: Record<string, string | undefined>) {
+    const pagination = this.parsePagination(query);
+
+    const [installations, entitlements] = await Promise.all([
       this.prisma.moduleInstallation.findMany({
         where: { companyId, status: 'ACTIVE' },
         select: { moduleKey: true }
@@ -380,11 +658,39 @@ export class AppApiService {
     const installedKeys = new Set(installations.map((row) => row.moduleKey));
     const entitlementByKey = new Map(entitlements.map((row) => [row.moduleKey, row.limits]));
 
-    return catalog.map((module) => ({
-      ...module,
-      installed: installedKeys.has(module.key),
-      entitlementLimits: entitlementByKey.get(module.key) ?? null
-    }));
+    if (!pagination) {
+      const catalog = await this.prisma.module.findMany({
+        where: { status: 'PUBLISHED' },
+        orderBy: { createdAt: 'asc' }
+      });
+
+      return catalog.map((module) => ({
+        ...module,
+        installed: installedKeys.has(module.key),
+        entitlementLimits: entitlementByKey.get(module.key) ?? null
+      }));
+    }
+
+    const [catalog, total] = await Promise.all([
+      this.prisma.module.findMany({
+        where: { status: 'PUBLISHED' },
+        orderBy: { createdAt: 'asc' },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit
+      }),
+      this.prisma.module.count({ where: { status: 'PUBLISHED' } })
+    ]);
+
+    return this.toPage(
+      catalog.map((module) => ({
+        ...module,
+        installed: installedKeys.has(module.key),
+        entitlementLimits: entitlementByKey.get(module.key) ?? null
+      })),
+      pagination.page,
+      pagination.limit,
+      total
+    );
   }
 
   async installModule(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
@@ -472,6 +778,678 @@ export class AppApiService {
     return { installation, entitlement };
   }
 
+  async onboardingCompanyBasics(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = onboardingCompanyBasicsSchema.parse(payload);
+    const company = await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        name: body.name,
+        ...(body.locale ? { locale: body.locale } : {}),
+        onboardingStep: { set: 2 }
+      }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.onboarding.company_basics',
+      entityType: 'company',
+      entityId: company.id,
+      metadata: { name: body.name, locale: body.locale ?? null, step: 2 },
+      ip,
+      userAgent
+    });
+
+    return company;
+  }
+
+  async onboardingProfitCenters(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = onboardingProfitCentersSchema.parse(payload);
+
+    for (const name of [...new Set(body.names.map((row) => row.trim()))]) {
+      if (!name) continue;
+      await this.prisma.financeProfitCenter.upsert({
+        where: { companyId_name: { companyId, name } },
+        create: { companyId, name, type: 'GENERAL', isActive: true },
+        update: { isActive: true }
+      });
+    }
+
+    await this.advanceOnboarding(companyId, 3);
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.onboarding.profit_centers',
+      entityType: 'finance_profit_center',
+      entityId: undefined,
+      metadata: { names: body.names, count: body.names.length, step: 3 },
+      ip,
+      userAgent
+    });
+
+    return this.onboardingStatus(companyId);
+  }
+
+  async onboardingInventoryBootstrap(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = onboardingInventoryBootstrapSchema.parse(payload);
+
+    const warehouse = await this.prisma.inventoryWarehouse.upsert({
+      where: { companyId_name: { companyId, name: body.warehouseName.trim() } },
+      create: {
+        companyId,
+        name: body.warehouseName.trim(),
+        location: 'Onboarding warehouse'
+      },
+      update: { isActive: true }
+    });
+
+    const item = await this.prisma.inventoryItem.create({
+      data: {
+        companyId,
+        name: body.itemName,
+        sku: `ONB-${Date.now()}`,
+        unit: body.unit,
+        lastPurchaseUnitCost: 10,
+        isActive: true
+      }
+    });
+
+    await this.prisma.inventoryStockMovement.create({
+      data: {
+        companyId,
+        itemId: item.id,
+        warehouseId: warehouse.id,
+        type: 'IN',
+        quantity: new Prisma.Decimal(body.initialStock),
+        reference: 'onboarding-initial-stock',
+        relatedDocumentType: 'manual',
+        relatedDocumentId: companyId,
+        createdByUserId: actorUserId
+      }
+    });
+
+    await this.advanceOnboarding(companyId, 4);
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.onboarding.inventory_bootstrap',
+      entityType: 'inventory_item',
+      entityId: item.id,
+      metadata: {
+        warehouseId: warehouse.id,
+        itemId: item.id,
+        initialStock: body.initialStock,
+        step: 4
+      },
+      ip,
+      userAgent
+    });
+
+    return { warehouse, item };
+  }
+
+  async onboardingEmployee(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = onboardingEmployeeSchema.parse(payload);
+
+    const employee = await this.prisma.employee.create({
+      data: {
+        companyId,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        hireDate: new Date(),
+        salaryType: (body.salaryType === 'fixed' ? 'FIXED' : 'HOURLY') as SalaryType,
+        baseSalary: body.salaryType === 'fixed' ? new Prisma.Decimal(body.baseSalary) : null,
+        hourlyRate: body.salaryType === 'hourly' ? new Prisma.Decimal(body.hourlyRate) : null,
+        isActive: true
+      }
+    });
+
+    await this.advanceOnboarding(companyId, 5);
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.onboarding.employee',
+      entityType: 'employee',
+      entityId: employee.id,
+      metadata: {
+        salaryType: employee.salaryType,
+        baseSalary: employee.baseSalary,
+        hourlyRate: employee.hourlyRate,
+        step: 5
+      },
+      ip,
+      userAgent
+    });
+
+    return employee;
+  }
+
+  async onboardingFirstSalesOrder(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = onboardingFirstSalesOrderSchema.parse(payload);
+
+    const warehouse =
+      (await this.prisma.inventoryWarehouse.findFirst({ where: { companyId, isActive: true }, orderBy: { createdAt: 'asc' } })) ??
+      (await this.prisma.inventoryWarehouse.create({
+        data: { companyId, name: 'Default Warehouse', location: 'Onboarding default' }
+      }));
+
+    const product = await this.prisma.salesProduct.create({
+      data: {
+        companyId,
+        name: body.productName,
+        sku: `ONB-SP-${Date.now()}`,
+        salesPrice: body.unitPrice,
+        isActive: true
+      }
+    });
+
+    const [revenueCategory, cogsCategory] = await this.ensureSalesFinanceCategories(companyId);
+    const orderDate = new Date();
+    const totalRevenue = Number((body.quantity * body.unitPrice).toFixed(2));
+    const totalCogs = Number((totalRevenue * 0.4).toFixed(2));
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const createdOrder = await tx.salesOrder.create({
+        data: {
+          companyId,
+          orderNo: `ONB-${Date.now()}`,
+          orderDate,
+          status: 'POSTED',
+          warehouseId: warehouse.id,
+          currency: 'TRY',
+          totalRevenue: new Prisma.Decimal(totalRevenue),
+          totalCogs: new Prisma.Decimal(totalCogs),
+          notes: body.notes ?? 'Onboarding first sales order',
+          createdByUserId: actorUserId
+        }
+      });
+
+      await tx.salesOrderLine.create({
+        data: {
+          companyId,
+          salesOrderId: createdOrder.id,
+          productId: product.id,
+          quantity: new Prisma.Decimal(body.quantity),
+          unitPrice: new Prisma.Decimal(body.unitPrice),
+          lineTotal: new Prisma.Decimal(totalRevenue)
+        }
+      });
+
+      await tx.financeEntry.createMany({
+        data: [
+          {
+            companyId,
+            categoryId: revenueCategory.id,
+            amount: new Prisma.Decimal(totalRevenue),
+            date: orderDate,
+            description: 'Onboarding sales revenue',
+            reference: createdOrder.orderNo,
+            relatedDocumentType: 'sale',
+            relatedDocumentId: createdOrder.id,
+            createdByUserId: actorUserId
+          },
+          {
+            companyId,
+            categoryId: cogsCategory.id,
+            amount: new Prisma.Decimal(totalCogs),
+            date: orderDate,
+            description: 'Onboarding COGS',
+            reference: createdOrder.orderNo,
+            relatedDocumentType: 'sale',
+            relatedDocumentId: createdOrder.id,
+            createdByUserId: actorUserId
+          }
+        ]
+      });
+
+      return createdOrder;
+    });
+
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        onboardingStep: 6,
+        onboardingCompleted: true
+      }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.onboarding.first_sales_order',
+      entityType: 'sales_order',
+      entityId: order.id,
+      metadata: { productId: product.id, totalRevenue, totalCogs, completed: true },
+      ip,
+      userAgent
+    });
+
+    return order;
+  }
+
+  async generateDemo(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = demoGenerateSchema.parse(payload ?? {});
+    const tag = body.tag ?? `demo-${new Date().toISOString().slice(0, 10)}`;
+
+    const [revenueCategory, expenseCategory, cogsCategory] = await this.ensureDemoFinanceCategories(companyId);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const profitCenters = [] as Array<{ id: string; name: string }>;
+      for (const name of ['Demo Dining', 'Demo Delivery', 'Demo Events']) {
+        const center = await tx.financeProfitCenter.upsert({
+          where: { companyId_name: { companyId, name } },
+          create: { companyId, name, type: 'GENERAL', isActive: true },
+          update: { isActive: true }
+        });
+        profitCenters.push({ id: center.id, name: center.name });
+      }
+
+      const warehouse = await tx.inventoryWarehouse.upsert({
+        where: { companyId_name: { companyId, name: `DEMO Warehouse ${tag}` } },
+        create: { companyId, name: `DEMO Warehouse ${tag}`, location: 'Demo location', isActive: true },
+        update: { isActive: true }
+      });
+
+      const items: Array<{ id: string; name: string }> = [];
+      for (let i = 1; i <= 20; i += 1) {
+        const item = await tx.inventoryItem.create({
+          data: {
+            companyId,
+            name: `DEMO Item ${i} (${tag})`,
+            sku: `DEMO-${tag}-${i}-${Date.now()}`,
+            unit: 'piece',
+            lastPurchaseUnitCost: new Prisma.Decimal((5 + (i % 7) * 2).toFixed(2)),
+            isActive: true
+          }
+        });
+        items.push({ id: item.id, name: item.name });
+
+        await tx.inventoryStockMovement.create({
+          data: {
+            companyId,
+            itemId: item.id,
+            warehouseId: warehouse.id,
+            type: 'IN',
+            quantity: new Prisma.Decimal(40 + i),
+            reference: `DEMO:${tag}:stock`,
+            relatedDocumentType: 'manual',
+            relatedDocumentId: tag,
+            createdByUserId: actorUserId
+          }
+        });
+      }
+
+      const employees: Array<{ id: string; firstName: string; lastName: string }> = [];
+      for (let i = 1; i <= 5; i += 1) {
+        const employee = await tx.employee.create({
+          data: {
+            companyId,
+            firstName: `Demo${i}`,
+            lastName: 'Employee',
+            hireDate: new Date(),
+            salaryType: 'FIXED',
+            baseSalary: new Prisma.Decimal(9000 + i * 750),
+            isActive: true
+          }
+        });
+        employees.push({ id: employee.id, firstName: employee.firstName, lastName: employee.lastName });
+      }
+
+      const payrollPeriod = await tx.payrollPeriod.create({
+        data: {
+          companyId,
+          startDate: this.startOfDay(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+          endDate: this.endOfDay(new Date()),
+          status: 'CALCULATED',
+          totalGross: new Prisma.Decimal(0),
+          totalNet: new Prisma.Decimal(0)
+        }
+      });
+
+      let payrollTotal = 0;
+      for (const employee of employees) {
+        const gross = 10000;
+        payrollTotal += gross;
+        await tx.payrollLine.create({
+          data: {
+            companyId,
+            payrollPeriodId: payrollPeriod.id,
+            employeeId: employee.id,
+            grossAmount: new Prisma.Decimal(gross),
+            notes: `DEMO:${tag}`
+          }
+        });
+      }
+
+      await tx.payrollPeriod.update({
+        where: { id: payrollPeriod.id },
+        data: {
+          totalGross: new Prisma.Decimal(payrollTotal),
+          totalNet: new Prisma.Decimal(payrollTotal)
+        }
+      });
+
+      for (let i = 0; i < 3; i += 1) {
+        const rule = await tx.financeAllocationRule.create({
+          data: {
+            companyId,
+            name: `DEMO Allocation ${i + 1} (${tag})`,
+            sourceCategoryId: expenseCategory.id,
+            allocationMethod: 'PERCENTAGE',
+            isActive: true
+          }
+        });
+
+        await tx.financeAllocationTarget.createMany({
+          data: [
+            { allocationRuleId: rule.id, profitCenterId: profitCenters[0].id, percentage: new Prisma.Decimal(50) },
+            { allocationRuleId: rule.id, profitCenterId: profitCenters[1].id, percentage: new Prisma.Decimal(30) },
+            { allocationRuleId: rule.id, profitCenterId: profitCenters[2].id, percentage: new Prisma.Decimal(20) }
+          ]
+        });
+      }
+
+      for (let i = 0; i < 30; i += 1) {
+        const date = new Date();
+        date.setDate(date.getDate() - (i % 14));
+        await tx.reservation.create({
+          data: {
+            companyId,
+            name: `DEMO Guest ${i + 1}`,
+            reservationDate: this.startOfDay(date),
+            reservationTime: new Date(this.startOfDay(date).getTime() + 19 * 60 * 60 * 1000),
+            guestCount: 2 + (i % 4),
+            status: i % 7 === 0 ? 'NO_SHOW' : i % 6 === 0 ? 'CANCELED' : 'COMPLETED',
+            tableRef: `T-${(i % 12) + 1}`,
+            notes: `DEMO:${tag}`,
+            createdByUserId: actorUserId
+          }
+        });
+      }
+
+      const products = [] as Array<{ id: string; name: string }>;
+      for (let i = 1; i <= 5; i += 1) {
+        const product = await tx.salesProduct.create({
+          data: {
+            companyId,
+            name: `DEMO Product ${i}`,
+            sku: `DEMO-P-${tag}-${i}-${Date.now()}`,
+            salesPrice: new Prisma.Decimal(70 + i * 10),
+            isActive: true
+          }
+        });
+        products.push({ id: product.id, name: product.name });
+      }
+
+      const today = new Date();
+      for (let i = 0; i < 50; i += 1) {
+        const date = new Date(today);
+        date.setDate(today.getDate() - (i % 25));
+        const product = products[i % products.length];
+        const quantity = (i % 4) + 1;
+        const unitPrice = 80 + (i % 5) * 15;
+        const revenue = Number((quantity * unitPrice).toFixed(2));
+        const cogs = Number((revenue * 0.42).toFixed(2));
+
+        const order = await tx.salesOrder.create({
+          data: {
+            companyId,
+            orderNo: `DEMO-SO-${tag}-${i + 1}`,
+            orderDate: date,
+            status: 'POSTED',
+            warehouseId: warehouse.id,
+            totalRevenue: new Prisma.Decimal(revenue),
+            totalCogs: new Prisma.Decimal(cogs),
+            notes: `DEMO:${tag}`,
+            createdByUserId: actorUserId,
+            profitCenterId: profitCenters[i % profitCenters.length].id
+          }
+        });
+
+        await tx.salesOrderLine.create({
+          data: {
+            companyId,
+            salesOrderId: order.id,
+            productId: product.id,
+            quantity: new Prisma.Decimal(quantity),
+            unitPrice: new Prisma.Decimal(unitPrice),
+            lineTotal: new Prisma.Decimal(revenue)
+          }
+        });
+
+        await tx.financeEntry.createMany({
+          data: [
+            {
+              companyId,
+              categoryId: revenueCategory.id,
+              amount: new Prisma.Decimal(revenue),
+              date,
+              description: `DEMO Revenue ${tag}`,
+              reference: `DEMO-SO-${i + 1}`,
+              relatedDocumentType: 'sale',
+              relatedDocumentId: order.id,
+              createdByUserId: actorUserId,
+              profitCenterId: order.profitCenterId
+            },
+            {
+              companyId,
+              categoryId: cogsCategory.id,
+              amount: new Prisma.Decimal(cogs),
+              date,
+              description: `DEMO COGS ${tag}`,
+              reference: `DEMO-SO-${i + 1}`,
+              relatedDocumentType: 'sale',
+              relatedDocumentId: order.id,
+              createdByUserId: actorUserId,
+              profitCenterId: order.profitCenterId
+            }
+          ]
+        });
+      }
+
+      for (let i = 0; i < 20; i += 1) {
+        const date = new Date(today);
+        date.setDate(today.getDate() - (i % 20));
+        const isIncome = i % 3 !== 0;
+        await tx.financeEntry.create({
+          data: {
+            companyId,
+            categoryId: isIncome ? revenueCategory.id : expenseCategory.id,
+            amount: new Prisma.Decimal(250 + i * 12),
+            date,
+            description: `DEMO Random ${tag}`,
+            reference: `DEMO-RND-${i + 1}`,
+            relatedDocumentType: 'demo',
+            relatedDocumentId: tag,
+            createdByUserId: actorUserId
+          }
+        });
+      }
+
+      await tx.company.update({
+        where: { id: companyId },
+        data: { onboardingCompleted: true, onboardingStep: 6 }
+      });
+
+      return {
+        tag,
+        profitCenters: 3,
+        inventoryItems: items.length,
+        sales: 50,
+        reservations: 30,
+        employees: employees.length,
+        payrollPeriods: 1,
+        allocationRules: 3,
+        randomFinanceEntries: 20
+      };
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.demo.generate',
+      entityType: 'company',
+      entityId: companyId,
+      metadata: result,
+      ip,
+      userAgent
+    });
+
+    return result;
+  }
+
+  private async ensureRoleTemplates(tx: Prisma.TransactionClient | PrismaService, companyId: string) {
+    const ownerTemplate = ROLE_TEMPLATES.find((row) => row.key === 'owner');
+    if (!ownerTemplate) return;
+
+    const allTemplatePermissionKeys = new Set<string>();
+    for (const template of ROLE_TEMPLATES) {
+      for (const key of template.permissionKeys) {
+        allTemplatePermissionKeys.add(key);
+      }
+    }
+
+    for (const key of allTemplatePermissionKeys) {
+      await tx.companyPermission.upsert({
+        where: { key },
+        create: { key },
+        update: {}
+      });
+    }
+
+    const existingPermissions = await tx.companyPermission.findMany({ select: { id: true, key: true } });
+    const permissionIdByKey = new Map(existingPermissions.map((row) => [row.key, row.id]));
+
+    const ownerRole = await tx.companyRole.upsert({
+      where: { companyId_key: { companyId, key: 'owner' } },
+      create: { companyId, key: 'owner', name: 'Owner', description: ownerTemplate.description },
+      update: { name: 'Owner', description: ownerTemplate.description }
+    });
+
+    for (const permission of existingPermissions) {
+      await tx.companyRolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: ownerRole.id,
+            permissionId: permission.id
+          }
+        },
+        create: { roleId: ownerRole.id, permissionId: permission.id },
+        update: {}
+      });
+    }
+
+    for (const template of ROLE_TEMPLATES.filter((row) => row.key !== 'owner')) {
+      const role = await tx.companyRole.upsert({
+        where: { companyId_key: { companyId, key: template.key } },
+        create: {
+          companyId,
+          key: template.key,
+          name: template.name,
+          description: template.description
+        },
+        update: {
+          name: template.name,
+          description: template.description
+        }
+      });
+
+      for (const permissionKey of template.permissionKeys) {
+        const permissionId = permissionIdByKey.get(permissionKey);
+        if (!permissionId) continue;
+        await tx.companyRolePermission.upsert({
+          where: {
+            roleId_permissionId: {
+              roleId: role.id,
+              permissionId
+            }
+          },
+          create: { roleId: role.id, permissionId },
+          update: {}
+        });
+      }
+    }
+  }
+
+  private async ensurePilotModulesInstalled(tx: Prisma.TransactionClient, companyId: string) {
+    const modules = await tx.module.findMany({
+      where: { key: { in: [...PILOT_MODULE_KEYS] }, status: 'PUBLISHED' },
+      select: { key: true }
+    });
+
+    for (const row of modules) {
+      await tx.moduleInstallation.upsert({
+        where: { companyId_moduleKey: { companyId, moduleKey: row.key } },
+        create: {
+          companyId,
+          moduleKey: row.key,
+          status: 'ACTIVE',
+          installedAt: new Date()
+        },
+        update: {
+          status: 'ACTIVE',
+          installedAt: new Date()
+        }
+      });
+
+      await tx.companyEntitlement.upsert({
+        where: { companyId_moduleKey: { companyId, moduleKey: row.key } },
+        create: { companyId, moduleKey: row.key, limits: {} },
+        update: {}
+      });
+    }
+  }
+
+  private async ensureSalesFinanceCategories(companyId: string) {
+    const revenue = await this.prisma.financeCategory.upsert({
+      where: { companyId_name: { companyId, name: 'Sales Revenue' } },
+      create: { companyId, name: 'Sales Revenue', type: 'INCOME' },
+      update: {}
+    });
+
+    const cogs = await this.prisma.financeCategory.upsert({
+      where: { companyId_name: { companyId, name: 'COGS' } },
+      create: { companyId, name: 'COGS', type: 'EXPENSE' },
+      update: {}
+    });
+
+    return [revenue, cogs] as const;
+  }
+
+  private async ensureDemoFinanceCategories(companyId: string) {
+    const [revenue, cogs] = await this.ensureSalesFinanceCategories(companyId);
+    const expense = await this.prisma.financeCategory.upsert({
+      where: { companyId_name: { companyId, name: 'Operating Expense' } },
+      create: { companyId, name: 'Operating Expense', type: 'EXPENSE' },
+      update: {}
+    });
+    return [revenue, expense, cogs] as const;
+  }
+
+  private async advanceOnboarding(companyId: string, step: number) {
+    const company = await this.prisma.company.findUniqueOrThrow({ where: { id: companyId } });
+    if (company.onboardingCompleted) return company;
+
+    return this.prisma.company.update({
+      where: { id: companyId },
+      data: { onboardingStep: Math.max(company.onboardingStep, step) }
+    });
+  }
+
+  private parsePagination(query?: Record<string, string | undefined>) {
+    if (!query) return null;
+    if (!query.page && !query.limit) return null;
+    return paginationQuerySchema.parse(query);
+  }
+
+  private toPage<T>(items: T[], page: number, limit: number, total: number): Paginated<T> {
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    return { items, page, limit, total, totalPages };
+  }
+
   private hashToken(rawToken: string) {
     return crypto.createHash('sha256').update(rawToken).digest('hex');
   }
@@ -488,5 +1466,17 @@ export class AppApiService {
       return Object.keys(row);
     }
     return [];
+  }
+
+  private startOfDay(value: Date) {
+    const out = new Date(value);
+    out.setHours(0, 0, 0, 0);
+    return out;
+  }
+
+  private endOfDay(value: Date) {
+    const out = new Date(value);
+    out.setHours(23, 59, 59, 999);
+    return out;
   }
 }

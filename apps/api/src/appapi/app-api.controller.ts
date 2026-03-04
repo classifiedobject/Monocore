@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AppApiService } from './app-api.service.js';
 import { AuthGuard } from '../common/guards/auth.guard.js';
@@ -34,15 +34,21 @@ export class AppApiController {
   @Get('team')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:team.read')
-  listTeam(@Req() req: Request & { companyId: string }) {
-    return this.appApi.listTeam(req.companyId);
+  listTeam(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>
+  ) {
+    return this.appApi.listTeam(req.companyId, query);
   }
 
   @Get('invites')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:team.invite.create')
-  listInvites(@Req() req: Request & { companyId: string }) {
-    return this.appApi.listInvites(req.companyId);
+  listInvites(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>
+  ) {
+    return this.appApi.listInvites(req.companyId, query);
   }
 
   @Post('invites')
@@ -117,22 +123,31 @@ export class AppApiController {
   @Get('audit-logs')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:audit.read')
-  logs(@Req() req: Request & { companyId: string }) {
-    return this.appApi.listAuditLogs(req.companyId);
+  logs(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>
+  ) {
+    return this.appApi.listAuditLogs(req.companyId, query);
   }
 
   @Get('modules')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:modules.read')
-  modules(@Req() req: Request & { companyId: string }) {
-    return this.appApi.listInstalledModules(req.companyId);
+  modules(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>
+  ) {
+    return this.appApi.listInstalledModules(req.companyId, query);
   }
 
   @Get('modules/catalog')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:modules.read')
-  catalog(@Req() req: Request & { companyId: string }) {
-    return this.appApi.listModuleCatalog(req.companyId);
+  catalog(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>
+  ) {
+    return this.appApi.listModuleCatalog(req.companyId, query);
   }
 
   @Post('modules/install')
@@ -140,5 +155,93 @@ export class AppApiController {
   @RequirePermissions('company:modules.install')
   installModule(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.appApi.installModule(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('company/context')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:team.read')
+  companyContext(@Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.companyContext(req.user.id, req.companyId);
+  }
+
+  @Get('company/role-templates')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:roles.manage')
+  roleTemplates() {
+    return this.appApi.listRoleTemplates();
+  }
+
+  @Post('company/apply-role-template')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:roles.manage')
+  applyRoleTemplate(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.applyRoleTemplate(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('onboarding/status')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:settings.manage')
+  onboardingStatus(@Req() req: Request & { companyId: string }) {
+    return this.appApi.onboardingStatus(req.companyId);
+  }
+
+  @Post('onboarding/company-basics')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:settings.manage')
+  onboardingCompanyBasics(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.onboardingCompanyBasics(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('onboarding/profit-centers')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('module:finance-core.profit-center.manage')
+  onboardingProfitCenters(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.onboardingProfitCenters(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('onboarding/inventory-bootstrap')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('module:inventory-core.item.manage', 'module:inventory-core.warehouse.manage')
+  onboardingInventoryBootstrap(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.onboardingInventoryBootstrap(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('onboarding/employee')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('module:payroll-core.employee.manage')
+  onboardingEmployee(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.onboardingEmployee(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('onboarding/first-sales-order')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('module:sales-core.order.manage', 'module:sales-core.order.post')
+  onboardingFirstSalesOrder(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.onboardingFirstSalesOrder(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('demo/generate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:settings.manage')
+  generateDemo(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.generateDemo(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 }
