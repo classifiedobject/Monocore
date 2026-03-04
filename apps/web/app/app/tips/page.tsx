@@ -61,6 +61,16 @@ type TipWeek = {
 };
 
 export default function TipsPage() {
+  const tr = {
+    'tip.tabs.configuration': 'Yapılandırma',
+    'tip.tabs.daily': 'Günlük Giriş',
+    'tip.tabs.weekly': 'Haftalık',
+    'tip.tabs.advance': 'Avans',
+    'tip.tabs.report': 'Rapor',
+    'tip.common.save': 'Kaydet',
+    'tip.common.date': 'Tarih'
+  } as const;
+
   const [tab, setTab] = useState<Tab>('configuration');
   const [config, setConfig] = useState<TipConfig | null>(null);
   const [dailyInputs, setDailyInputs] = useState<TipDailyInput[]>([]);
@@ -94,6 +104,11 @@ export default function TipsPage() {
   const [defaultWastePoints, setDefaultWastePoints] = useState('0');
   const [allowDepartmentSubPool, setAllowDepartmentSubPool] = useState(false);
 
+  const parseNumber = (value: string) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+  };
+
   async function loadAll() {
     const [cfg, dailyRows, weekRows, employeeRows] = await Promise.all([
       apiFetch('/app-api/tips/config') as Promise<TipConfig>,
@@ -120,6 +135,32 @@ export default function TipsPage() {
   }, []);
 
   const weekOptions = useMemo(() => weeks.map((row) => ({ id: row.id, label: `${row.periodStart.slice(0, 10)} - ${row.periodEnd.slice(0, 10)}` })), [weeks]);
+  const dailyPreview = useMemo(() => {
+    const gross = parseNumber(grossRevenue);
+    const disc = parseNumber(discounts);
+    const comp = parseNumber(comps);
+    const waste = parseNumber(wastageSales);
+    const cash = parseNumber(cashTips);
+    const visaGross = parseNumber(visaTipsGross);
+    const expense = parseNumber(expenseAdjustments);
+    const srvRate = parseNumber(serviceRate);
+    const srvTax = parseNumber(serviceTaxRate);
+    const visaTax = parseNumber(visaTaxRate);
+
+    const serviceRevenue = gross - disc - comp - waste;
+    const serviceFee = serviceRevenue > 0 ? serviceRevenue / (1 + srvRate) : 0;
+    const netServiceFee = serviceFee - serviceFee * srvTax;
+    const netVisaTip = visaGross - visaGross * visaTax;
+    const distributable = netServiceFee + netVisaTip + cash - expense;
+
+    return {
+      serviceRevenue,
+      serviceFee,
+      netServiceFee,
+      netVisaTip,
+      distributable
+    };
+  }, [grossRevenue, discounts, comps, wastageSales, cashTips, visaTipsGross, expenseAdjustments, serviceRate, serviceTaxRate, visaTaxRate]);
 
   async function saveConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -215,7 +256,7 @@ export default function TipsPage() {
     <section className="space-y-5">
       <header>
         <h1 className="text-3xl font-bold">Tip Core - Advanced Tip Engine v2</h1>
-        <p className="text-sm text-slate-600">Configurable weekly tip pool, weighted distribution and advance tracking.</p>
+        <p className="text-sm text-slate-600">Haftalık tip havuzu, ağırlıklı dağıtım ve avans takibini tek ekrandan yönetin.</p>
       </header>
 
       <div className="flex flex-wrap gap-2">
@@ -225,48 +266,103 @@ export default function TipsPage() {
             className={`rounded px-3 py-2 text-sm ${tab === item ? 'bg-slate-900 text-white' : 'bg-white'}`}
             onClick={() => setTab(item)}
           >
-            {item[0].toUpperCase() + item.slice(1)}
+            {item === 'configuration' ? tr['tip.tabs.configuration'] : null}
+            {item === 'daily' ? tr['tip.tabs.daily'] : null}
+            {item === 'weekly' ? tr['tip.tabs.weekly'] : null}
+            {item === 'advance' ? tr['tip.tabs.advance'] : null}
+            {item === 'report' ? tr['tip.tabs.report'] : null}
           </button>
         ))}
       </div>
 
       {tab === 'configuration' ? (
-        <form className="grid gap-2 rounded bg-white p-4 shadow-sm md:grid-cols-3" onSubmit={(event) => saveConfig(event).catch(handleApiError)}>
-          <input className="rounded border px-3 py-2" type="number" step="0.0001" value={serviceRate} onChange={(event) => setServiceRate(event.target.value)} placeholder="Service rate" />
-          <input className="rounded border px-3 py-2" type="number" step="0.0001" value={serviceTaxRate} onChange={(event) => setServiceTaxRate(event.target.value)} placeholder="Service tax deduction rate" />
-          <input className="rounded border px-3 py-2" type="number" step="0.0001" value={visaTaxRate} onChange={(event) => setVisaTaxRate(event.target.value)} placeholder="Visa tax deduction rate" />
-          <input className="rounded border px-3 py-2" type="number" step="0.01" value={defaultWastePoints} onChange={(event) => setDefaultWastePoints(event.target.value)} placeholder="Default waste points" />
-          <label className="flex items-center gap-2 rounded border px-3 py-2 text-sm">
-            <input type="checkbox" checked={allowDepartmentSubPool} onChange={(event) => setAllowDepartmentSubPool(event.target.checked)} />
-            Allow department sub pool
+        <form className="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2" onSubmit={(event) => saveConfig(event).catch(handleApiError)}>
+          <label className="space-y-1">
+            <span className="text-sm font-medium">Servis Oranı</span>
+            <input className="w-full rounded border px-3 py-2" type="number" step="0.0001" min={0} max={1} value={serviceRate} onChange={(event) => setServiceRate(event.target.value)} />
+            <p className="text-xs text-slate-500">Örn: %10 = 0.10 | Aralık: 0 - 1</p>
           </label>
-          <button className="rounded bg-mono-500 px-3 py-2 text-white">Save Configuration</button>
-          {config ? <p className="text-xs text-slate-500 md:col-span-3">Config id: {config.id}</p> : null}
+          <label className="space-y-1">
+            <span className="text-sm font-medium">Servis Kesinti Oranı (Vergi)</span>
+            <input className="w-full rounded border px-3 py-2" type="number" step="0.0001" min={0} max={1} value={serviceTaxRate} onChange={(event) => setServiceTaxRate(event.target.value)} />
+            <p className="text-xs text-slate-500">Örn: %40 = 0.40 | Aralık: 0 - 1</p>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm font-medium">Visa Tip Kesinti Oranı</span>
+            <input className="w-full rounded border px-3 py-2" type="number" step="0.0001" min={0} max={1} value={visaTaxRate} onChange={(event) => setVisaTaxRate(event.target.value)} />
+            <p className="text-xs text-slate-500">Örn: %40 = 0.40 | Aralık: 0 - 1</p>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm font-medium">Varsayılan Zayi Puanı</span>
+            <input className="w-full rounded border px-3 py-2" type="number" step="0.01" min={0} value={defaultWastePoints} onChange={(event) => setDefaultWastePoints(event.target.value)} />
+            <p className="text-xs text-slate-500">Sarf zayisi puanı. Örn: 2.5</p>
+          </label>
+          <label className="flex items-center gap-2 rounded border px-3 py-2 text-sm md:col-span-2">
+            <input type="checkbox" checked={allowDepartmentSubPool} onChange={(event) => setAllowDepartmentSubPool(event.target.checked)} />
+            Departman alt havuzu aktif olsun
+          </label>
+          <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-2">{tr['tip.common.save']}</button>
+          {config ? <p className="text-xs text-slate-500 md:col-span-2">Config id: {config.id}</p> : null}
         </form>
       ) : null}
 
       {tab === 'daily' ? (
         <div className="space-y-3">
-          <form className="grid gap-2 rounded bg-white p-4 shadow-sm md:grid-cols-4" onSubmit={(event) => saveDailyInput(event).catch(handleApiError)}>
-            <input className="rounded border px-3 py-2" type="date" value={dailyDate} onChange={(event) => setDailyDate(event.target.value)} required />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={grossRevenue} onChange={(event) => setGrossRevenue(event.target.value)} placeholder="Gross revenue" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={discounts} onChange={(event) => setDiscounts(event.target.value)} placeholder="Discounts" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={comps} onChange={(event) => setComps(event.target.value)} placeholder="Comps" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={wastageSales} onChange={(event) => setWastageSales(event.target.value)} placeholder="Wastage sales" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={cashTips} onChange={(event) => setCashTips(event.target.value)} placeholder="Cash tips" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={visaTipsGross} onChange={(event) => setVisaTipsGross(event.target.value)} placeholder="Visa tips gross" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={expenseAdjustments} onChange={(event) => setExpenseAdjustments(event.target.value)} placeholder="Expense adjustments" />
-            <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-4">Save Daily Input</button>
+          <form className="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2" onSubmit={(event) => saveDailyInput(event).catch(handleApiError)}>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">{tr['tip.common.date']}</span>
+              <input className="w-full rounded border px-3 py-2" type="date" value={dailyDate} onChange={(event) => setDailyDate(event.target.value)} required />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Brüt Ciro</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={grossRevenue} onChange={(event) => setGrossRevenue(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">İndirimler</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={discounts} onChange={(event) => setDiscounts(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">İkram / Ödenmez</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={comps} onChange={(event) => setComps(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Satış Zayileri (Bilgi Amaçlı)</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={wastageSales} onChange={(event) => setWastageSales(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Nakit Servis Bahşişi</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={cashTips} onChange={(event) => setCashTips(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Visa Tip (Brüt)</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={visaTipsGross} onChange={(event) => setVisaTipsGross(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Masraflar (Tipten Düşülecek)</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={expenseAdjustments} onChange={(event) => setExpenseAdjustments(event.target.value)} />
+            </label>
+            <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-2">Günlük Veriyi Kaydet</button>
           </form>
+
+          <article className="rounded bg-white p-4 shadow-sm">
+            <h3 className="mb-2 font-semibold">Hesap Önizleme (Salt Okunur)</h3>
+            <div className="grid gap-2 text-sm md:grid-cols-2">
+              <p>Servis ve Cari Dahil Ciro: <strong>{dailyPreview.serviceRevenue.toFixed(2)}</strong></p>
+              <p>Servis Ücreti (Hesap): <strong>{dailyPreview.serviceFee.toFixed(2)}</strong></p>
+              <p>Net Servis Ücreti: <strong>{dailyPreview.netServiceFee.toFixed(2)}</strong></p>
+              <p>Net Visa Tip: <strong>{dailyPreview.netVisaTip.toFixed(2)}</strong></p>
+              <p className="md:col-span-2">Dağıtılacak Günlük Tip: <strong>{dailyPreview.distributable.toFixed(2)}</strong></p>
+            </div>
+          </article>
 
           <div className="overflow-hidden rounded bg-white shadow-sm">
             <table className="w-full text-sm">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="px-3 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-left">Gross</th>
-                  <th className="px-3 py-2 text-left">Net Service Fee</th>
-                  <th className="px-3 py-2 text-left">Cash</th>
+                  <th className="px-3 py-2 text-left">Tarih</th>
+                  <th className="px-3 py-2 text-left">Brüt Ciro</th>
+                  <th className="px-3 py-2 text-left">Net Servis</th>
+                  <th className="px-3 py-2 text-left">Nakit</th>
                   <th className="px-3 py-2 text-left">Visa Net</th>
                 </tr>
               </thead>
@@ -288,13 +384,34 @@ export default function TipsPage() {
 
       {tab === 'weekly' ? (
         <div className="space-y-3">
-          <form className="grid gap-2 rounded bg-white p-4 shadow-sm md:grid-cols-5" onSubmit={(event) => createWeek(event).catch(handleApiError)}>
-            <input className="rounded border px-3 py-2" type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} required />
-            <input className="rounded border px-3 py-2" type="date" value={weekEnd} onChange={(event) => setWeekEnd(event.target.value)} required />
-            <input className="rounded border px-3 py-2" type="number" step="0.0001" value={weekServiceRate} onChange={(event) => setWeekServiceRate(event.target.value)} placeholder="Service rate override" />
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={weekWastePoints} onChange={(event) => setWeekWastePoints(event.target.value)} placeholder="Waste points override" />
-            <input className="rounded border px-3 py-2" type="date" value={payableDate} onChange={(event) => setPayableDate(event.target.value)} />
-            <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-5">Create Tip Week</button>
+          <form className="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2" onSubmit={(event) => createWeek(event).catch(handleApiError)}>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Hafta Başlangıç</span>
+              <input className="w-full rounded border px-3 py-2" type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} required />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Hafta Bitiş</span>
+              <input className="w-full rounded border px-3 py-2" type="date" value={weekEnd} onChange={(event) => setWeekEnd(event.target.value)} required />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">
+                Bu Hafta Servis Oranı (Varsayılanı Geçersiz Kıl)
+                <span className="ml-1 cursor-help text-slate-400" title="Boş bırakılırsa sistem yapılandırmasındaki servis oranı kullanılır.">ⓘ</span>
+              </span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} max={1} step="0.0001" value={weekServiceRate} onChange={(event) => setWeekServiceRate(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">
+                Bu Hafta Ek Zayi Puanı (Sarf Zayisi)
+                <span className="ml-1 cursor-help text-slate-400" title="Toplam puana eklenir, puan değeri hesaplamasını etkiler.">ⓘ</span>
+              </span>
+              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={weekWastePoints} onChange={(event) => setWeekWastePoints(event.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Ödeme Tarihi (Opsiyonel)</span>
+              <input className="w-full rounded border px-3 py-2" type="date" value={payableDate} onChange={(event) => setPayableDate(event.target.value)} />
+            </label>
+            <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-2">Tip Haftası Oluştur</button>
           </form>
 
           <div className="space-y-3">
@@ -322,11 +439,11 @@ export default function TipsPage() {
                     value={overrideDepartment}
                     onChange={(event) => setOverrideDepartment(event.target.value as 'service' | 'bar' | 'kitchen' | 'support' | 'other')}
                   >
-                    <option value="service">service</option>
-                    <option value="bar">bar</option>
-                    <option value="kitchen">kitchen</option>
-                    <option value="support">support</option>
-                    <option value="other">other</option>
+                    <option value="service">Servis</option>
+                    <option value="bar">Bar</option>
+                    <option value="kitchen">Mutfak</option>
+                    <option value="support">Destek</option>
+                    <option value="other">Diğer</option>
                   </select>
                   <input
                     className="rounded border px-2 py-1 text-xs"
@@ -334,13 +451,13 @@ export default function TipsPage() {
                     step="0.01"
                     value={overrideWeight}
                     onChange={(event) => setOverrideWeight(event.target.value)}
-                    placeholder="Department override weight"
+                    placeholder="Departman için override ağırlık"
                   />
                   <button
                     className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
                     onClick={() => setDepartmentOverride(row.id).catch(handleApiError)}
                   >
-                    Save Override
+                    Override Kaydet
                   </button>
                 </div>
               </article>
@@ -353,19 +470,19 @@ export default function TipsPage() {
         <div className="space-y-3">
           <form className="grid gap-2 rounded bg-white p-4 shadow-sm md:grid-cols-4" onSubmit={(event) => createAdvance(event).catch(handleApiError)}>
             <select className="rounded border px-3 py-2" value={advanceWeekId} onChange={(event) => setAdvanceWeekId(event.target.value)} required>
-              <option value="">Select week</option>
+              <option value="">Hafta Seç</option>
               {weekOptions.map((row) => (
                 <option key={row.id} value={row.id}>{row.label}</option>
               ))}
             </select>
             <select className="rounded border px-3 py-2" value={advanceEmployeeId} onChange={(event) => setAdvanceEmployeeId(event.target.value)} required>
-              <option value="">Select employee</option>
+              <option value="">Çalışan Seç</option>
               {employees.map((row) => (
                 <option key={row.id} value={row.id}>{row.firstName} {row.lastName}</option>
               ))}
             </select>
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={advanceAmount} onChange={(event) => setAdvanceAmount(event.target.value)} placeholder="Advance amount" required />
-            <button className="rounded bg-mono-500 px-3 py-2 text-white">Add Advance</button>
+            <input className="rounded border px-3 py-2" type="number" step="0.01" value={advanceAmount} onChange={(event) => setAdvanceAmount(event.target.value)} placeholder="Avans Tutarı" required />
+            <button className="rounded bg-mono-500 px-3 py-2 text-white">Avans Ekle</button>
           </form>
 
           <div className="space-y-2">
@@ -376,7 +493,7 @@ export default function TipsPage() {
                   {week.advances.map((advance) => (
                     <li key={advance.id}>{advance.employee.firstName} {advance.employee.lastName}: {advance.amount}</li>
                   ))}
-                  {week.advances.length === 0 ? <li className="text-slate-500">No advances</li> : null}
+                  {week.advances.length === 0 ? <li className="text-slate-500">Avans kaydı yok</li> : null}
                 </ul>
               </article>
             ))}
@@ -386,20 +503,26 @@ export default function TipsPage() {
 
       {tab === 'report' ? (
         <div className="space-y-3">
+          {weeks.length === 0 ? (
+            <article className="rounded bg-white p-4 text-sm text-slate-600 shadow-sm">
+              <p className="font-medium">Henüz tip haftası yok.</p>
+              <p className="mt-1">Önce “Haftalık” sekmesinden bir tip haftası oluşturup hesaplama çalıştırın.</p>
+            </article>
+          ) : null}
           {weeks.map((week) => (
             <article key={week.id} className="rounded bg-white p-4 shadow-sm">
               <h2 className="font-semibold">
-                Distribution {week.periodStart.slice(0, 10)} - {week.periodEnd.slice(0, 10)}
+                Dağıtım {week.periodStart.slice(0, 10)} - {week.periodEnd.slice(0, 10)}
               </h2>
               <div className="mt-2 overflow-hidden rounded border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-3 py-2 text-left">Employee</th>
-                      <th className="px-3 py-2 text-left">Weight</th>
-                      <th className="px-3 py-2 text-left">Gross Share</th>
-                      <th className="px-3 py-2 text-left">Advance</th>
-                      <th className="px-3 py-2 text-left">Net Share</th>
+                      <th className="px-3 py-2 text-left">Çalışan</th>
+                      <th className="px-3 py-2 text-left">Puan</th>
+                      <th className="px-3 py-2 text-left">Brüt Pay</th>
+                      <th className="px-3 py-2 text-left">Avans</th>
+                      <th className="px-3 py-2 text-left">Net Pay</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -414,7 +537,9 @@ export default function TipsPage() {
                     ))}
                     {week.distributions.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-3 text-slate-500" colSpan={5}>No distribution calculated yet.</td>
+                        <td className="px-3 py-3 text-slate-500" colSpan={5}>
+                          Bu hafta hesaplama yapılmadı. “Haftalık” sekmesinden önce “Calculate”, sonra “Lock” adımlarını çalıştırın.
+                        </td>
                       </tr>
                     ) : null}
                   </tbody>
