@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AppApiService } from './app-api.service.js';
 import { AuthGuard } from '../common/guards/auth.guard.js';
@@ -206,6 +206,59 @@ export class AppApiController {
     return this.appApi.updateOrgDepartment(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
   }
 
+  @Patch('company/departments/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  updateCompanyDepartment(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.updateOrgDepartment(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/org/departments/:id/activate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  activateOrgDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgDepartmentActive(req.user.id, req.companyId, id, true, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/departments/:id/activate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  activateCompanyDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgDepartmentActive(req.user.id, req.companyId, id, true, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/org/departments/:id/deactivate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deactivateOrgDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgDepartmentActive(req.user.id, req.companyId, id, false, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/departments/:id/deactivate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deactivateCompanyDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgDepartmentActive(req.user.id, req.companyId, id, false, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('company/org/departments/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deleteOrgDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.deleteOrgDepartment(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('company/departments/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deleteCompanyDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.deleteOrgDepartment(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
   @Get('company/org/titles')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:org.read')
@@ -229,6 +282,59 @@ export class AppApiController {
     @Req() req: Request & { user: { id: string }; companyId: string }
   ) {
     return this.appApi.updateOrgTitle(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('company/titles/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  updateCompanyTitle(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.updateOrgTitle(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/org/titles/:id/activate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  activateOrgTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgTitleActive(req.user.id, req.companyId, id, true, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/titles/:id/activate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  activateCompanyTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgTitleActive(req.user.id, req.companyId, id, true, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/org/titles/:id/deactivate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deactivateOrgTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgTitleActive(req.user.id, req.companyId, id, false, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/titles/:id/deactivate')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deactivateCompanyTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.setOrgTitleActive(req.user.id, req.companyId, id, false, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('company/org/titles/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deleteOrgTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.deleteOrgTitle(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('company/titles/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  deleteCompanyTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.deleteOrgTitle(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
   @Get('company/org/employees')
