@@ -23,7 +23,6 @@ type DirectoryEmployee = {
 };
 
 type TipConfig = {
-  id: string;
   serviceRate: string;
   serviceTaxDeductionRate: string;
   visaTaxDeductionRate: string;
@@ -38,7 +37,10 @@ type TipDailyInput = {
   discounts: string;
   comps: string;
   wastageSales: string;
+  serviceRevenueCalculated: string;
+  netServiceRevenue: string;
   netServiceFee: string;
+  cariAdisyonTotal: string;
   cashTips: string;
   visaTipsGross: string;
   visaTipsNet: string;
@@ -115,6 +117,40 @@ type TipWeekReport = {
   };
 };
 
+const moneyFormatter = new Intl.NumberFormat('tr-TR', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+function parseTrNumber(value: string) {
+  if (!value) return 0;
+  const normalized = value.replace(/\./g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatTrNumber(value: number) {
+  return moneyFormatter.format(value);
+}
+
+function normalizeTrInput(raw: string) {
+  const only = raw.replace(/[^\d,.]/g, '').replace(/\./g, ',');
+  const commaIndex = only.indexOf(',');
+  if (commaIndex === -1) return only;
+  const intPart = only.slice(0, commaIndex).replace(/,/g, '');
+  const fracPart = only.slice(commaIndex + 1).replace(/,/g, '');
+  return `${intPart},${fracPart}`;
+}
+
+function useTrNumberState(initial = '0,00') {
+  const [value, setValue] = useState(initial);
+  const onChange = (next: string) => setValue(normalizeTrInput(next));
+  const onBlur = () => setValue(formatTrNumber(parseTrNumber(value)));
+  return { value, setValue, onChange, onBlur };
+}
+
 export default function TipsPage() {
   const tr = {
     'tip.tabs.configuration': 'Yapılandırma',
@@ -127,44 +163,39 @@ export default function TipsPage() {
   } as const;
 
   const [tab, setTab] = useState<Tab>('configuration');
-  const [config, setConfig] = useState<TipConfig | null>(null);
   const [dailyInputs, setDailyInputs] = useState<TipDailyInput[]>([]);
   const [weeks, setWeeks] = useState<TipWeek[]>([]);
   const [employees, setEmployees] = useState<DirectoryEmployee[]>([]);
   const [reportWeekId, setReportWeekId] = useState('');
   const [report, setReport] = useState<TipWeekReport | null>(null);
 
-  const [dailyDate, setDailyDate] = useState(new Date().toISOString().slice(0, 10));
-  const [grossRevenue, setGrossRevenue] = useState('0');
-  const [discounts, setDiscounts] = useState('0');
-  const [comps, setComps] = useState('0');
-  const [wastageSales, setWastageSales] = useState('0');
-  const [cashTips, setCashTips] = useState('0');
-  const [visaTipsGross, setVisaTipsGross] = useState('0');
-  const [expenseAdjustments, setExpenseAdjustments] = useState('0');
+  const [dailyDate, setDailyDate] = useState(todayIso());
+  const grossRevenue = useTrNumberState();
+  const discounts = useTrNumberState();
+  const comps = useTrNumberState();
+  const wastageSales = useTrNumberState();
+  const cariAdisyonTotal = useTrNumberState();
+  const cashTips = useTrNumberState();
+  const visaTipsGross = useTrNumberState();
+  const expenseAdjustments = useTrNumberState();
 
-  const [weekStart, setWeekStart] = useState(new Date().toISOString().slice(0, 10));
-  const [weekEnd, setWeekEnd] = useState(new Date().toISOString().slice(0, 10));
-  const [weekServiceRate, setWeekServiceRate] = useState('');
-  const [weekWastePoints, setWeekWastePoints] = useState('');
+  const [weekStart, setWeekStart] = useState(todayIso());
+  const [weekEnd, setWeekEnd] = useState(todayIso());
+  const weekServiceRate = useTrNumberState('');
+  const weekWastePoints = useTrNumberState('');
   const [payableDate, setPayableDate] = useState('');
 
   const [advanceWeekId, setAdvanceWeekId] = useState('');
   const [advanceDirectoryEmployeeId, setAdvanceDirectoryEmployeeId] = useState('');
-  const [advanceAmount, setAdvanceAmount] = useState('');
+  const advanceAmount = useTrNumberState('');
   const [overrideDepartment, setOverrideDepartment] = useState<'service' | 'bar' | 'kitchen' | 'support' | 'other'>('kitchen');
-  const [overrideWeight, setOverrideWeight] = useState('');
+  const overrideWeight = useTrNumberState('');
 
-  const [serviceRate, setServiceRate] = useState('0.1');
-  const [serviceTaxRate, setServiceTaxRate] = useState('0.4');
-  const [visaTaxRate, setVisaTaxRate] = useState('0.4');
-  const [defaultWastePoints, setDefaultWastePoints] = useState('0');
+  const serviceRatePercent = useTrNumberState('10,00');
+  const serviceTaxRatePercent = useTrNumberState('40,00');
+  const visaTaxRatePercent = useTrNumberState('40,00');
+  const defaultWastePoints = useTrNumberState('0,00');
   const [allowDepartmentSubPool, setAllowDepartmentSubPool] = useState(false);
-
-  const parseNumber = (value: string) => {
-    const num = Number(value);
-    return Number.isFinite(num) ? num : 0;
-  };
 
   async function loadAll() {
     const [cfg, dailyRows, weekRows, employeeRows] = await Promise.all([
@@ -173,14 +204,13 @@ export default function TipsPage() {
       apiFetch('/app-api/tips/weeks') as Promise<TipWeek[]>,
       apiFetch('/app-api/tips/employees') as Promise<DirectoryEmployee[]>
     ]);
-    setConfig(cfg);
     setDailyInputs(dailyRows);
     setWeeks(weekRows);
     setEmployees(employeeRows.filter((row) => Boolean(row.id) && row.isActive && row.title?.isTipEligible));
-    setServiceRate(String(cfg.serviceRate));
-    setServiceTaxRate(String(cfg.serviceTaxDeductionRate));
-    setVisaTaxRate(String(cfg.visaTaxDeductionRate));
-    setDefaultWastePoints(String(cfg.defaultWastePoints));
+    serviceRatePercent.setValue(formatTrNumber(Number(cfg.serviceRate) * 100));
+    serviceTaxRatePercent.setValue(formatTrNumber(Number(cfg.serviceTaxDeductionRate) * 100));
+    visaTaxRatePercent.setValue(formatTrNumber(Number(cfg.visaTaxDeductionRate) * 100));
+    defaultWastePoints.setValue(formatTrNumber(Number(cfg.defaultWastePoints)));
     setAllowDepartmentSubPool(Boolean(cfg.allowDepartmentSubPool));
     if (!advanceWeekId && weekRows[0]?.id) setAdvanceWeekId(weekRows[0].id);
     if (!advanceDirectoryEmployeeId && employeeRows[0]?.id) setAdvanceDirectoryEmployeeId(employeeRows[0].id);
@@ -199,43 +229,64 @@ export default function TipsPage() {
       .catch(handleApiError);
   }, [reportWeekId]);
 
-  const weekOptions = useMemo(() => weeks.map((row) => ({ id: row.id, label: `${row.periodStart.slice(0, 10)} - ${row.periodEnd.slice(0, 10)}` })), [weeks]);
-  const dailyPreview = useMemo(() => {
-    const gross = parseNumber(grossRevenue);
-    const disc = parseNumber(discounts);
-    const comp = parseNumber(comps);
-    const waste = parseNumber(wastageSales);
-    const cash = parseNumber(cashTips);
-    const visaGross = parseNumber(visaTipsGross);
-    const expense = parseNumber(expenseAdjustments);
-    const srvRate = parseNumber(serviceRate);
-    const srvTax = parseNumber(serviceTaxRate);
-    const visaTax = parseNumber(visaTaxRate);
+  const weekOptions = useMemo(
+    () => weeks.map((row) => ({ id: row.id, label: `${row.periodStart.slice(0, 10)} - ${row.periodEnd.slice(0, 10)}` })),
+    [weeks]
+  );
 
-    const serviceRevenue = gross - disc - comp - waste;
-    const serviceFee = serviceRevenue > 0 ? serviceRevenue / (1 + srvRate) : 0;
-    const netServiceFee = serviceFee - serviceFee * srvTax;
-    const netVisaTip = visaGross - visaGross * visaTax;
-    const distributable = netServiceFee + netVisaTip + cash - expense;
+  const dailyPreview = useMemo(() => {
+    const gross = parseTrNumber(grossRevenue.value);
+    const disc = parseTrNumber(discounts.value);
+    const comp = parseTrNumber(comps.value);
+    const waste = parseTrNumber(wastageSales.value);
+    const cari = parseTrNumber(cariAdisyonTotal.value);
+    const cash = parseTrNumber(cashTips.value);
+    const visaGross = parseTrNumber(visaTipsGross.value);
+    const expense = parseTrNumber(expenseAdjustments.value);
+    const serviceRate = parseTrNumber(serviceRatePercent.value) / 100;
+    const serviceTaxRate = parseTrNumber(serviceTaxRatePercent.value) / 100;
+    const visaTaxRate = parseTrNumber(visaTaxRatePercent.value) / 100;
+
+    const serviceAndCariRevenue = gross - (disc + comp + waste);
+    const grossServiceFee = serviceAndCariRevenue - serviceAndCariRevenue / (1 + serviceRate);
+    const netServiceFee = grossServiceFee - grossServiceFee * serviceTaxRate;
+    const cariDahilCiro = serviceAndCariRevenue - grossServiceFee;
+    const netCiro = cariDahilCiro - cari;
+    const visaNet = visaGross - visaGross * visaTaxRate;
+    const distributablePool = netServiceFee + visaNet + cash - expense;
 
     return {
-      serviceRevenue,
-      serviceFee,
+      serviceAndCariRevenue,
+      grossServiceFee,
       netServiceFee,
-      netVisaTip,
-      distributable
+      cariDahilCiro,
+      netCiro,
+      visaNet,
+      distributablePool
     };
-  }, [grossRevenue, discounts, comps, wastageSales, cashTips, visaTipsGross, expenseAdjustments, serviceRate, serviceTaxRate, visaTaxRate]);
+  }, [
+    grossRevenue.value,
+    discounts.value,
+    comps.value,
+    wastageSales.value,
+    cariAdisyonTotal.value,
+    cashTips.value,
+    visaTipsGross.value,
+    expenseAdjustments.value,
+    serviceRatePercent.value,
+    serviceTaxRatePercent.value,
+    visaTaxRatePercent.value
+  ]);
 
   async function saveConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await apiFetch('/app-api/tips/config', {
       method: 'POST',
       body: JSON.stringify({
-        serviceRate: Number(serviceRate),
-        serviceTaxDeductionRate: Number(serviceTaxRate),
-        visaTaxDeductionRate: Number(visaTaxRate),
-        defaultWastePoints: Number(defaultWastePoints),
+        serviceRate: parseTrNumber(serviceRatePercent.value) / 100,
+        serviceTaxDeductionRate: parseTrNumber(serviceTaxRatePercent.value) / 100,
+        visaTaxDeductionRate: parseTrNumber(visaTaxRatePercent.value) / 100,
+        defaultWastePoints: parseTrNumber(defaultWastePoints.value),
         allowDepartmentSubPool
       })
     });
@@ -248,15 +299,27 @@ export default function TipsPage() {
       method: 'POST',
       body: JSON.stringify({
         date: dailyDate,
-        grossRevenue: Number(grossRevenue),
-        discounts: Number(discounts),
-        comps: Number(comps),
-        wastageSales: Number(wastageSales),
-        cashTips: Number(cashTips),
-        visaTipsGross: Number(visaTipsGross),
-        expenseAdjustments: Number(expenseAdjustments)
+        grossRevenue: parseTrNumber(grossRevenue.value),
+        discounts: parseTrNumber(discounts.value),
+        comps: parseTrNumber(comps.value),
+        wastageSales: parseTrNumber(wastageSales.value),
+        cariAdisyonTotal: parseTrNumber(cariAdisyonTotal.value),
+        cashTips: parseTrNumber(cashTips.value),
+        visaTipsGross: parseTrNumber(visaTipsGross.value),
+        expenseAdjustments: parseTrNumber(expenseAdjustments.value)
       })
     });
+
+    setDailyDate(todayIso());
+    grossRevenue.setValue('0,00');
+    discounts.setValue('0,00');
+    comps.setValue('0,00');
+    wastageSales.setValue('0,00');
+    cariAdisyonTotal.setValue('0,00');
+    cashTips.setValue('0,00');
+    visaTipsGross.setValue('0,00');
+    expenseAdjustments.setValue('0,00');
+
     await loadAll();
   }
 
@@ -267,8 +330,8 @@ export default function TipsPage() {
       body: JSON.stringify({
         periodStart: weekStart,
         periodEnd: weekEnd,
-        serviceRateUsed: weekServiceRate === '' ? undefined : Number(weekServiceRate),
-        wastePointsUsed: weekWastePoints === '' ? undefined : Number(weekWastePoints),
+        serviceRateUsed: weekServiceRate.value === '' ? undefined : parseTrNumber(weekServiceRate.value) / 100,
+        wastePointsUsed: weekWastePoints.value === '' ? undefined : parseTrNumber(weekWastePoints.value),
         payableDate: payableDate || null
       })
     });
@@ -282,10 +345,10 @@ export default function TipsPage() {
       body: JSON.stringify({
         tipWeekId: advanceWeekId,
         directoryEmployeeId: advanceDirectoryEmployeeId,
-        amount: Number(advanceAmount)
+        amount: parseTrNumber(advanceAmount.value)
       })
     });
-    setAdvanceAmount('');
+    advanceAmount.setValue('');
     await loadAll();
   }
 
@@ -310,15 +373,15 @@ export default function TipsPage() {
   }
 
   async function setDepartmentOverride(weekId: string) {
-    if (overrideWeight === '') return;
+    if (overrideWeight.value === '') return;
     await apiFetch(`/app-api/tips/weeks/${weekId}/department-override`, {
       method: 'POST',
       body: JSON.stringify({
         department: overrideDepartment,
-        overrideWeight: Number(overrideWeight)
+        overrideWeight: parseTrNumber(overrideWeight.value)
       })
     });
-    setOverrideWeight('');
+    overrideWeight.setValue('');
     await loadAll();
   }
 
@@ -372,31 +435,54 @@ export default function TipsPage() {
       {tab === 'configuration' ? (
         <form className="grid gap-3 rounded bg-white p-4 shadow-sm md:grid-cols-2" onSubmit={(event) => saveConfig(event).catch(handleApiError)}>
           <label className="space-y-1">
-            <span className="text-sm font-medium">Servis Oranı</span>
-            <input className="w-full rounded border px-3 py-2" type="number" step="0.0001" min={0} max={1} value={serviceRate} onChange={(event) => setServiceRate(event.target.value)} />
-            <p className="text-xs text-slate-500">Örn: %10 = 0.10 | Aralık: 0 - 1</p>
+            <span className="text-sm font-medium">Servis Oranı (%)</span>
+            <input
+              className="w-full rounded border px-3 py-2"
+              inputMode="decimal"
+              value={serviceRatePercent.value}
+              onChange={(event) => serviceRatePercent.onChange(event.target.value)}
+              onBlur={serviceRatePercent.onBlur}
+            />
+            <p className="text-xs text-slate-500">Ornek: 10,00 - sistemde 0.10 olarak saklanir.</p>
           </label>
           <label className="space-y-1">
-            <span className="text-sm font-medium">Servis Kesinti Oranı (Vergi)</span>
-            <input className="w-full rounded border px-3 py-2" type="number" step="0.0001" min={0} max={1} value={serviceTaxRate} onChange={(event) => setServiceTaxRate(event.target.value)} />
-            <p className="text-xs text-slate-500">Örn: %40 = 0.40 | Aralık: 0 - 1</p>
+            <span className="text-sm font-medium">Servis Kesinti Oranı (%)</span>
+            <input
+              className="w-full rounded border px-3 py-2"
+              inputMode="decimal"
+              value={serviceTaxRatePercent.value}
+              onChange={(event) => serviceTaxRatePercent.onChange(event.target.value)}
+              onBlur={serviceTaxRatePercent.onBlur}
+            />
+            <p className="text-xs text-slate-500">Ornek: 40,00 - sistemde 0.40 olarak saklanir.</p>
           </label>
           <label className="space-y-1">
-            <span className="text-sm font-medium">Visa Tip Kesinti Oranı</span>
-            <input className="w-full rounded border px-3 py-2" type="number" step="0.0001" min={0} max={1} value={visaTaxRate} onChange={(event) => setVisaTaxRate(event.target.value)} />
-            <p className="text-xs text-slate-500">Örn: %40 = 0.40 | Aralık: 0 - 1</p>
+            <span className="text-sm font-medium">Visa Tip Kesinti Oranı (%)</span>
+            <input
+              className="w-full rounded border px-3 py-2"
+              inputMode="decimal"
+              value={visaTaxRatePercent.value}
+              onChange={(event) => visaTaxRatePercent.onChange(event.target.value)}
+              onBlur={visaTaxRatePercent.onBlur}
+            />
+            <p className="text-xs text-slate-500">Ornek: 40,00 - sistemde 0.40 olarak saklanir.</p>
           </label>
           <label className="space-y-1">
             <span className="text-sm font-medium">Varsayılan Zayi Puanı</span>
-            <input className="w-full rounded border px-3 py-2" type="number" step="0.01" min={0} value={defaultWastePoints} onChange={(event) => setDefaultWastePoints(event.target.value)} />
-            <p className="text-xs text-slate-500">Sarf zayisi puanı. Örn: 2.5</p>
+            <input
+              className="w-full rounded border px-3 py-2"
+              inputMode="decimal"
+              value={defaultWastePoints.value}
+              onChange={(event) => defaultWastePoints.onChange(event.target.value)}
+              onBlur={defaultWastePoints.onBlur}
+            />
+            <p className="text-xs text-slate-500">Sarf zayisi puanı. Ornek: 2,50</p>
           </label>
           <label className="flex items-center gap-2 rounded border px-3 py-2 text-sm md:col-span-2">
             <input type="checkbox" checked={allowDepartmentSubPool} onChange={(event) => setAllowDepartmentSubPool(event.target.checked)} />
             Departman alt havuzu aktif olsun
           </label>
           <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-2">{tr['tip.common.save']}</button>
-          {config ? <p className="text-xs text-slate-500 md:col-span-2">Config id: {config.id}</p> : null}
         </form>
       ) : null}
 
@@ -409,31 +495,35 @@ export default function TipsPage() {
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">Brüt Ciro</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={grossRevenue} onChange={(event) => setGrossRevenue(event.target.value)} />
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={grossRevenue.value} onChange={(event) => grossRevenue.onChange(event.target.value)} onBlur={grossRevenue.onBlur} />
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">İndirimler</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={discounts} onChange={(event) => setDiscounts(event.target.value)} />
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={discounts.value} onChange={(event) => discounts.onChange(event.target.value)} onBlur={discounts.onBlur} />
             </label>
             <label className="space-y-1">
-              <span className="text-sm font-medium">İkram / Ödenmez</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={comps} onChange={(event) => setComps(event.target.value)} />
+              <span className="text-sm font-medium">İkram/Ödenmez</span>
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={comps.value} onChange={(event) => comps.onChange(event.target.value)} onBlur={comps.onBlur} />
             </label>
             <label className="space-y-1">
-              <span className="text-sm font-medium">Satış Zayileri (Bilgi Amaçlı)</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={wastageSales} onChange={(event) => setWastageSales(event.target.value)} />
+              <span className="text-sm font-medium">Satış Zayi</span>
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={wastageSales.value} onChange={(event) => wastageSales.onChange(event.target.value)} onBlur={wastageSales.onBlur} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Cari Adisyonlar Toplamı</span>
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={cariAdisyonTotal.value} onChange={(event) => cariAdisyonTotal.onChange(event.target.value)} onBlur={cariAdisyonTotal.onBlur} />
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">Nakit Servis Bahşişi</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={cashTips} onChange={(event) => setCashTips(event.target.value)} />
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={cashTips.value} onChange={(event) => cashTips.onChange(event.target.value)} onBlur={cashTips.onBlur} />
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">Visa Tip (Brüt)</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={visaTipsGross} onChange={(event) => setVisaTipsGross(event.target.value)} />
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={visaTipsGross.value} onChange={(event) => visaTipsGross.onChange(event.target.value)} onBlur={visaTipsGross.onBlur} />
             </label>
             <label className="space-y-1">
-              <span className="text-sm font-medium">Masraflar (Tipten Düşülecek)</span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={expenseAdjustments} onChange={(event) => setExpenseAdjustments(event.target.value)} />
+              <span className="text-sm font-medium">Masraflar (Tipten düşülecek)</span>
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={expenseAdjustments.value} onChange={(event) => expenseAdjustments.onChange(event.target.value)} onBlur={expenseAdjustments.onBlur} />
             </label>
             <button className="rounded bg-mono-500 px-3 py-2 text-white md:col-span-2">Günlük Veriyi Kaydet</button>
           </form>
@@ -441,35 +531,61 @@ export default function TipsPage() {
           <article className="rounded bg-white p-4 shadow-sm">
             <h3 className="mb-2 font-semibold">Hesap Önizleme (Salt Okunur)</h3>
             <div className="grid gap-2 text-sm md:grid-cols-2">
-              <p>Servis ve Cari Dahil Ciro: <strong>{dailyPreview.serviceRevenue.toFixed(2)}</strong></p>
-              <p>Servis Ücreti (Hesap): <strong>{dailyPreview.serviceFee.toFixed(2)}</strong></p>
-              <p>Net Servis Ücreti: <strong>{dailyPreview.netServiceFee.toFixed(2)}</strong></p>
-              <p>Net Visa Tip: <strong>{dailyPreview.netVisaTip.toFixed(2)}</strong></p>
-              <p className="md:col-span-2">Dağıtılacak Günlük Tip: <strong>{dailyPreview.distributable.toFixed(2)}</strong></p>
+              <p>Servis ve Cari Dahil Ciro: <strong>{formatTrNumber(dailyPreview.serviceAndCariRevenue)}</strong></p>
+              <p>Brüt Servis Ücreti: <strong>{formatTrNumber(dailyPreview.grossServiceFee)}</strong></p>
+              <p>Net Servis Ücreti: <strong>{formatTrNumber(dailyPreview.netServiceFee)}</strong></p>
+              <p>Cari Dahil Ciro: <strong>{formatTrNumber(dailyPreview.cariDahilCiro)}</strong></p>
+              <p>Net Ciro: <strong>{formatTrNumber(dailyPreview.netCiro)}</strong></p>
+              <p>Net Visa Tip: <strong>{formatTrNumber(dailyPreview.visaNet)}</strong></p>
+              <p className="md:col-span-2">Personele dağıtılacak toplam havuz: <strong>{formatTrNumber(dailyPreview.distributablePool)}</strong></p>
             </div>
           </article>
 
-          <div className="overflow-hidden rounded bg-white shadow-sm">
-            <table className="w-full text-sm">
+          <div className="overflow-auto rounded bg-white shadow-sm">
+            <table className="w-full min-w-[1800px] text-sm">
               <thead className="bg-slate-100">
                 <tr>
                   <th className="px-3 py-2 text-left">Tarih</th>
                   <th className="px-3 py-2 text-left">Brüt Ciro</th>
-                  <th className="px-3 py-2 text-left">Net Servis</th>
-                  <th className="px-3 py-2 text-left">Nakit</th>
+                  <th className="px-3 py-2 text-left">İndirim</th>
+                  <th className="px-3 py-2 text-left">İkram/Ödenmez</th>
+                  <th className="px-3 py-2 text-left">Satış Zayi</th>
+                  <th className="px-3 py-2 text-left">Servis ve Cari Dahil Ciro</th>
+                  <th className="px-3 py-2 text-left">Brüt Servis Ücreti</th>
+                  <th className="px-3 py-2 text-left">Net Servis Ücreti</th>
+                  <th className="px-3 py-2 text-left">Cari Dahil Ciro</th>
+                  <th className="px-3 py-2 text-left">Cari Adisyonlar Toplamı</th>
+                  <th className="px-3 py-2 text-left">Net Ciro</th>
+                  <th className="px-3 py-2 text-left">Visa Brüt</th>
                   <th className="px-3 py-2 text-left">Visa Net</th>
+                  <th className="px-3 py-2 text-left">Nakit Bahşiş Toplamı</th>
                 </tr>
               </thead>
               <tbody>
-                {dailyInputs.map((row) => (
-                  <tr key={row.id} className="border-t">
-                    <td className="px-3 py-2">{row.date.slice(0, 10)}</td>
-                    <td className="px-3 py-2">{row.grossRevenue}</td>
-                    <td className="px-3 py-2">{row.netServiceFee}</td>
-                    <td className="px-3 py-2">{row.cashTips}</td>
-                    <td className="px-3 py-2">{row.visaTipsNet}</td>
-                  </tr>
-                ))}
+                {dailyInputs.map((row) => {
+                  const serviceAndCariRevenue = Number(row.serviceRevenueCalculated);
+                  const cariDahilCiro = Number(row.netServiceRevenue);
+                  const grossServiceFee = serviceAndCariRevenue - cariDahilCiro;
+                  const netCiro = cariDahilCiro - Number(row.cariAdisyonTotal);
+                  return (
+                    <tr key={row.id} className="border-t">
+                      <td className="px-3 py-2">{row.date.slice(0, 10)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.grossRevenue))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.discounts))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.comps))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.wastageSales))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(serviceAndCariRevenue)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(grossServiceFee)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.netServiceFee))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(cariDahilCiro)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.cariAdisyonTotal))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(netCiro)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.visaTipsGross))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.visaTipsNet))}</td>
+                      <td className="px-3 py-2">{formatTrNumber(Number(row.cashTips))}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -489,17 +605,17 @@ export default function TipsPage() {
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">
-                Bu Hafta Servis Oranı (Varsayılanı Geçersiz Kıl)
-                <span className="ml-1 cursor-help text-slate-400" title="Boş bırakılırsa sistem yapılandırmasındaki servis oranı kullanılır.">ⓘ</span>
+                Bu Hafta Servis Oranı (%)
+                <span className="ml-1 cursor-help text-slate-400" title="Boş bırakılırsa yapılandırmadaki servis oranı kullanılır.">ⓘ</span>
               </span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} max={1} step="0.0001" value={weekServiceRate} onChange={(event) => setWeekServiceRate(event.target.value)} />
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={weekServiceRate.value} onChange={(event) => weekServiceRate.onChange(event.target.value)} onBlur={weekServiceRate.onBlur} />
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">
                 Bu Hafta Ek Zayi Puanı (Sarf Zayisi)
-                <span className="ml-1 cursor-help text-slate-400" title="Toplam puana eklenir, puan değeri hesaplamasını etkiler.">ⓘ</span>
+                <span className="ml-1 cursor-help text-slate-400" title="Toplam puana eklenir, puan değerini etkiler.">ⓘ</span>
               </span>
-              <input className="w-full rounded border px-3 py-2" type="number" min={0} step="0.01" value={weekWastePoints} onChange={(event) => setWeekWastePoints(event.target.value)} />
+              <input className="w-full rounded border px-3 py-2" inputMode="decimal" value={weekWastePoints.value} onChange={(event) => weekWastePoints.onChange(event.target.value)} onBlur={weekWastePoints.onBlur} />
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">Ödeme Tarihi (Opsiyonel)</span>
@@ -525,7 +641,7 @@ export default function TipsPage() {
                   ) : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-600">
-                  Gross: {row.totalPoolGross} | Net: {row.totalPoolNet} | Distributed: {row.totalDistributed}
+                  Servis Oranı: {formatTrNumber(Number(row.serviceRateUsed) * 100)}% | Net Havuz: {formatTrNumber(Number(row.totalPoolNet))} | Dagitilan: {formatTrNumber(Number(row.totalDistributed))}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <select
@@ -541,11 +657,11 @@ export default function TipsPage() {
                   </select>
                   <input
                     className="rounded border px-2 py-1 text-xs"
-                    type="number"
-                    step="0.01"
-                    value={overrideWeight}
-                    onChange={(event) => setOverrideWeight(event.target.value)}
-                    placeholder="Departman için override ağırlık"
+                    inputMode="decimal"
+                    value={overrideWeight.value}
+                    onChange={(event) => overrideWeight.onChange(event.target.value)}
+                    onBlur={overrideWeight.onBlur}
+                    placeholder="Departman ağırlığı"
                   />
                   <button
                     className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
@@ -573,11 +689,11 @@ export default function TipsPage() {
               <option value="">Çalışan Seç</option>
               {employees.map((row) => (
                 <option key={row.id} value={row.id}>
-                  {row.firstName} {row.lastName} - {row.title.name} ({row.title.tipWeight} puan)
+                  {row.firstName} {row.lastName} - {row.title.department.name} / {row.title.name} ({formatTrNumber(Number(row.title.tipWeight))} puan)
                 </option>
               ))}
             </select>
-            <input className="rounded border px-3 py-2" type="number" step="0.01" value={advanceAmount} onChange={(event) => setAdvanceAmount(event.target.value)} placeholder="Avans Tutarı" required />
+            <input className="rounded border px-3 py-2" inputMode="decimal" value={advanceAmount.value} onChange={(event) => advanceAmount.onChange(event.target.value)} onBlur={advanceAmount.onBlur} placeholder="Avans Tutarı" required />
             <button className="rounded bg-mono-500 px-3 py-2 text-white">Avans Ekle</button>
           </form>
 
@@ -587,7 +703,7 @@ export default function TipsPage() {
                 <p className="font-medium">{week.periodStart.slice(0, 10)} - {week.periodEnd.slice(0, 10)}</p>
                 <ul className="mt-1 list-disc pl-5 text-sm">
                   {week.advances.map((advance) => (
-                    <li key={advance.id}>{displayEmployeeName(advance.directoryEmployee ?? advance.employee)}: {advance.amount}</li>
+                    <li key={advance.id}>{displayEmployeeName(advance.directoryEmployee ?? advance.employee)}: {formatTrNumber(Number(advance.amount))}</li>
                   ))}
                   {week.advances.length === 0 ? <li className="text-slate-500">Avans kaydı yok</li> : null}
                 </ul>
@@ -650,25 +766,25 @@ export default function TipsPage() {
               </h2>
 
               <div className="grid gap-2 text-sm md:grid-cols-3">
-                <p>Service Rate Used: <strong>{report.week.serviceRateUsed.toFixed(4)}</strong></p>
-                <p>Waste Points Used: <strong>{report.week.wastePointsUsed.toFixed(2)}</strong></p>
-                <p>Total Pool (Net): <strong>{report.week.totalPoolNet.toFixed(2)}</strong></p>
-                <p>Total Points: <strong>{report.metrics.totalPoints.toFixed(2)}</strong></p>
-                <p>Point Value: <strong>{report.metrics.pointValue.toFixed(2)}</strong></p>
-                <p>Total Distributed: <strong>{report.week.totalDistributed.toFixed(2)}</strong></p>
+                <p>Servis Oranı: <strong>{formatTrNumber(report.week.serviceRateUsed * 100)}%</strong></p>
+                <p>Zayi Puanı: <strong>{formatTrNumber(report.week.wastePointsUsed)}</strong></p>
+                <p>Toplam Havuz (Net): <strong>{formatTrNumber(report.week.totalPoolNet)}</strong></p>
+                <p>Toplam Puan: <strong>{formatTrNumber(report.metrics.totalPoints)}</strong></p>
+                <p>Puan Değeri: <strong>{formatTrNumber(report.metrics.pointValue)}</strong></p>
+                <p>Toplam Dağıtılan: <strong>{formatTrNumber(report.week.totalDistributed)}</strong></p>
               </div>
 
               <div className="overflow-hidden rounded border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-3 py-2 text-left">Name</th>
-                      <th className="px-3 py-2 text-left">Title</th>
-                      <th className="px-3 py-2 text-left">Department</th>
-                      <th className="px-3 py-2 text-left">Tip Weight</th>
-                      <th className="px-3 py-2 text-left">Gross Share</th>
-                      <th className="px-3 py-2 text-left">Advance</th>
-                      <th className="px-3 py-2 text-left">Net Payable</th>
+                      <th className="px-3 py-2 text-left">Ad Soyad</th>
+                      <th className="px-3 py-2 text-left">Unvan</th>
+                      <th className="px-3 py-2 text-left">Departman</th>
+                      <th className="px-3 py-2 text-left">Puan</th>
+                      <th className="px-3 py-2 text-left">Brüt Pay</th>
+                      <th className="px-3 py-2 text-left">Avans</th>
+                      <th className="px-3 py-2 text-left">Net Ödenecek</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -677,17 +793,17 @@ export default function TipsPage() {
                         <td className="px-3 py-2">{row.name}</td>
                         <td className="px-3 py-2">{row.title}</td>
                         <td className="px-3 py-2">{row.department}</td>
-                        <td className="px-3 py-2">{row.tipWeight.toFixed(2)}</td>
-                        <td className="px-3 py-2">{row.grossShare.toFixed(2)}</td>
-                        <td className="px-3 py-2">{row.advanceDeducted.toFixed(2)}</td>
-                        <td className="px-3 py-2">{row.netPayable.toFixed(2)}</td>
+                        <td className="px-3 py-2">{formatTrNumber(row.tipWeight)}</td>
+                        <td className="px-3 py-2">{formatTrNumber(row.grossShare)}</td>
+                        <td className="px-3 py-2">{formatTrNumber(row.advanceDeducted)}</td>
+                        <td className="px-3 py-2">{formatTrNumber(row.netPayable)}</td>
                       </tr>
                     ))}
                     <tr className="border-t bg-slate-50 font-semibold">
-                      <td className="px-3 py-2" colSpan={4}>Totals</td>
-                      <td className="px-3 py-2">{report.totals.totalGrossShare.toFixed(2)}</td>
-                      <td className="px-3 py-2">{report.totals.totalAdvance.toFixed(2)}</td>
-                      <td className="px-3 py-2">{report.totals.totalNetPayable.toFixed(2)}</td>
+                      <td className="px-3 py-2" colSpan={4}>Toplam</td>
+                      <td className="px-3 py-2">{formatTrNumber(report.totals.totalGrossShare)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(report.totals.totalAdvance)}</td>
+                      <td className="px-3 py-2">{formatTrNumber(report.totals.totalNetPayable)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -695,11 +811,10 @@ export default function TipsPage() {
 
               <div className="rounded border border-slate-200 p-3 text-sm">
                 <p>
-                  Reconcile: Sum(Net Payable) <strong>{report.reconcile.sumNetPayable.toFixed(2)}</strong> vs
-                  Total Distributed <strong>{report.reconcile.totalDistributed.toFixed(2)}</strong>
+                  Uzlaştırma: Net Ödenecek Toplamı <strong>{formatTrNumber(report.reconcile.sumNetPayable)}</strong> / Dağıtılan <strong>{formatTrNumber(report.reconcile.totalDistributed)}</strong>
                 </p>
                 <p className={report.reconcile.ok ? 'text-emerald-700' : 'text-amber-700'}>
-                  Diff: {report.reconcile.diff.toFixed(2)} {report.reconcile.ok ? '(OK)' : '(Rounding reconciliation needed)'}
+                  Fark: {formatTrNumber(report.reconcile.diff)} {report.reconcile.ok ? '(OK)' : '(Rounding reconciliation needed)'}
                 </p>
               </div>
             </article>

@@ -1456,6 +1456,7 @@ model TipDailyInput {
   serviceRevenueCalculated Decimal @default(0) @db.Decimal(14, 2)
   netServiceRevenue       Decimal  @default(0) @db.Decimal(14, 2)
   netServiceFee           Decimal  @default(0) @db.Decimal(14, 2)
+  cariAdisyonTotal        Decimal  @default(0) @db.Decimal(14, 2)
   cashTips                Decimal  @default(0) @db.Decimal(14, 2)
   visaTipsGross           Decimal  @default(0) @db.Decimal(14, 2)
   visaTipsNet             Decimal  @default(0) @db.Decimal(14, 2)
