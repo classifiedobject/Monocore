@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AppApiService } from './app-api.service.js';
 import { AuthGuard } from '../common/guards/auth.guard.js';
@@ -179,6 +179,81 @@ export class AppApiController {
     @Req() req: Request & { user: { id: string }; companyId: string }
   ) {
     return this.appApi.applyRoleTemplate(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('company/org/departments')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.read')
+  listOrgDepartments(@Req() req: Request & { companyId: string }) {
+    return this.appApi.listOrgDepartments(req.companyId);
+  }
+
+  @Post('company/org/departments')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  createOrgDepartment(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.createOrgDepartment(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('company/org/departments/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  updateOrgDepartment(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.updateOrgDepartment(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('company/org/titles')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.read')
+  listOrgTitles(@Req() req: Request & { companyId: string }) {
+    return this.appApi.listOrgTitles(req.companyId);
+  }
+
+  @Post('company/org/titles')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  createOrgTitle(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.createOrgTitle(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('company/org/titles/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  updateOrgTitle(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.updateOrgTitle(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('company/org/employees')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.read')
+  listOrgEmployees(@Req() req: Request & { companyId: string }) {
+    return this.appApi.listOrgEmployees(req.companyId);
+  }
+
+  @Post('company/org/employees')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  createOrgEmployee(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.createOrgEmployee(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('company/org/employees/:id')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  updateOrgEmployee(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.appApi.updateOrgEmployee(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
   }
 
   @Get('onboarding/status')

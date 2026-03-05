@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
@@ -17,22 +17,6 @@ export class TipController {
   @RequirePermissions('module:tip-core.manage')
   listEmployees(@Req() req: Request & { companyId: string }) {
     return this.tip.listEmployees(req.companyId);
-  }
-
-  @Post('employees')
-  @RequirePermissions('module:tip-core.manage')
-  createEmployee(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
-    return this.tip.createEmployee(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
-  }
-
-  @Patch('employees/:id')
-  @RequirePermissions('module:tip-core.manage')
-  updateEmployee(
-    @Param('id') id: string,
-    @Body() body: unknown,
-    @Req() req: Request & { user: { id: string }; companyId: string }
-  ) {
-    return this.tip.updateEmployee(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
   }
 
   @Get('config')

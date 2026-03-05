@@ -31,6 +31,8 @@ const companyPermissions = [
   'company:team.invite.revoke',
   'company:team.role.assign',
   'company:roles.manage',
+  'company:org.read',
+  'company:org.manage',
   'company:audit.read',
   'company:settings.manage',
   'company:modules.read',
@@ -101,6 +103,7 @@ const roleTemplates: Array<{
       'company:team.read',
       'company:audit.read',
       'company:modules.read',
+      'company:org.read',
       'module:finance-core.entry.create',
       'module:finance-core.entry.read',
       'module:finance-core.entry.delete',
@@ -135,6 +138,8 @@ const roleTemplates: Array<{
     permissionKeys: [
       'company:team.read',
       'company:modules.read',
+      'company:org.read',
+      'company:org.manage',
       'module:inventory-core.item.manage',
       'module:inventory-core.item.cost.manage',
       'module:inventory-core.warehouse.manage',
@@ -163,6 +168,7 @@ const roleTemplates: Array<{
     description: 'Floor-level reservation, service and task execution.',
     permissionKeys: [
       'company:team.read',
+      'company:org.read',
       'module:reservation-core.customer.manage',
       'module:reservation-core.reservation.manage',
       'module:reservation-core.reservation.read',
@@ -182,7 +188,8 @@ const roleTemplates: Array<{
       'module:task-core.task.complete',
       'module:reservation-core.reservation.read',
       'module:sales-core.order.read',
-      'module:inventory-core.movement.read'
+      'module:inventory-core.movement.read',
+      'company:org.read'
     ]
   }
 ];
@@ -591,6 +598,81 @@ async function main() {
     },
     update: {}
   });
+
+  const serviceDepartment =
+    (await prisma.companyDepartment.findFirst({ where: { companyId: company.id, name: 'Service' } })) ??
+    (await prisma.companyDepartment.create({
+      data: {
+        companyId: company.id,
+        name: 'Service',
+        tipDepartment: 'SERVICE'
+      }
+    }));
+
+  const kitchenDepartment =
+    (await prisma.companyDepartment.findFirst({ where: { companyId: company.id, name: 'Kitchen' } })) ??
+    (await prisma.companyDepartment.create({
+      data: {
+        companyId: company.id,
+        name: 'Kitchen',
+        tipDepartment: 'KITCHEN'
+      }
+    }));
+
+  const waiterTitle =
+    (await prisma.companyTitle.findFirst({ where: { companyId: company.id, name: 'Waiter' } })) ??
+    (await prisma.companyTitle.create({
+      data: {
+        companyId: company.id,
+        departmentId: serviceDepartment.id,
+        name: 'Waiter',
+        tipWeight: 1.2,
+        isTipEligible: true
+      }
+    }));
+
+  const kitchenAggregateTitle =
+    (await prisma.companyTitle.findFirst({ where: { companyId: company.id, name: 'Kitchen Aggregate' } })) ??
+    (await prisma.companyTitle.create({
+      data: {
+        companyId: company.id,
+        departmentId: kitchenDepartment.id,
+        name: 'Kitchen Aggregate',
+        tipWeight: 12,
+        departmentAggregate: true,
+        isTipEligible: true
+      }
+    }));
+
+  const demoEmployee = await prisma.companyEmployeeDirectory.findFirst({
+    where: { companyId: company.id, firstName: 'Semih', lastName: 'Alper' }
+  });
+  if (!demoEmployee) {
+    await prisma.companyEmployeeDirectory.create({
+      data: {
+        companyId: company.id,
+        firstName: 'Semih',
+        lastName: 'Alper',
+        userId: user.id,
+        titleId: waiterTitle.id,
+        isActive: true
+      }
+    });
+  }
+  const demoKitchen = await prisma.companyEmployeeDirectory.findFirst({
+    where: { companyId: company.id, firstName: 'Kitchen', lastName: 'Pool' }
+  });
+  if (!demoKitchen) {
+    await prisma.companyEmployeeDirectory.create({
+      data: {
+        companyId: company.id,
+        firstName: 'Kitchen',
+        lastName: 'Pool',
+        titleId: kitchenAggregateTitle.id,
+        isActive: true
+      }
+    });
+  }
   await prisma.moduleInstallation.upsert({
     where: {
       companyId_moduleKey: {

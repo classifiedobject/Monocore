@@ -1,7 +1,6 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
-  payrollEmployeeSchema,
   tipAdvanceSchema,
   tipConfigurationSchema,
   tipDailyInputSchema,
@@ -21,83 +20,14 @@ export class TipService {
   ) {}
 
   async listEmployees(companyId: string) {
-    return this.prisma.employee.findMany({
+    return this.prisma.companyEmployeeDirectory.findMany({
       where: { companyId },
-      include: { role: true, profitCenter: true },
+      include: {
+        user: true,
+        title: { include: { department: true } }
+      },
       orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }, { lastName: 'asc' }]
     });
-  }
-
-  async createEmployee(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
-    const body = payrollEmployeeSchema.parse(payload);
-    await this.validateEmployeeRefs(companyId, body.roleId ?? null, body.profitCenterId ?? null);
-    this.validateSalaryFields(body.salaryType, body.baseSalary ?? null, body.hourlyRate ?? null);
-
-    const row = await this.prisma.employee.create({
-      data: {
-        companyId,
-        firstName: body.firstName,
-        lastName: body.lastName,
-        email: body.email ?? null,
-        phone: body.phone ?? null,
-        roleId: body.roleId ?? null,
-        profitCenterId: body.profitCenterId ?? null,
-        hireDate: this.parseDate(body.hireDate, false),
-        salaryType: body.salaryType === 'fixed' ? 'FIXED' : 'HOURLY',
-        baseSalary: body.baseSalary === null || body.baseSalary === undefined ? null : new Prisma.Decimal(body.baseSalary),
-        hourlyRate: body.hourlyRate === null || body.hourlyRate === undefined ? null : new Prisma.Decimal(body.hourlyRate),
-        tipWeight: body.tipWeight === undefined ? new Prisma.Decimal(1) : new Prisma.Decimal(body.tipWeight),
-        department: body.department ? this.mapDepartment(body.department) : 'SERVICE',
-        isActive: body.isActive ?? true
-      },
-      include: { role: true, profitCenter: true }
-    });
-
-    await this.logCompany(actorUserId, companyId, 'company.tip.employee.create', 'employee', row.id, body, ip, userAgent);
-    return row;
-  }
-
-  async updateEmployee(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
-    const body = payrollEmployeeSchema.partial().parse(payload);
-    const existing = await this.requireEmployee(companyId, id);
-
-    const mergedSalaryType = body.salaryType ?? (existing.salaryType === 'FIXED' ? 'fixed' : 'hourly');
-    const mergedBase = body.baseSalary === undefined ? existing.baseSalary : body.baseSalary;
-    const mergedHourly = body.hourlyRate === undefined ? existing.hourlyRate : body.hourlyRate;
-    this.validateSalaryFields(mergedSalaryType, mergedBase ? Number(mergedBase.toString()) : null, mergedHourly ? Number(mergedHourly.toString()) : null);
-
-    await this.validateEmployeeRefs(
-      companyId,
-      body.roleId === undefined ? existing.roleId : body.roleId,
-      body.profitCenterId === undefined ? existing.profitCenterId : body.profitCenterId
-    );
-
-    const row = await this.prisma.employee.update({
-      where: { id: existing.id },
-      data: {
-        ...(body.firstName !== undefined ? { firstName: body.firstName } : {}),
-        ...(body.lastName !== undefined ? { lastName: body.lastName } : {}),
-        ...(body.email !== undefined ? { email: body.email } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone } : {}),
-        ...(body.roleId !== undefined ? { roleId: body.roleId } : {}),
-        ...(body.profitCenterId !== undefined ? { profitCenterId: body.profitCenterId } : {}),
-        ...(body.hireDate !== undefined ? { hireDate: this.parseDate(body.hireDate, false) } : {}),
-        ...(body.salaryType !== undefined ? { salaryType: body.salaryType === 'fixed' ? 'FIXED' : 'HOURLY' } : {}),
-        ...(body.baseSalary !== undefined
-          ? { baseSalary: body.baseSalary === null ? null : new Prisma.Decimal(body.baseSalary) }
-          : {}),
-        ...(body.hourlyRate !== undefined
-          ? { hourlyRate: body.hourlyRate === null ? null : new Prisma.Decimal(body.hourlyRate) }
-          : {}),
-        ...(body.tipWeight !== undefined ? { tipWeight: new Prisma.Decimal(body.tipWeight) } : {}),
-        ...(body.department !== undefined ? { department: this.mapDepartment(body.department) } : {}),
-        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
-      },
-      include: { role: true, profitCenter: true }
-    });
-
-    await this.logCompany(actorUserId, companyId, 'company.tip.employee.update', 'employee', row.id, body, ip, userAgent);
-    return row;
   }
 
   async getTipConfiguration(companyId: string) {
@@ -205,8 +135,8 @@ export class TipService {
     return this.prisma.tipWeek.findMany({
       where: { companyId },
       include: {
-        advances: { include: { employee: true }, orderBy: { createdAt: 'desc' } },
-        distributions: { include: { employee: true }, orderBy: { createdAt: 'asc' } },
+        advances: { include: { employee: true, directoryEmployee: { include: { title: true } } }, orderBy: { createdAt: 'desc' } },
+        distributions: { include: { employee: true, directoryEmployee: { include: { title: true } } }, orderBy: { createdAt: 'asc' } },
         departmentOverrides: true
       },
       orderBy: { periodStart: 'desc' }
@@ -267,7 +197,10 @@ export class TipService {
 
   async createTipAdvance(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
     const body = tipAdvanceSchema.parse(payload);
-    await this.requireEmployee(companyId, body.employeeId);
+    const directoryEmployee = await this.requireDirectoryEmployee(companyId, body.directoryEmployeeId);
+    if (!directoryEmployee.isActive || !directoryEmployee.title.isTipEligible) {
+      throw new BadRequestException('Employee is not eligible for tip distribution');
+    }
     const week = await this.requireTipWeek(companyId, body.tipWeekId);
     if (week.status === 'LOCKED' || week.status === 'PAID') {
       throw new BadRequestException('Cannot add advance after lock');
@@ -276,11 +209,12 @@ export class TipService {
       data: {
         companyId,
         tipWeekId: week.id,
-        employeeId: body.employeeId,
+        directoryEmployeeId: directoryEmployee.id,
+        employeeId: null,
         amount: new Prisma.Decimal(body.amount),
         approvedByUserId: actorUserId
       },
-      include: { employee: true }
+      include: { directoryEmployee: { include: { title: true } } }
     });
     await this.logCompany(actorUserId, companyId, 'company.tip.advance.create', 'tip_advance', row.id, body, ip, userAgent);
     return row;
@@ -294,7 +228,16 @@ export class TipService {
 
     const [dailyInputs, employees, advances, overrides] = await Promise.all([
       this.prisma.tipDailyInput.findMany({ where: { companyId, date: { gte: week.periodStart, lte: week.periodEnd } } }),
-      this.prisma.employee.findMany({ where: { companyId, isActive: true } }),
+      this.prisma.companyEmployeeDirectory.findMany({
+        where: {
+          companyId,
+          isActive: true,
+          title: { isActive: true, isTipEligible: true }
+        },
+        include: {
+          title: { include: { department: true } }
+        }
+      }),
       this.prisma.tipAdvance.findMany({ where: { companyId, tipWeekId: week.id } }),
       this.prisma.tipDepartmentOverride.findMany({ where: { companyId, tipWeekId: week.id } })
     ]);
@@ -315,10 +258,10 @@ export class TipService {
 
     const overrideMap = new Map(overrides.map((row) => [row.department, Number(row.overrideWeight)]));
     const weights = employees.map((employee) => {
-      const base = Number(employee.tipWeight);
-      const override = overrideMap.get(employee.department);
+      const base = Number(employee.title.tipWeight);
+      const override = overrideMap.get(employee.title.department.tipDepartment);
       return {
-        employeeId: employee.id,
+        directoryEmployeeId: employee.id,
         weight: override !== undefined ? override : base
       };
     });
@@ -328,15 +271,17 @@ export class TipService {
 
     const advanceByEmployee = new Map<string, number>();
     for (const row of advances) {
-      advanceByEmployee.set(row.employeeId, this.round2((advanceByEmployee.get(row.employeeId) ?? 0) + Number(row.amount)));
+      const key = row.directoryEmployeeId ?? row.employeeId;
+      if (!key) continue;
+      advanceByEmployee.set(key, this.round2((advanceByEmployee.get(key) ?? 0) + Number(row.amount)));
     }
 
     const distributions = this.splitByWeights(weights, totalPoolNet).map((row) => {
-      const advance = advanceByEmployee.get(row.employeeId) ?? 0;
+      const advance = advanceByEmployee.get(row.directoryEmployeeId) ?? 0;
       const netShare = this.round2(Math.max(0, row.amount - advance));
       return {
-        employeeId: row.employeeId,
-        tipWeightUsed: weights.find((w) => w.employeeId === row.employeeId)?.weight ?? 0,
+        directoryEmployeeId: row.directoryEmployeeId,
+        tipWeightUsed: weights.find((w) => w.directoryEmployeeId === row.directoryEmployeeId)?.weight ?? 0,
         grossShare: row.amount,
         advanceDeducted: advance,
         netShare
@@ -352,7 +297,8 @@ export class TipService {
           data: {
             companyId,
             tipWeekId: week.id,
-            employeeId: row.employeeId,
+            employeeId: null,
+            directoryEmployeeId: row.directoryEmployeeId,
             tipWeightUsed: new Prisma.Decimal(row.tipWeightUsed),
             grossShare: new Prisma.Decimal(row.grossShare),
             advanceDeducted: new Prisma.Decimal(row.advanceDeducted),
@@ -369,8 +315,8 @@ export class TipService {
           status: 'CALCULATED'
         },
         include: {
-          advances: { include: { employee: true } },
-          distributions: { include: { employee: true } },
+          advances: { include: { employee: true, directoryEmployee: { include: { title: true } } } },
+          distributions: { include: { employee: true, directoryEmployee: { include: { title: true } } } },
           departmentOverrides: true
         }
       });
@@ -401,8 +347,8 @@ export class TipService {
       where: { id: week.id },
       data: { status: 'LOCKED' },
       include: {
-        advances: { include: { employee: true } },
-        distributions: { include: { employee: true } },
+        advances: { include: { employee: true, directoryEmployee: { include: { title: true } } } },
+        distributions: { include: { employee: true, directoryEmployee: { include: { title: true } } } },
         departmentOverrides: true
       }
     });
@@ -417,8 +363,8 @@ export class TipService {
       where: { id: week.id },
       data: { status: 'PAID' },
       include: {
-        advances: { include: { employee: true } },
-        distributions: { include: { employee: true } },
+        advances: { include: { employee: true, directoryEmployee: { include: { title: true } } } },
+        distributions: { include: { employee: true, directoryEmployee: { include: { title: true } } } },
         departmentOverrides: true
       }
     });
@@ -426,19 +372,19 @@ export class TipService {
     return row;
   }
 
-  private splitByWeights(rows: Array<{ employeeId: string; weight: number }>, total: number) {
+  private splitByWeights(rows: Array<{ directoryEmployeeId: string; weight: number }>, total: number) {
     const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
     let remaining = this.round2(total);
 
     return rows.map((row, index) => {
       if (index === rows.length - 1) {
-        return { employeeId: row.employeeId, amount: this.round2(remaining) };
+        return { directoryEmployeeId: row.directoryEmployeeId, amount: this.round2(remaining) };
       }
 
       const portion = totalWeight > 0 ? (total * row.weight) / totalWeight : 0;
       const amount = this.round2(portion);
       remaining = this.round2(remaining - amount);
-      return { employeeId: row.employeeId, amount };
+      return { directoryEmployeeId: row.directoryEmployeeId, amount };
     });
   }
 
@@ -450,34 +396,12 @@ export class TipService {
     return 'OTHER' as const;
   }
 
-  private validateSalaryFields(salaryType: 'fixed' | 'hourly', baseSalary: number | null, hourlyRate: number | null) {
-    if (salaryType === 'fixed' && (baseSalary === null || baseSalary === undefined)) {
-      throw new BadRequestException('baseSalary is required for fixed salary type');
-    }
-    if (salaryType === 'hourly' && (hourlyRate === null || hourlyRate === undefined)) {
-      throw new BadRequestException('hourlyRate is required for hourly salary type');
-    }
-  }
-
-  private async validateEmployeeRefs(companyId: string, roleId: string | null, profitCenterId: string | null) {
-    if (roleId) {
-      const role = await this.prisma.companyRole.findUnique({ where: { id: roleId } });
-      if (!role || role.companyId !== companyId) {
-        throw new ForbiddenException('Role is not owned by tenant');
-      }
-    }
-
-    if (profitCenterId) {
-      const center = await this.prisma.financeProfitCenter.findUnique({ where: { id: profitCenterId } });
-      if (!center || center.companyId !== companyId) {
-        throw new ForbiddenException('Profit center is not owned by tenant');
-      }
-    }
-  }
-
-  private async requireEmployee(companyId: string, id: string) {
-    const row = await this.prisma.employee.findUnique({ where: { id }, include: { role: true, profitCenter: true } });
-    if (!row || row.companyId !== companyId) throw new NotFoundException('Employee not found');
+  private async requireDirectoryEmployee(companyId: string, id: string) {
+    const row = await this.prisma.companyEmployeeDirectory.findUnique({
+      where: { id },
+      include: { title: { include: { department: true } }, user: true }
+    });
+    if (!row || row.companyId !== companyId) throw new NotFoundException('Directory employee not found');
     return row;
   }
 

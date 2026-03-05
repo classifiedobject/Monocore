@@ -180,6 +180,7 @@ model User {
   sessions         Session[]
   platformAccess   PlatformMembership[]
   companyMemberships CompanyMembership[]
+  directoryEmployees CompanyEmployeeDirectory[]
   platformAuditLogs PlatformAuditLog[]  @relation("platform_actor")
   companyAuditLogs CompanyAuditLog[]    @relation("company_actor")
   platformInvites  PlatformInvite[]     @relation("platform_invite_creator")
@@ -282,6 +283,9 @@ model Company {
   updatedAt      DateTime             @updatedAt
   memberships    CompanyMembership[]
   roles          CompanyRole[]
+  departments    CompanyDepartment[]
+  titles         CompanyTitle[]
+  directoryEmployees CompanyEmployeeDirectory[]
   locations      Location[]
   modules        ModuleInstallation[]
   entitlements   CompanyEntitlement[]
@@ -383,6 +387,64 @@ model CompanyPermission {
   description String?
   createdAt   DateTime                 @default(now())
   roles       CompanyRolePermission[]
+}
+
+model CompanyDepartment {
+  id            String   @id @default(uuid())
+  companyId     String
+  name          String
+  parentId      String?
+  tipDepartment EmployeeDepartment @default(OTHER)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent        CompanyDepartment? @relation("company_department_tree", fields: [parentId], references: [id], onDelete: SetNull)
+  children      CompanyDepartment[] @relation("company_department_tree")
+  titles        CompanyTitle[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, parentId])
+}
+
+model CompanyTitle {
+  id                  String   @id @default(uuid())
+  companyId           String
+  departmentId        String
+  name                String
+  tipWeight           Decimal  @default(1) @db.Decimal(8, 2)
+  isTipEligible       Boolean  @default(true)
+  departmentAggregate Boolean  @default(false)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department          CompanyDepartment @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  employees           CompanyEmployeeDirectory[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, departmentId])
+}
+
+model CompanyEmployeeDirectory {
+  id           String   @id @default(uuid())
+  companyId    String
+  firstName    String
+  lastName     String
+  userId       String?
+  titleId      String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  title        CompanyTitle @relation(fields: [titleId], references: [id], onDelete: Restrict)
+  tipAdvances  TipAdvance[]
+  tipWeekDistributions TipWeekDistribution[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, titleId])
+  @@index([companyId, userId])
 }
 
 model CompanyRolePermission {
@@ -1406,18 +1468,21 @@ model TipDailyInput {
 model TipAdvance {
   id               String   @id @default(uuid())
   companyId        String
-  employeeId       String
+  employeeId       String?
+  directoryEmployeeId String?
   tipWeekId        String
   amount           Decimal  @db.Decimal(14, 2)
   approvedByUserId String
   createdAt        DateTime @default(now())
   company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee         Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  directoryEmployee CompanyEmployeeDirectory? @relation(fields: [directoryEmployeeId], references: [id], onDelete: SetNull)
   tipWeek          TipWeek  @relation(fields: [tipWeekId], references: [id], onDelete: Cascade)
   approvedBy       User     @relation("tip_advance_approver", fields: [approvedByUserId], references: [id], onDelete: Restrict)
 
   @@index([companyId, tipWeekId])
   @@index([companyId, employeeId])
+  @@index([companyId, directoryEmployeeId])
 }
 
 model TipDepartmentOverride {
@@ -1438,7 +1503,8 @@ model TipWeekDistribution {
   id          String   @id @default(uuid())
   companyId   String
   tipWeekId   String
-  employeeId  String
+  employeeId  String?
+  directoryEmployeeId String?
   tipWeightUsed Decimal @db.Decimal(10, 2)
   grossShare  Decimal  @db.Decimal(14, 2)
   advanceDeducted Decimal @default(0) @db.Decimal(14, 2)
@@ -1446,9 +1512,12 @@ model TipWeekDistribution {
   createdAt   DateTime @default(now())
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   tipWeek     TipWeek  @relation(fields: [tipWeekId], references: [id], onDelete: Cascade)
-  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee    Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  directoryEmployee CompanyEmployeeDirectory? @relation(fields: [directoryEmployeeId], references: [id], onDelete: SetNull)
 
   @@unique([tipWeekId, employeeId])
+  @@unique([tipWeekId, directoryEmployeeId])
   @@index([companyId, tipWeekId])
   @@index([companyId, employeeId])
+  @@index([companyId, directoryEmployeeId])
 }

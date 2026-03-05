@@ -36,6 +36,30 @@ export const applyRoleTemplateSchema = z.object({
   template: companyRoleTemplateSchema
 });
 
+export const companyDepartmentSchema = z.object({
+  name: z.string().min(2).max(120),
+  parentId: z.string().uuid().nullable().optional(),
+  tipDepartment: z.enum(['SERVICE', 'BAR', 'KITCHEN', 'SUPPORT', 'OTHER']).optional(),
+  isActive: z.boolean().optional()
+});
+
+export const companyTitleSchema = z.object({
+  departmentId: z.string().uuid(),
+  name: z.string().min(2).max(120),
+  tipWeight: z.coerce.number().positive().max(1000),
+  isTipEligible: z.boolean().default(true),
+  departmentAggregate: z.boolean().default(false),
+  isActive: z.boolean().optional()
+});
+
+export const companyEmployeeDirectorySchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  userId: z.string().uuid().nullable().optional(),
+  titleId: z.string().uuid(),
+  isActive: z.boolean().optional()
+});
+
 export const onboardingCompanyBasicsSchema = z.object({
   name: z.string().min(2).max(120),
   locale: z.string().min(2).max(8).optional()
@@ -558,7 +582,7 @@ export const tipDailyInputSchema = z.object({
 
 export const tipAdvanceSchema = z.object({
   tipWeekId: z.string().uuid(),
-  employeeId: z.string().uuid(),
+  directoryEmployeeId: z.string().uuid(),
   amount: z.coerce.number().positive()
 });
 

@@ -4,6 +4,9 @@ import { Prisma, SalaryType } from '@prisma/client';
 import {
   acceptInviteSchema,
   applyRoleTemplateSchema,
+  companyDepartmentSchema,
+  companyEmployeeDirectorySchema,
+  companyTitleSchema,
   createCompanySchema,
   createInviteSchema,
   demoGenerateSchema,
@@ -57,6 +60,7 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'company:team.read',
       'company:audit.read',
       'company:modules.read',
+      'company:org.read',
       'module:finance-core.entry.create',
       'module:finance-core.entry.read',
       'module:finance-core.entry.delete',
@@ -91,6 +95,8 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
     permissionKeys: [
       'company:team.read',
       'company:modules.read',
+      'company:org.read',
+      'company:org.manage',
       'module:inventory-core.item.manage',
       'module:inventory-core.item.cost.manage',
       'module:inventory-core.warehouse.manage',
@@ -119,6 +125,7 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
     description: 'Floor-level reservation, service and task execution.',
     permissionKeys: [
       'company:team.read',
+      'company:org.read',
       'module:reservation-core.customer.manage',
       'module:reservation-core.reservation.manage',
       'module:reservation-core.reservation.read',
@@ -138,7 +145,8 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'module:task-core.task.complete',
       'module:reservation-core.reservation.read',
       'module:sales-core.order.read',
-      'module:inventory-core.movement.read'
+      'module:inventory-core.movement.read',
+      'company:org.read'
     ]
   }
 ];
@@ -593,6 +601,257 @@ export class AppApiService {
     });
 
     return { success: true, roleId: role.id };
+  }
+
+  listOrgDepartments(companyId: string) {
+    return this.prisma.companyDepartment.findMany({
+      where: { companyId },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }]
+    });
+  }
+
+  async createOrgDepartment(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = companyDepartmentSchema.parse(payload);
+    if (body.parentId) {
+      const parent = await this.prisma.companyDepartment.findUnique({ where: { id: body.parentId } });
+      if (!parent || parent.companyId !== companyId) {
+        throw new ForbiddenException('Parent department is not owned by tenant');
+      }
+    }
+
+    const row = await this.prisma.companyDepartment.create({
+      data: {
+        companyId,
+        name: body.name,
+        parentId: body.parentId ?? null,
+        tipDepartment: body.tipDepartment ?? 'OTHER',
+        isActive: body.isActive ?? true
+      }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.org.department.create',
+      entityType: 'company_department',
+      entityId: row.id,
+      metadata: body,
+      ip,
+      userAgent
+    });
+
+    return row;
+  }
+
+  async updateOrgDepartment(
+    actorUserId: string,
+    companyId: string,
+    departmentId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = companyDepartmentSchema.partial().parse(payload);
+    const existing = await this.prisma.companyDepartment.findUnique({ where: { id: departmentId } });
+    if (!existing || existing.companyId !== companyId) {
+      throw new NotFoundException('Department not found');
+    }
+    if (body.parentId) {
+      if (body.parentId === departmentId) {
+        throw new BadRequestException('Department cannot be its own parent');
+      }
+      const parent = await this.prisma.companyDepartment.findUnique({ where: { id: body.parentId } });
+      if (!parent || parent.companyId !== companyId) {
+        throw new ForbiddenException('Parent department is not owned by tenant');
+      }
+    }
+
+    const row = await this.prisma.companyDepartment.update({
+      where: { id: departmentId },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+        ...(body.tipDepartment !== undefined ? { tipDepartment: body.tipDepartment } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+      }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.org.department.update',
+      entityType: 'company_department',
+      entityId: row.id,
+      metadata: body,
+      ip,
+      userAgent
+    });
+
+    return row;
+  }
+
+  listOrgTitles(companyId: string) {
+    return this.prisma.companyTitle.findMany({
+      where: { companyId },
+      include: { department: true },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }]
+    });
+  }
+
+  async createOrgTitle(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = companyTitleSchema.parse(payload);
+    const department = await this.prisma.companyDepartment.findUnique({ where: { id: body.departmentId } });
+    if (!department || department.companyId !== companyId) {
+      throw new ForbiddenException('Department is not owned by tenant');
+    }
+
+    const row = await this.prisma.companyTitle.create({
+      data: {
+        companyId,
+        departmentId: body.departmentId,
+        name: body.name,
+        tipWeight: new Prisma.Decimal(body.tipWeight),
+        isTipEligible: body.isTipEligible,
+        departmentAggregate: body.departmentAggregate,
+        isActive: body.isActive ?? true
+      },
+      include: { department: true }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.org.title.create',
+      entityType: 'company_title',
+      entityId: row.id,
+      metadata: body,
+      ip,
+      userAgent
+    });
+
+    return row;
+  }
+
+  async updateOrgTitle(actorUserId: string, companyId: string, titleId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = companyTitleSchema.partial().parse(payload);
+    const existing = await this.prisma.companyTitle.findUnique({ where: { id: titleId } });
+    if (!existing || existing.companyId !== companyId) {
+      throw new NotFoundException('Title not found');
+    }
+    if (body.departmentId) {
+      const department = await this.prisma.companyDepartment.findUnique({ where: { id: body.departmentId } });
+      if (!department || department.companyId !== companyId) {
+        throw new ForbiddenException('Department is not owned by tenant');
+      }
+    }
+
+    const row = await this.prisma.companyTitle.update({
+      where: { id: titleId },
+      data: {
+        ...(body.departmentId !== undefined ? { departmentId: body.departmentId } : {}),
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.tipWeight !== undefined ? { tipWeight: new Prisma.Decimal(body.tipWeight) } : {}),
+        ...(body.isTipEligible !== undefined ? { isTipEligible: body.isTipEligible } : {}),
+        ...(body.departmentAggregate !== undefined ? { departmentAggregate: body.departmentAggregate } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+      },
+      include: { department: true }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.org.title.update',
+      entityType: 'company_title',
+      entityId: row.id,
+      metadata: body,
+      ip,
+      userAgent
+    });
+
+    return row;
+  }
+
+  listOrgEmployees(companyId: string) {
+    return this.prisma.companyEmployeeDirectory.findMany({
+      where: { companyId },
+      include: { title: { include: { department: true } }, user: true },
+      orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }, { lastName: 'asc' }]
+    });
+  }
+
+  async createOrgEmployee(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = companyEmployeeDirectorySchema.parse(payload);
+    await this.validateOrgEmployeeRefs(companyId, body.titleId, body.userId ?? null);
+    const row = await this.prisma.companyEmployeeDirectory.create({
+      data: {
+        companyId,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        userId: body.userId ?? null,
+        titleId: body.titleId,
+        isActive: body.isActive ?? true
+      },
+      include: { title: { include: { department: true } }, user: true }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.org.employee.create',
+      entityType: 'company_employee_directory',
+      entityId: row.id,
+      metadata: body,
+      ip,
+      userAgent
+    });
+
+    return row;
+  }
+
+  async updateOrgEmployee(
+    actorUserId: string,
+    companyId: string,
+    employeeId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = companyEmployeeDirectorySchema.partial().parse(payload);
+    const existing = await this.prisma.companyEmployeeDirectory.findUnique({ where: { id: employeeId } });
+    if (!existing || existing.companyId !== companyId) {
+      throw new NotFoundException('Directory employee not found');
+    }
+    await this.validateOrgEmployeeRefs(
+      companyId,
+      body.titleId ?? existing.titleId,
+      body.userId === undefined ? existing.userId : body.userId
+    );
+
+    const row = await this.prisma.companyEmployeeDirectory.update({
+      where: { id: employeeId },
+      data: {
+        ...(body.firstName !== undefined ? { firstName: body.firstName } : {}),
+        ...(body.lastName !== undefined ? { lastName: body.lastName } : {}),
+        ...(body.userId !== undefined ? { userId: body.userId } : {}),
+        ...(body.titleId !== undefined ? { titleId: body.titleId } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+      },
+      include: { title: { include: { department: true } }, user: true }
+    });
+
+    await this.audit.logCompany({
+      actorUserId,
+      companyId,
+      action: 'company.org.employee.update',
+      entityType: 'company_employee_directory',
+      entityId: row.id,
+      metadata: body,
+      ip,
+      userAgent
+    });
+
+    return row;
   }
 
   async listAuditLogs(companyId: string, query?: Record<string, string | undefined>) {
@@ -1438,6 +1697,21 @@ export class AppApiService {
       where: { id: companyId },
       data: { onboardingStep: Math.max(company.onboardingStep, step) }
     });
+  }
+
+  private async validateOrgEmployeeRefs(companyId: string, titleId: string, userId: string | null) {
+    const title = await this.prisma.companyTitle.findUnique({ where: { id: titleId } });
+    if (!title || title.companyId !== companyId) {
+      throw new ForbiddenException('Title is not owned by tenant');
+    }
+
+    if (!userId) return;
+    const membership = await this.prisma.companyMembership.findUnique({
+      where: { companyId_userId: { companyId, userId } }
+    });
+    if (!membership || membership.status !== 'active') {
+      throw new ForbiddenException('User is not an active company member');
+    }
   }
 
   private parsePagination(query?: Record<string, string | undefined>) {
