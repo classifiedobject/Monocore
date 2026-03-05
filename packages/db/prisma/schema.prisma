@@ -313,6 +313,9 @@ model Company {
   reservations Reservation[]
   inventoryWarehouses InventoryWarehouse[]
   inventoryItems InventoryItem[]
+  inventorySuppliers InventorySupplier[]
+  inventoryBrands InventoryBrand[]
+  inventoryBrandSuppliers InventoryBrandSupplier[]
   inventoryStockMovements InventoryStockMovement[]
   salesProducts   SalesProduct[]
   recipes         Recipe[]
@@ -1177,6 +1180,58 @@ model InventoryItem {
   @@unique([companyId, sku])
   @@index([companyId, isActive])
   @@index([companyId, name])
+}
+
+model InventorySupplier {
+  id           String   @id @default(uuid())
+  companyId    String
+  shortName    String
+  legalName    String
+  address      String?
+  taxOffice    String?
+  taxNumber    String?
+  contactName  String?
+  contactPhone String?
+  notes        String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(1000)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  brandLinks   InventoryBrandSupplier[]
+
+  @@index([companyId, shortName])
+  @@index([companyId, isActive])
+}
+
+model InventoryBrand {
+  id        String   @id @default(uuid())
+  companyId String
+  name      String
+  shortName String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(1000)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplierLinks InventoryBrandSupplier[]
+
+  @@index([companyId, name])
+}
+
+model InventoryBrandSupplier {
+  id         String   @id @default(uuid())
+  companyId  String
+  brandId    String
+  supplierId String
+  createdAt  DateTime @default(now())
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  brand      InventoryBrand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  supplier   InventorySupplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, brandId, supplierId])
+  @@index([companyId, brandId])
+  @@index([companyId, supplierId])
 }
 
 model InventoryStockMovement {

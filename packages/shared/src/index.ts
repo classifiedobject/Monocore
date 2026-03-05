@@ -466,6 +466,30 @@ export const inventoryStockBalanceQuerySchema = z.object({
   warehouseId: z.string().uuid().optional()
 });
 
+export const inventorySupplierSchema = z.object({
+  shortName: z.string().min(1).max(140),
+  legalName: z.string().min(1).max(240),
+  address: z.string().max(400).nullable().optional(),
+  taxOffice: z.string().max(120).nullable().optional(),
+  taxNumber: z.string().max(80).nullable().optional(),
+  contactName: z.string().max(140).nullable().optional(),
+  contactPhone: z.string().max(80).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.coerce.number().int().min(0).optional()
+});
+
+export const inventoryBrandSchema = z.object({
+  name: z.string().min(1).max(160),
+  shortName: z.string().max(80).nullable().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.coerce.number().int().min(0).optional()
+});
+
+export const inventoryBrandSupplierLinkSchema = z.object({
+  supplierId: z.string().uuid()
+});
+
 export const salesProductSchema = z.object({
   name: z.string().min(2).max(160),
   sku: z.string().max(80).nullable().optional(),
