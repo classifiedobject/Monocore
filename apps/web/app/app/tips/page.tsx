@@ -5,12 +5,20 @@ import { apiFetch, handleApiError } from '../../../lib/api';
 
 type Tab = 'configuration' | 'daily' | 'weekly' | 'advance' | 'report';
 
-type Employee = {
+type DirectoryEmployee = {
   id: string;
   firstName: string;
   lastName: string;
-  department: 'SERVICE' | 'BAR' | 'KITCHEN' | 'SUPPORT' | 'OTHER';
-  tipWeight: string;
+  isActive: boolean;
+  title: {
+    name: string;
+    tipWeight: string;
+    isTipEligible: boolean;
+    department: {
+      name: string;
+      tipDepartment: 'SERVICE' | 'BAR' | 'KITCHEN' | 'SUPPORT' | 'OTHER';
+    };
+  };
 };
 
 type TipConfig = {
@@ -42,7 +50,11 @@ type TipWeekDistribution = {
   grossShare: string;
   advanceDeducted: string;
   netShare: string;
-  employee: Employee;
+  employee?: {
+    firstName: string;
+    lastName: string;
+  } | null;
+  directoryEmployee?: DirectoryEmployee | null;
 };
 
 type TipWeek = {
@@ -57,7 +69,12 @@ type TipWeek = {
   status: 'DRAFT' | 'CALCULATED' | 'LOCKED' | 'PAID';
   payableDate: string | null;
   distributions: TipWeekDistribution[];
-  advances: Array<{ id: string; amount: string; employee: Employee }>;
+  advances: Array<{
+    id: string;
+    amount: string;
+    employee?: { firstName: string; lastName: string } | null;
+    directoryEmployee?: DirectoryEmployee | null;
+  }>;
 };
 
 export default function TipsPage() {
@@ -75,7 +92,7 @@ export default function TipsPage() {
   const [config, setConfig] = useState<TipConfig | null>(null);
   const [dailyInputs, setDailyInputs] = useState<TipDailyInput[]>([]);
   const [weeks, setWeeks] = useState<TipWeek[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employees, setEmployees] = useState<DirectoryEmployee[]>([]);
 
   const [dailyDate, setDailyDate] = useState(new Date().toISOString().slice(0, 10));
   const [grossRevenue, setGrossRevenue] = useState('0');
@@ -93,7 +110,7 @@ export default function TipsPage() {
   const [payableDate, setPayableDate] = useState('');
 
   const [advanceWeekId, setAdvanceWeekId] = useState('');
-  const [advanceEmployeeId, setAdvanceEmployeeId] = useState('');
+  const [advanceDirectoryEmployeeId, setAdvanceDirectoryEmployeeId] = useState('');
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [overrideDepartment, setOverrideDepartment] = useState<'service' | 'bar' | 'kitchen' | 'support' | 'other'>('kitchen');
   const [overrideWeight, setOverrideWeight] = useState('');
@@ -114,19 +131,19 @@ export default function TipsPage() {
       apiFetch('/app-api/tips/config') as Promise<TipConfig>,
       apiFetch('/app-api/tips/daily-inputs') as Promise<TipDailyInput[]>,
       apiFetch('/app-api/tips/weeks') as Promise<TipWeek[]>,
-      apiFetch('/app-api/tips/employees') as Promise<Employee[]>
+      apiFetch('/app-api/tips/employees') as Promise<DirectoryEmployee[]>
     ]);
     setConfig(cfg);
     setDailyInputs(dailyRows);
     setWeeks(weekRows);
-    setEmployees(employeeRows.filter((row) => Boolean(row.id)));
+    setEmployees(employeeRows.filter((row) => Boolean(row.id) && row.isActive && row.title?.isTipEligible));
     setServiceRate(String(cfg.serviceRate));
     setServiceTaxRate(String(cfg.serviceTaxDeductionRate));
     setVisaTaxRate(String(cfg.visaTaxDeductionRate));
     setDefaultWastePoints(String(cfg.defaultWastePoints));
     setAllowDepartmentSubPool(Boolean(cfg.allowDepartmentSubPool));
     if (!advanceWeekId && weekRows[0]?.id) setAdvanceWeekId(weekRows[0].id);
-    if (!advanceEmployeeId && employeeRows[0]?.id) setAdvanceEmployeeId(employeeRows[0].id);
+    if (!advanceDirectoryEmployeeId && employeeRows[0]?.id) setAdvanceDirectoryEmployeeId(employeeRows[0].id);
   }
 
   useEffect(() => {
@@ -216,12 +233,17 @@ export default function TipsPage() {
       method: 'POST',
       body: JSON.stringify({
         tipWeekId: advanceWeekId,
-        employeeId: advanceEmployeeId,
+        directoryEmployeeId: advanceDirectoryEmployeeId,
         amount: Number(advanceAmount)
       })
     });
     setAdvanceAmount('');
     await loadAll();
+  }
+
+  function displayEmployeeName(row: { firstName: string; lastName: string } | DirectoryEmployee | null | undefined) {
+    if (!row) return 'Bilinmiyor';
+    return `${row.firstName} ${row.lastName}`;
   }
 
   async function calculateWeek(id: string) {
@@ -475,10 +497,12 @@ export default function TipsPage() {
                 <option key={row.id} value={row.id}>{row.label}</option>
               ))}
             </select>
-            <select className="rounded border px-3 py-2" value={advanceEmployeeId} onChange={(event) => setAdvanceEmployeeId(event.target.value)} required>
+            <select className="rounded border px-3 py-2" value={advanceDirectoryEmployeeId} onChange={(event) => setAdvanceDirectoryEmployeeId(event.target.value)} required>
               <option value="">Çalışan Seç</option>
               {employees.map((row) => (
-                <option key={row.id} value={row.id}>{row.firstName} {row.lastName}</option>
+                <option key={row.id} value={row.id}>
+                  {row.firstName} {row.lastName} - {row.title.name} ({row.title.tipWeight} puan)
+                </option>
               ))}
             </select>
             <input className="rounded border px-3 py-2" type="number" step="0.01" value={advanceAmount} onChange={(event) => setAdvanceAmount(event.target.value)} placeholder="Avans Tutarı" required />
@@ -491,7 +515,7 @@ export default function TipsPage() {
                 <p className="font-medium">{week.periodStart.slice(0, 10)} - {week.periodEnd.slice(0, 10)}</p>
                 <ul className="mt-1 list-disc pl-5 text-sm">
                   {week.advances.map((advance) => (
-                    <li key={advance.id}>{advance.employee.firstName} {advance.employee.lastName}: {advance.amount}</li>
+                    <li key={advance.id}>{displayEmployeeName(advance.directoryEmployee ?? advance.employee)}: {advance.amount}</li>
                   ))}
                   {week.advances.length === 0 ? <li className="text-slate-500">Avans kaydı yok</li> : null}
                 </ul>
@@ -528,7 +552,7 @@ export default function TipsPage() {
                   <tbody>
                     {week.distributions.map((row) => (
                       <tr key={row.id} className="border-t">
-                        <td className="px-3 py-2">{row.employee.firstName} {row.employee.lastName}</td>
+                        <td className="px-3 py-2">{displayEmployeeName(row.directoryEmployee ?? row.employee)}</td>
                         <td className="px-3 py-2">{row.tipWeightUsed}</td>
                         <td className="px-3 py-2">{row.grossShare}</td>
                         <td className="px-3 py-2">{row.advanceDeducted}</td>

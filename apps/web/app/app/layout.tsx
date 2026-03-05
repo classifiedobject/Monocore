@@ -9,6 +9,7 @@ import type { Route } from 'next';
 const baseLinks: Array<{ href: Route; label: string }> = [
   { href: '/app/home', label: 'Home' },
   { href: '/app/company', label: 'Company' },
+  { href: '/app/company/org', label: 'Company Org' },
   { href: '/app/settings', label: 'Settings' },
   { href: '/app/team', label: 'Team' },
   { href: '/app/roles', label: 'Roles & Permissions' },
