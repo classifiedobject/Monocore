@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from '../common/guards/module-installed.guard.js';
@@ -47,6 +47,38 @@ export class TipController {
   @RequirePermissions('module:tip-core.manage')
   listWeeks(@Req() req: Request & { companyId: string }) {
     return this.tip.listTipWeeks(req.companyId);
+  }
+
+  @Get('weeks/:id/report')
+  @RequirePermissions('module:tip-core.manage')
+  weekReport(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.tip.getTipWeekReport(req.companyId, id);
+  }
+
+  @Get('weeks/:id/export.csv')
+  @RequirePermissions('module:tip-core.manage')
+  async exportWeekCsv(
+    @Param('id') id: string,
+    @Req() req: Request & { companyId: string },
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const csv = await this.tip.exportTipWeekCsv(req.companyId, id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="tip-week-${id}.csv"`);
+    return csv;
+  }
+
+  @Get('daily-inputs/export.csv')
+  @RequirePermissions('module:tip-core.manage')
+  async exportDailyInputsCsv(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const csv = await this.tip.exportTipDailyInputsCsv(req.companyId, query);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="tip-daily-inputs.csv"');
+    return csv;
   }
 
   @Post('weeks')

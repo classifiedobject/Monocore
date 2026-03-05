@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../lib/api';
+import { getWebEnv } from '../../../lib/env';
 
 type Tab = 'configuration' | 'daily' | 'weekly' | 'advance' | 'report';
 
@@ -77,6 +78,43 @@ type TipWeek = {
   }>;
 };
 
+type TipWeekReport = {
+  week: {
+    id: string;
+    periodStart: string;
+    periodEnd: string;
+    status: 'DRAFT' | 'CALCULATED' | 'LOCKED' | 'PAID';
+    serviceRateUsed: number;
+    wastePointsUsed: number;
+    totalPoolNet: number;
+    totalDistributed: number;
+  };
+  metrics: {
+    totalPoints: number;
+    pointValue: number;
+  };
+  rows: Array<{
+    name: string;
+    title: string;
+    department: string;
+    tipWeight: number;
+    grossShare: number;
+    advanceDeducted: number;
+    netPayable: number;
+  }>;
+  totals: {
+    totalGrossShare: number;
+    totalAdvance: number;
+    totalNetPayable: number;
+  };
+  reconcile: {
+    totalDistributed: number;
+    sumNetPayable: number;
+    diff: number;
+    ok: boolean;
+  };
+};
+
 export default function TipsPage() {
   const tr = {
     'tip.tabs.configuration': 'Yapılandırma',
@@ -93,6 +131,8 @@ export default function TipsPage() {
   const [dailyInputs, setDailyInputs] = useState<TipDailyInput[]>([]);
   const [weeks, setWeeks] = useState<TipWeek[]>([]);
   const [employees, setEmployees] = useState<DirectoryEmployee[]>([]);
+  const [reportWeekId, setReportWeekId] = useState('');
+  const [report, setReport] = useState<TipWeekReport | null>(null);
 
   const [dailyDate, setDailyDate] = useState(new Date().toISOString().slice(0, 10));
   const [grossRevenue, setGrossRevenue] = useState('0');
@@ -144,12 +184,20 @@ export default function TipsPage() {
     setAllowDepartmentSubPool(Boolean(cfg.allowDepartmentSubPool));
     if (!advanceWeekId && weekRows[0]?.id) setAdvanceWeekId(weekRows[0].id);
     if (!advanceDirectoryEmployeeId && employeeRows[0]?.id) setAdvanceDirectoryEmployeeId(employeeRows[0].id);
+    if (!reportWeekId && weekRows[0]?.id) setReportWeekId(weekRows[0].id);
   }
 
   useEffect(() => {
     loadAll().catch(handleApiError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!reportWeekId) return;
+    apiFetch(`/app-api/tips/weeks/${reportWeekId}/report`)
+      .then((data) => setReport(data as TipWeekReport))
+      .catch(handleApiError);
+  }, [reportWeekId]);
 
   const weekOptions = useMemo(() => weeks.map((row) => ({ id: row.id, label: `${row.periodStart.slice(0, 10)} - ${row.periodEnd.slice(0, 10)}` })), [weeks]);
   const dailyPreview = useMemo(() => {
@@ -272,6 +320,30 @@ export default function TipsPage() {
     });
     setOverrideWeight('');
     await loadAll();
+  }
+
+  async function downloadCsv(path: string, fileName: string) {
+    const API_URL = getWebEnv().NEXT_PUBLIC_WEB_PUBLIC_API_URL;
+    const companyId = window.localStorage.getItem('activeCompanyId') ?? '';
+    const res = await fetch(`${API_URL}${path}`, {
+      credentials: 'include',
+      headers: {
+        'x-company-id': companyId
+      }
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   }
 
   return (
@@ -527,50 +599,111 @@ export default function TipsPage() {
 
       {tab === 'report' ? (
         <div className="space-y-3">
-          {weeks.length === 0 ? (
+          <article className="flex flex-wrap items-center gap-2 rounded bg-white p-4 shadow-sm">
+            <select
+              className="rounded border px-3 py-2"
+              value={reportWeekId}
+              onChange={(event) => setReportWeekId(event.target.value)}
+            >
+              <option value="">Hafta seçin</option>
+              {weekOptions.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.label}
+                </option>
+              ))}
+            </select>
+            <button
+              className="rounded border border-slate-300 px-3 py-2"
+              onClick={() => {
+                if (!reportWeekId) return;
+                apiFetch(`/app-api/tips/weeks/${reportWeekId}/report`)
+                  .then((data) => setReport(data as TipWeekReport))
+                  .catch(handleApiError);
+              }}
+            >
+              Raporu Yenile
+            </button>
+            <button
+              className="rounded bg-mono-500 px-3 py-2 text-white disabled:opacity-60"
+              disabled={!reportWeekId}
+              onClick={() => downloadCsv(`/app-api/tips/weeks/${reportWeekId}/export.csv`, `tip-week-${reportWeekId}.csv`).catch(handleApiError)}
+            >
+              Hafta CSV
+            </button>
+            <button
+              className="rounded bg-slate-900 px-3 py-2 text-white"
+              onClick={() => downloadCsv('/app-api/tips/daily-inputs/export.csv', 'tip-daily-inputs.csv').catch(handleApiError)}
+            >
+              Günlük CSV
+            </button>
+          </article>
+
+          {!report ? (
             <article className="rounded bg-white p-4 text-sm text-slate-600 shadow-sm">
-              <p className="font-medium">Henüz tip haftası yok.</p>
-              <p className="mt-1">Önce “Haftalık” sekmesinden bir tip haftası oluşturup hesaplama çalıştırın.</p>
+              <p className="font-medium">Bu hafta hesaplama yapılmadı.</p>
+              <p className="mt-1">Hafta seçip “Raporu Yenile” ile sonucu görüntüleyin.</p>
             </article>
-          ) : null}
-          {weeks.map((week) => (
-            <article key={week.id} className="rounded bg-white p-4 shadow-sm">
+          ) : (
+            <article className="space-y-4 rounded bg-white p-4 shadow-sm">
               <h2 className="font-semibold">
-                Dağıtım {week.periodStart.slice(0, 10)} - {week.periodEnd.slice(0, 10)}
+                Dağıtım {report.week.periodStart.slice(0, 10)} - {report.week.periodEnd.slice(0, 10)}
               </h2>
-              <div className="mt-2 overflow-hidden rounded border border-slate-200">
+
+              <div className="grid gap-2 text-sm md:grid-cols-3">
+                <p>Service Rate Used: <strong>{report.week.serviceRateUsed.toFixed(4)}</strong></p>
+                <p>Waste Points Used: <strong>{report.week.wastePointsUsed.toFixed(2)}</strong></p>
+                <p>Total Pool (Net): <strong>{report.week.totalPoolNet.toFixed(2)}</strong></p>
+                <p>Total Points: <strong>{report.metrics.totalPoints.toFixed(2)}</strong></p>
+                <p>Point Value: <strong>{report.metrics.pointValue.toFixed(2)}</strong></p>
+                <p>Total Distributed: <strong>{report.week.totalDistributed.toFixed(2)}</strong></p>
+              </div>
+
+              <div className="overflow-hidden rounded border border-slate-200">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-3 py-2 text-left">Çalışan</th>
-                      <th className="px-3 py-2 text-left">Puan</th>
-                      <th className="px-3 py-2 text-left">Brüt Pay</th>
-                      <th className="px-3 py-2 text-left">Avans</th>
-                      <th className="px-3 py-2 text-left">Net Pay</th>
+                      <th className="px-3 py-2 text-left">Name</th>
+                      <th className="px-3 py-2 text-left">Title</th>
+                      <th className="px-3 py-2 text-left">Department</th>
+                      <th className="px-3 py-2 text-left">Tip Weight</th>
+                      <th className="px-3 py-2 text-left">Gross Share</th>
+                      <th className="px-3 py-2 text-left">Advance</th>
+                      <th className="px-3 py-2 text-left">Net Payable</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {week.distributions.map((row) => (
-                      <tr key={row.id} className="border-t">
-                        <td className="px-3 py-2">{displayEmployeeName(row.directoryEmployee ?? row.employee)}</td>
-                        <td className="px-3 py-2">{row.tipWeightUsed}</td>
-                        <td className="px-3 py-2">{row.grossShare}</td>
-                        <td className="px-3 py-2">{row.advanceDeducted}</td>
-                        <td className="px-3 py-2">{row.netShare}</td>
+                    {report.rows.map((row, index) => (
+                      <tr key={`${row.name}-${index}`} className="border-t">
+                        <td className="px-3 py-2">{row.name}</td>
+                        <td className="px-3 py-2">{row.title}</td>
+                        <td className="px-3 py-2">{row.department}</td>
+                        <td className="px-3 py-2">{row.tipWeight.toFixed(2)}</td>
+                        <td className="px-3 py-2">{row.grossShare.toFixed(2)}</td>
+                        <td className="px-3 py-2">{row.advanceDeducted.toFixed(2)}</td>
+                        <td className="px-3 py-2">{row.netPayable.toFixed(2)}</td>
                       </tr>
                     ))}
-                    {week.distributions.length === 0 ? (
-                      <tr>
-                        <td className="px-3 py-3 text-slate-500" colSpan={5}>
-                          Bu hafta hesaplama yapılmadı. “Haftalık” sekmesinden önce “Calculate”, sonra “Lock” adımlarını çalıştırın.
-                        </td>
-                      </tr>
-                    ) : null}
+                    <tr className="border-t bg-slate-50 font-semibold">
+                      <td className="px-3 py-2" colSpan={4}>Totals</td>
+                      <td className="px-3 py-2">{report.totals.totalGrossShare.toFixed(2)}</td>
+                      <td className="px-3 py-2">{report.totals.totalAdvance.toFixed(2)}</td>
+                      <td className="px-3 py-2">{report.totals.totalNetPayable.toFixed(2)}</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+
+              <div className="rounded border border-slate-200 p-3 text-sm">
+                <p>
+                  Reconcile: Sum(Net Payable) <strong>{report.reconcile.sumNetPayable.toFixed(2)}</strong> vs
+                  Total Distributed <strong>{report.reconcile.totalDistributed.toFixed(2)}</strong>
+                </p>
+                <p className={report.reconcile.ok ? 'text-emerald-700' : 'text-amber-700'}>
+                  Diff: {report.reconcile.diff.toFixed(2)} {report.reconcile.ok ? '(OK)' : '(Rounding reconciliation needed)'}
+                </p>
+              </div>
             </article>
-          ))}
+          )}
         </div>
       ) : null}
     </section>
