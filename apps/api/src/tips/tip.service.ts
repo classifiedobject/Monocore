@@ -29,7 +29,7 @@ export class TipService {
   ) {}
 
   async listEmployees(companyId: string) {
-    return this.prisma.companyEmployeeDirectory.findMany({
+    const rows = await this.prisma.companyEmployeeDirectory.findMany({
       where: { companyId },
       include: {
         user: true,
@@ -37,6 +37,7 @@ export class TipService {
       },
       orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }, { lastName: 'asc' }]
     });
+    return this.sortDirectoryEmployees(rows);
   }
 
   async getTipConfiguration(companyId: string) {
@@ -99,41 +100,61 @@ export class TipService {
     const body = tipDailyInputSchema.parse(payload);
     const config = await this.getTipConfiguration(companyId);
     const date = this.parseDate(body.date, false);
-    const serviceRevenue = this.round2(body.grossRevenue - body.discounts - body.comps - body.wastageSales);
-    const serviceFee = serviceRevenue > 0 ? this.round2(serviceRevenue / (1 + Number(config.serviceRate))) : 0;
-    const taxDeduction = this.round2(serviceFee * Number(config.serviceTaxDeductionRate));
-    const netService = this.round2(serviceFee - taxDeduction);
-    const visaNet = this.round2(body.visaTipsGross - body.visaTipsGross * Number(config.visaTaxDeductionRate));
+    const grossRevenue = this.dec(body.grossRevenue);
+    const discounts = this.dec(body.discounts);
+    const comps = this.dec(body.comps);
+    const wastageSales = this.dec(body.wastageSales);
+    const cariAdisyonTotal = this.dec(body.cariAdisyonTotal);
+    const cashTips = this.dec(body.cashTips);
+    const visaTipsGross = this.dec(body.visaTipsGross);
+    const expenseAdjustments = this.dec(body.expenseAdjustments);
+    const serviceRate = this.dec(config.serviceRate);
+    const serviceTaxRate = this.dec(config.serviceTaxDeductionRate);
+    const visaTaxRate = this.dec(config.visaTaxDeductionRate);
+
+    const serviceAndCariRevenue = this.round2Decimal(
+      grossRevenue.minus(discounts.plus(comps).plus(wastageSales))
+    );
+    const grossServiceFee = this.round2Decimal(
+      serviceAndCariRevenue.minus(serviceAndCariRevenue.div(this.dec(1).plus(serviceRate)))
+    );
+    const netServiceFee = this.round2Decimal(
+      grossServiceFee.minus(grossServiceFee.mul(serviceTaxRate))
+    );
+    const cariDahilCiro = this.round2Decimal(serviceAndCariRevenue.minus(grossServiceFee));
+    const visaTipsNet = this.round2Decimal(visaTipsGross.minus(visaTipsGross.mul(visaTaxRate)));
 
     const row = await this.prisma.tipDailyInput.upsert({
       where: { companyId_date: { companyId, date } },
       create: {
         companyId,
         date,
-        grossRevenue: new Prisma.Decimal(body.grossRevenue),
-        discounts: new Prisma.Decimal(body.discounts),
-        comps: new Prisma.Decimal(body.comps),
-        wastageSales: new Prisma.Decimal(body.wastageSales),
-        serviceRevenueCalculated: new Prisma.Decimal(serviceRevenue),
-        netServiceRevenue: new Prisma.Decimal(serviceRevenue),
-        netServiceFee: new Prisma.Decimal(netService),
-        cashTips: new Prisma.Decimal(body.cashTips),
-        visaTipsGross: new Prisma.Decimal(body.visaTipsGross),
-        visaTipsNet: new Prisma.Decimal(visaNet),
-        expenseAdjustments: new Prisma.Decimal(body.expenseAdjustments)
+        grossRevenue: this.round2Decimal(grossRevenue),
+        discounts: this.round2Decimal(discounts),
+        comps: this.round2Decimal(comps),
+        wastageSales: this.round2Decimal(wastageSales),
+        serviceRevenueCalculated: serviceAndCariRevenue,
+        netServiceRevenue: cariDahilCiro,
+        netServiceFee,
+        cariAdisyonTotal: this.round2Decimal(cariAdisyonTotal),
+        cashTips: this.round2Decimal(cashTips),
+        visaTipsGross: this.round2Decimal(visaTipsGross),
+        visaTipsNet,
+        expenseAdjustments: this.round2Decimal(expenseAdjustments)
       },
       update: {
-        grossRevenue: new Prisma.Decimal(body.grossRevenue),
-        discounts: new Prisma.Decimal(body.discounts),
-        comps: new Prisma.Decimal(body.comps),
-        wastageSales: new Prisma.Decimal(body.wastageSales),
-        serviceRevenueCalculated: new Prisma.Decimal(serviceRevenue),
-        netServiceRevenue: new Prisma.Decimal(serviceRevenue),
-        netServiceFee: new Prisma.Decimal(netService),
-        cashTips: new Prisma.Decimal(body.cashTips),
-        visaTipsGross: new Prisma.Decimal(body.visaTipsGross),
-        visaTipsNet: new Prisma.Decimal(visaNet),
-        expenseAdjustments: new Prisma.Decimal(body.expenseAdjustments)
+        grossRevenue: this.round2Decimal(grossRevenue),
+        discounts: this.round2Decimal(discounts),
+        comps: this.round2Decimal(comps),
+        wastageSales: this.round2Decimal(wastageSales),
+        serviceRevenueCalculated: serviceAndCariRevenue,
+        netServiceRevenue: cariDahilCiro,
+        netServiceFee,
+        cariAdisyonTotal: this.round2Decimal(cariAdisyonTotal),
+        cashTips: this.round2Decimal(cashTips),
+        visaTipsGross: this.round2Decimal(visaTipsGross),
+        visaTipsNet,
+        expenseAdjustments: this.round2Decimal(expenseAdjustments)
       }
     });
     await this.logCompany(actorUserId, companyId, 'company.tip.daily_input.upsert', 'tip_daily_input', row.id, body, ip, userAgent);
@@ -396,7 +417,8 @@ export class TipService {
     });
     if (!week || week.companyId !== companyId) throw new NotFoundException('Tip week not found');
 
-    const rows: TipReportRow[] = week.distributions.map((row) => ({
+    const sortedDistributions = this.sortDistributions(week.distributions);
+    const rows: TipReportRow[] = sortedDistributions.map((row) => ({
       name: row.directoryEmployee
         ? `${row.directoryEmployee.firstName} ${row.directoryEmployee.lastName}`
         : row.employee
@@ -525,15 +547,27 @@ export class TipService {
         'Discounts',
         'Comps',
         'WastageSales',
+        'ServiceAndCariRevenue',
+        'GrossServiceFee',
         'NetServiceFee',
-        'CashTips',
+        'CariDahilCiro',
+        'CariAdisyonTotal',
+        'NetCiro',
         'VisaTipsGross',
         'VisaTipsNet',
-        'ExpenseAdjustments'
+        'CashTips',
+        'ExpenseAdjustments',
+        'DistributablePool'
       ].join(',')
     ];
 
     for (const row of rows) {
+      const serviceAndCariRevenue = Number(row.serviceRevenueCalculated);
+      const grossServiceFee = this.round2(serviceAndCariRevenue - Number(row.netServiceRevenue));
+      const cariDahilCiro = Number(row.netServiceRevenue);
+      const cariAdisyonTotal = Number(row.cariAdisyonTotal);
+      const netCiro = this.round2(cariDahilCiro - cariAdisyonTotal);
+      const distributablePool = this.round2(Number(row.netServiceFee) + Number(row.visaTipsNet) + Number(row.cashTips) - Number(row.expenseAdjustments));
       lines.push(
         [
           row.date.toISOString().slice(0, 10),
@@ -541,11 +575,17 @@ export class TipService {
           Number(row.discounts).toFixed(2),
           Number(row.comps).toFixed(2),
           Number(row.wastageSales).toFixed(2),
+          serviceAndCariRevenue.toFixed(2),
+          grossServiceFee.toFixed(2),
           Number(row.netServiceFee).toFixed(2),
-          Number(row.cashTips).toFixed(2),
+          cariDahilCiro.toFixed(2),
+          cariAdisyonTotal.toFixed(2),
+          netCiro.toFixed(2),
           Number(row.visaTipsGross).toFixed(2),
           Number(row.visaTipsNet).toFixed(2),
-          Number(row.expenseAdjustments).toFixed(2)
+          Number(row.cashTips).toFixed(2),
+          Number(row.expenseAdjustments).toFixed(2),
+          distributablePool.toFixed(2)
         ].join(',')
       );
     }
@@ -602,6 +642,59 @@ export class TipService {
 
   private round2(value: number) {
     return Math.round(value * 100) / 100;
+  }
+
+  private dec(value: Prisma.Decimal.Value) {
+    return new Prisma.Decimal(value);
+  }
+
+  private round2Decimal(value: Prisma.Decimal) {
+    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+
+  private sortDirectoryEmployees<
+    T extends {
+      title: { sortOrder: number | null; department: { sortOrder: number | null } };
+      firstName: string;
+      lastName: string;
+    }
+  >(rows: T[]) {
+    return [...rows].sort((a, b) => {
+      const aDept = a.title.department.sortOrder ?? 1000;
+      const bDept = b.title.department.sortOrder ?? 1000;
+      if (aDept !== bDept) return aDept - bDept;
+      const aTitle = a.title.sortOrder ?? 1000;
+      const bTitle = b.title.sortOrder ?? 1000;
+      if (aTitle !== bTitle) return aTitle - bTitle;
+      const last = a.lastName.localeCompare(b.lastName, 'tr');
+      if (last !== 0) return last;
+      return a.firstName.localeCompare(b.firstName, 'tr');
+    });
+  }
+
+  private sortDistributions<
+    T extends {
+      directoryEmployee: null | {
+        firstName: string;
+        lastName: string;
+        title: { sortOrder: number | null; department: { sortOrder: number | null } };
+      };
+    }
+  >(rows: T[]) {
+    return [...rows].sort((a, b) => {
+      if (!a.directoryEmployee && !b.directoryEmployee) return 0;
+      if (!a.directoryEmployee) return 1;
+      if (!b.directoryEmployee) return -1;
+      const aDept = a.directoryEmployee.title.department.sortOrder ?? 1000;
+      const bDept = b.directoryEmployee.title.department.sortOrder ?? 1000;
+      if (aDept !== bDept) return aDept - bDept;
+      const aTitle = a.directoryEmployee.title.sortOrder ?? 1000;
+      const bTitle = b.directoryEmployee.title.sortOrder ?? 1000;
+      if (aTitle !== bTitle) return aTitle - bTitle;
+      const last = a.directoryEmployee.lastName.localeCompare(b.directoryEmployee.lastName, 'tr');
+      if (last !== 0) return last;
+      return a.directoryEmployee.firstName.localeCompare(b.directoryEmployee.firstName, 'tr');
+    });
   }
 
   private csvCell(value: string) {

@@ -1,0 +1,2 @@
+ALTER TABLE "TipDailyInput"
+ADD COLUMN "cariAdisyonTotal" DECIMAL(14,2) NOT NULL DEFAULT 0;

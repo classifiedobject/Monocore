@@ -577,6 +577,7 @@ export const tipDailyInputSchema = z.object({
   discounts: z.coerce.number().nonnegative().default(0),
   comps: z.coerce.number().nonnegative().default(0),
   wastageSales: z.coerce.number().nonnegative().default(0),
+  cariAdisyonTotal: z.coerce.number().nonnegative().default(0),
   cashTips: z.coerce.number().nonnegative().default(0),
   visaTipsGross: z.coerce.number().nonnegative().default(0),
   expenseAdjustments: z.coerce.number().nonnegative().default(0)
