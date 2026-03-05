@@ -11,6 +11,15 @@ import { PrismaService } from '../common/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 
 type JsonObject = Record<string, Prisma.InputJsonValue | null>;
+type TipReportRow = {
+  name: string;
+  title: string;
+  department: string;
+  tipWeight: number;
+  grossShare: number;
+  advanceDeducted: number;
+  netPayable: number;
+};
 
 @Injectable()
 export class TipService {
@@ -372,6 +381,178 @@ export class TipService {
     return row;
   }
 
+  async getTipWeekReport(companyId: string, id: string) {
+    const week = await this.prisma.tipWeek.findUnique({
+      where: { id },
+      include: {
+        distributions: {
+          include: {
+            directoryEmployee: { include: { title: { include: { department: true } } } },
+            employee: true
+          },
+          orderBy: { createdAt: 'asc' }
+        }
+      }
+    });
+    if (!week || week.companyId !== companyId) throw new NotFoundException('Tip week not found');
+
+    const rows: TipReportRow[] = week.distributions.map((row) => ({
+      name: row.directoryEmployee
+        ? `${row.directoryEmployee.firstName} ${row.directoryEmployee.lastName}`
+        : row.employee
+          ? `${row.employee.firstName} ${row.employee.lastName}`
+          : 'Unknown',
+      title: row.directoryEmployee?.title.name ?? 'N/A',
+      department: row.directoryEmployee?.title.department.name ?? 'N/A',
+      tipWeight: Number(row.tipWeightUsed),
+      grossShare: Number(row.grossShare),
+      advanceDeducted: Number(row.advanceDeducted),
+      netPayable: Number(row.netShare)
+    }));
+
+    const totalPointsFromEmployees = this.round2(rows.reduce((sum, row) => sum + row.tipWeight, 0));
+    const wastePoints = Number(week.wastePointsUsed);
+    const totalPoints = this.round2(totalPointsFromEmployees + wastePoints);
+    const totalPoolNet = Number(week.totalPoolNet);
+    const pointValue = totalPoints > 0 ? this.round2(totalPoolNet / totalPoints) : 0;
+    const totalGrossShare = this.round2(rows.reduce((sum, row) => sum + row.grossShare, 0));
+    const totalAdvance = this.round2(rows.reduce((sum, row) => sum + row.advanceDeducted, 0));
+    const totalNetPayable = this.round2(rows.reduce((sum, row) => sum + row.netPayable, 0));
+    const totalDistributed = Number(week.totalDistributed);
+    const reconcileDiff = this.round2(totalDistributed - totalNetPayable);
+
+    return {
+      week: {
+        id: week.id,
+        periodStart: week.periodStart,
+        periodEnd: week.periodEnd,
+        status: week.status,
+        serviceRateUsed: Number(week.serviceRateUsed),
+        wastePointsUsed: wastePoints,
+        totalPoolNet,
+        totalDistributed
+      },
+      metrics: {
+        totalPoints,
+        pointValue
+      },
+      rows,
+      totals: {
+        totalGrossShare,
+        totalAdvance,
+        totalNetPayable
+      },
+      reconcile: {
+        totalDistributed,
+        sumNetPayable: totalNetPayable,
+        diff: reconcileDiff,
+        ok: Math.abs(reconcileDiff) <= 0.01
+      }
+    };
+  }
+
+  async exportTipWeekCsv(companyId: string, id: string) {
+    const report = await this.getTipWeekReport(companyId, id);
+    const lines = [
+      [
+        'PeriodStart',
+        'PeriodEnd',
+        'ServiceRateUsed',
+        'WastePointsUsed',
+        'TotalPoolNet',
+        'TotalPoints',
+        'PointValue',
+        'EmployeeName',
+        'Title',
+        'Department',
+        'TipWeight',
+        'GrossShare',
+        'Advance',
+        'NetPayable'
+      ].join(',')
+    ];
+
+    for (const row of report.rows) {
+      lines.push(
+        [
+          report.week.periodStart.toISOString().slice(0, 10),
+          report.week.periodEnd.toISOString().slice(0, 10),
+          report.week.serviceRateUsed.toFixed(4),
+          report.week.wastePointsUsed.toFixed(2),
+          report.week.totalPoolNet.toFixed(2),
+          report.metrics.totalPoints.toFixed(2),
+          report.metrics.pointValue.toFixed(2),
+          this.csvCell(row.name),
+          this.csvCell(row.title),
+          this.csvCell(row.department),
+          row.tipWeight.toFixed(2),
+          row.grossShare.toFixed(2),
+          row.advanceDeducted.toFixed(2),
+          row.netPayable.toFixed(2)
+        ].join(',')
+      );
+    }
+
+    lines.push(
+      [
+        'TOTAL',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        report.totals.totalGrossShare.toFixed(2),
+        report.totals.totalAdvance.toFixed(2),
+        report.totals.totalNetPayable.toFixed(2)
+      ].join(',')
+    );
+
+    lines.push(['RECONCILE_DIFF', report.reconcile.diff.toFixed(2)].join(','));
+    return lines.join('\n');
+  }
+
+  async exportTipDailyInputsCsv(companyId: string, query: Record<string, string | undefined>) {
+    const rows = await this.listTipDailyInputs(companyId, query);
+    const lines = [
+      [
+        'Date',
+        'GrossRevenue',
+        'Discounts',
+        'Comps',
+        'WastageSales',
+        'NetServiceFee',
+        'CashTips',
+        'VisaTipsGross',
+        'VisaTipsNet',
+        'ExpenseAdjustments'
+      ].join(',')
+    ];
+
+    for (const row of rows) {
+      lines.push(
+        [
+          row.date.toISOString().slice(0, 10),
+          Number(row.grossRevenue).toFixed(2),
+          Number(row.discounts).toFixed(2),
+          Number(row.comps).toFixed(2),
+          Number(row.wastageSales).toFixed(2),
+          Number(row.netServiceFee).toFixed(2),
+          Number(row.cashTips).toFixed(2),
+          Number(row.visaTipsGross).toFixed(2),
+          Number(row.visaTipsNet).toFixed(2),
+          Number(row.expenseAdjustments).toFixed(2)
+        ].join(',')
+      );
+    }
+
+    return lines.join('\n');
+  }
+
   private splitByWeights(rows: Array<{ directoryEmployeeId: string; weight: number }>, total: number) {
     const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
     let remaining = this.round2(total);
@@ -422,6 +603,11 @@ export class TipService {
 
   private round2(value: number) {
     return Math.round(value * 100) / 100;
+  }
+
+  private csvCell(value: string) {
+    const escaped = value.replaceAll('"', '""');
+    return `"${escaped}"`;
   }
 
   private async logCompany(
