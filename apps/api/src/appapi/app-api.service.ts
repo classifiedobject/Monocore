@@ -614,7 +614,7 @@ export class AppApiService {
           }
         }
       },
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }]
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
     }).then((rows) =>
       rows.map((row) => ({
         ...row,
@@ -643,6 +643,7 @@ export class AppApiService {
         data: {
           companyId,
           name: body.name,
+          sortOrder: body.sortOrder ?? 1000,
           parentId: body.parentId ?? null,
           tipDepartment: body.tipDepartment ?? 'OTHER',
           isActive: body.isActive ?? true
@@ -705,6 +706,7 @@ export class AppApiService {
         where: { id: departmentId },
         data: {
           ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
           ...(body.tipDepartment !== undefined ? { tipDepartment: body.tipDepartment } : {}),
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
@@ -830,7 +832,7 @@ export class AppApiService {
         department: true,
         _count: { select: { employees: true } }
       },
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }]
+      orderBy: [{ department: { sortOrder: 'asc' } }, { sortOrder: 'asc' }, { name: 'asc' }]
     }).then((rows) =>
       rows.map((row) => ({
         ...row,
@@ -853,6 +855,7 @@ export class AppApiService {
           companyId,
           departmentId: body.departmentId,
           name: body.name,
+          sortOrder: body.sortOrder ?? 1000,
           tipWeight: new Prisma.Decimal(body.tipWeight),
           isTipEligible: body.isTipEligible,
           departmentAggregate: body.departmentAggregate,
@@ -907,6 +910,7 @@ export class AppApiService {
         data: {
           ...(body.departmentId !== undefined ? { departmentId: body.departmentId } : {}),
           ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           ...(body.tipWeight !== undefined ? { tipWeight: new Prisma.Decimal(body.tipWeight) } : {}),
           ...(body.isTipEligible !== undefined ? { isTipEligible: body.isTipEligible } : {}),
           ...(body.departmentAggregate !== undefined ? { departmentAggregate: body.departmentAggregate } : {}),
