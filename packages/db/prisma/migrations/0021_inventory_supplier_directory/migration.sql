@@ -1,6 +1,6 @@
 CREATE TABLE "InventorySupplier" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
   "shortName" TEXT NOT NULL,
   "legalName" TEXT NOT NULL,
   "address" TEXT,
@@ -17,8 +17,8 @@ CREATE TABLE "InventorySupplier" (
 );
 
 CREATE TABLE "InventoryBrand" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
   "name" TEXT NOT NULL,
   "shortName" TEXT,
   "isActive" BOOLEAN NOT NULL DEFAULT true,
@@ -29,10 +29,10 @@ CREATE TABLE "InventoryBrand" (
 );
 
 CREATE TABLE "InventoryBrandSupplier" (
-  "id" TEXT NOT NULL,
-  "companyId" TEXT NOT NULL,
-  "brandId" TEXT NOT NULL,
-  "supplierId" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL,
+  "brandId" UUID NOT NULL,
+  "supplierId" UUID NOT NULL,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "InventoryBrandSupplier_pkey" PRIMARY KEY ("id")
 );
