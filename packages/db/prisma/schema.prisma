@@ -122,6 +122,33 @@ enum InventoryMovementType {
   ADJUSTMENT
 }
 
+enum InventoryMainStockArea {
+  BAR
+  KITCHEN
+  OTHER
+}
+
+enum InventoryAttributeCategory {
+  ALCOHOL
+  SOFT
+  KITCHEN
+  OTHER
+}
+
+enum InventoryBaseUom {
+  CL
+  ML
+  GRAM
+  KG
+  PIECE
+}
+
+enum InventoryPackageUom {
+  BOTTLE
+  PACK
+  PIECE
+}
+
 enum SalesOrderStatus {
   DRAFT
   POSTED
@@ -1164,22 +1191,39 @@ model InventoryWarehouse {
 }
 
 model InventoryItem {
-  id        String   @id @default(uuid())
-  companyId String
-  name      String
-  sku       String?
-  unit      String
+  id                  String   @id @default(uuid())
+  companyId           String
+  name                String
+  sku                 String?
+  unit                String
+  brandId             String?
+  supplierId          String?
+  mainStockArea       InventoryMainStockArea      @default(OTHER)
+  attributeCategory   InventoryAttributeCategory  @default(OTHER)
+  subCategory         String?
+  baseUom             InventoryBaseUom            @default(PIECE)
+  packageUom          InventoryPackageUom?
+  packageSizeBase     Decimal? @db.Decimal(14, 4)
+  purchaseVatRate     Decimal  @default(0.2) @db.Decimal(6, 4)
+  listPriceExVat      Decimal? @db.Decimal(14, 4)
+  discountRate        Decimal  @default(0) @db.Decimal(6, 4)
+  computedPriceIncVat Decimal? @db.Decimal(14, 4)
   lastPurchaseUnitCost Decimal? @db.Decimal(14, 4)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  movements InventoryStockMovement[]
-  recipeLines RecipeLine[]
+  isActive            Boolean  @default(true)
+  sortOrder           Int      @default(1000)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  brand               InventoryBrand? @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  supplier            InventorySupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  movements           InventoryStockMovement[]
+  recipeLines         RecipeLine[]
 
   @@unique([companyId, sku])
   @@index([companyId, isActive])
   @@index([companyId, name])
+  @@index([companyId, brandId])
+  @@index([companyId, supplierId])
 }
 
 model InventorySupplier {
@@ -1198,6 +1242,7 @@ model InventorySupplier {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items        InventoryItem[]
   brandLinks   InventoryBrandSupplier[]
 
   @@index([companyId, shortName])
@@ -1214,6 +1259,7 @@ model InventoryBrand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items     InventoryItem[]
   supplierLinks InventoryBrandSupplier[]
 
   @@index([companyId, name])
