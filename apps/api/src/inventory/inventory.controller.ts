@@ -109,6 +109,50 @@ export class InventoryController {
     return this.inventory.stockBalance(req.companyId, query);
   }
 
+  @Get('stock-counts')
+  @RequirePermissions('module:inventory-core.stock-count.read')
+  listStockCounts(@Req() req: Request & { companyId: string }) {
+    return this.inventory.listStockCounts(req.companyId);
+  }
+
+  @Post('stock-counts')
+  @RequirePermissions('module:inventory-core.stock-count.manage')
+  createStockCount(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.createStockCountSession(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('stock-counts/:id')
+  @RequirePermissions('module:inventory-core.stock-count.read')
+  getStockCount(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.inventory.getStockCountSession(req.companyId, id);
+  }
+
+  @Patch('stock-counts/:id/lines')
+  @RequirePermissions('module:inventory-core.stock-count.manage')
+  upsertStockCountLine(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.upsertStockCountLine(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('stock-counts/:id/lines/:lineId')
+  @RequirePermissions('module:inventory-core.stock-count.manage')
+  deleteStockCountLine(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.deleteStockCountLine(req.user.id, req.companyId, id, lineId, req.ip, req.get('user-agent'));
+  }
+
+  @Post('stock-counts/:id/post')
+  @RequirePermissions('module:inventory-core.stock-count.manage')
+  postStockCount(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.postStockCountSession(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
   @Get('suppliers')
   @RequirePermissions('module:inventory-core.suppliers.read')
   listSuppliers(@Req() req: Request & { companyId: string }) {
