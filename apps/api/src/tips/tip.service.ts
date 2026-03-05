@@ -552,7 +552,6 @@ export class TipService {
 
     return lines.join('\n');
   }
-
   private splitByWeights(rows: Array<{ directoryEmployeeId: string; weight: number }>, total: number) {
     const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
     let remaining = this.round2(total);
