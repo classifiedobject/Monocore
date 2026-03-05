@@ -393,6 +393,7 @@ model CompanyDepartment {
   id            String   @id @default(uuid())
   companyId     String
   name          String
+  sortOrder     Int      @default(1000)
   parentId      String?
   tipDepartment EmployeeDepartment @default(OTHER)
   isActive      Boolean  @default(true)
@@ -412,6 +413,7 @@ model CompanyTitle {
   companyId           String
   departmentId        String
   name                String
+  sortOrder           Int      @default(1000)
   tipWeight           Decimal  @default(1) @db.Decimal(8, 2)
   isTipEligible       Boolean  @default(true)
   departmentAggregate Boolean  @default(false)

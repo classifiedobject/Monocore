@@ -38,6 +38,7 @@ export const applyRoleTemplateSchema = z.object({
 
 export const companyDepartmentSchema = z.object({
   name: z.string().min(2).max(120),
+  sortOrder: z.coerce.number().int().min(0).optional(),
   parentId: z.string().uuid().nullable().optional(),
   tipDepartment: z.enum(['SERVICE', 'BAR', 'KITCHEN', 'SUPPORT', 'OTHER']).optional(),
   isActive: z.boolean().optional()
@@ -46,6 +47,7 @@ export const companyDepartmentSchema = z.object({
 export const companyTitleSchema = z.object({
   departmentId: z.string().uuid(),
   name: z.string().min(2).max(120),
+  sortOrder: z.coerce.number().int().min(0).optional(),
   tipWeight: z.coerce.number().nonnegative().max(1000),
   isTipEligible: z.boolean().default(true),
   departmentAggregate: z.boolean().default(false),
