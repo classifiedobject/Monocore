@@ -1,11 +1,14 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type InventoryMovementType } from '@prisma/client';
 import {
+  inventoryBrandSchema,
+  inventoryBrandSupplierLinkSchema,
   inventoryItemSchema,
   inventoryItemCostSchema,
   inventoryMovementQuerySchema,
   inventoryMovementSchema,
   inventoryStockBalanceQuerySchema,
+  inventorySupplierSchema,
   inventoryTransferSchema,
   inventoryWarehouseSchema
 } from '@monocore/shared';
@@ -48,7 +51,11 @@ export class InventoryService {
       manageItemCost: keys.has('module:inventory-core.item.cost.manage'),
       manageWarehouse: keys.has('module:inventory-core.warehouse.manage'),
       manageMovement: keys.has('module:inventory-core.movement.manage'),
-      readMovement: keys.has('module:inventory-core.movement.read')
+      readMovement: keys.has('module:inventory-core.movement.read'),
+      manageSuppliers: keys.has('module:inventory-core.suppliers.manage'),
+      readSuppliers: keys.has('module:inventory-core.suppliers.read'),
+      manageBrands: keys.has('module:inventory-core.brands.manage'),
+      readBrands: keys.has('module:inventory-core.brands.read')
     };
   }
 
@@ -155,6 +162,226 @@ export class InventoryService {
     );
 
     return row;
+  }
+
+  listSuppliers(companyId: string) {
+    return this.prisma.inventorySupplier.findMany({
+      where: { companyId },
+      orderBy: [{ sortOrder: 'asc' }, { shortName: 'asc' }]
+    });
+  }
+
+  async createSupplier(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventorySupplierSchema.parse(payload);
+    const row = await this.prisma.inventorySupplier.create({
+      data: {
+        companyId,
+        shortName: body.shortName,
+        legalName: body.legalName,
+        address: body.address ?? null,
+        taxOffice: body.taxOffice ?? null,
+        taxNumber: body.taxNumber ?? null,
+        contactName: body.contactName ?? null,
+        contactPhone: body.contactPhone ?? null,
+        notes: body.notes ?? null,
+        isActive: body.isActive ?? true,
+        sortOrder: body.sortOrder ?? 1000
+      }
+    });
+    await this.logCompany(actorUserId, companyId, 'company.inventory.supplier.create', 'inventory_supplier', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async updateSupplier(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventorySupplierSchema.partial().parse(payload);
+    const existing = await this.requireSupplier(companyId, id);
+    const row = await this.prisma.inventorySupplier.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.shortName !== undefined ? { shortName: body.shortName } : {}),
+        ...(body.legalName !== undefined ? { legalName: body.legalName } : {}),
+        ...(body.address !== undefined ? { address: body.address } : {}),
+        ...(body.taxOffice !== undefined ? { taxOffice: body.taxOffice } : {}),
+        ...(body.taxNumber !== undefined ? { taxNumber: body.taxNumber } : {}),
+        ...(body.contactName !== undefined ? { contactName: body.contactName } : {}),
+        ...(body.contactPhone !== undefined ? { contactPhone: body.contactPhone } : {}),
+        ...(body.notes !== undefined ? { notes: body.notes } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {})
+      }
+    });
+    await this.logCompany(actorUserId, companyId, 'company.inventory.supplier.update', 'inventory_supplier', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async activateSupplier(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setSupplierActive(actorUserId, companyId, id, true, ip, userAgent);
+  }
+
+  async deactivateSupplier(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setSupplierActive(actorUserId, companyId, id, false, ip, userAgent);
+  }
+
+  async deleteSupplier(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireSupplier(companyId, id);
+    try {
+      const links = await this.prisma.inventoryBrandSupplier.count({ where: { companyId, supplierId: existing.id } });
+      if (links > 0) {
+        throw new ConflictException('Supplier is linked to brands and cannot be deleted. Deactivate instead.');
+      }
+      await this.prisma.inventorySupplier.delete({ where: { id: existing.id } });
+      await this.logCompany(actorUserId, companyId, 'company.inventory.supplier.delete', 'inventory_supplier', existing.id, { status: 'success' }, ip, userAgent);
+      return { ok: true };
+    } catch (error) {
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        'company.inventory.supplier.delete',
+        'inventory_supplier',
+        existing.id,
+        { status: 'failed', reason: error instanceof Error ? error.message : 'unknown' },
+        ip,
+        userAgent
+      );
+      throw error;
+    }
+  }
+
+  listBrands(companyId: string) {
+    return this.prisma.inventoryBrand.findMany({
+      where: { companyId },
+      include: {
+        supplierLinks: {
+          include: { supplier: true },
+          orderBy: { createdAt: 'asc' }
+        }
+      },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+    });
+  }
+
+  async createBrand(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryBrandSchema.parse(payload);
+    const row = await this.prisma.inventoryBrand.create({
+      data: {
+        companyId,
+        name: body.name,
+        shortName: body.shortName ?? null,
+        isActive: body.isActive ?? true,
+        sortOrder: body.sortOrder ?? 1000
+      }
+    });
+    await this.logCompany(actorUserId, companyId, 'company.inventory.brand.create', 'inventory_brand', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async updateBrand(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryBrandSchema.partial().parse(payload);
+    const existing = await this.requireBrand(companyId, id);
+    const row = await this.prisma.inventoryBrand.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.shortName !== undefined ? { shortName: body.shortName } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {})
+      }
+    });
+    await this.logCompany(actorUserId, companyId, 'company.inventory.brand.update', 'inventory_brand', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async activateBrand(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setBrandActive(actorUserId, companyId, id, true, ip, userAgent);
+  }
+
+  async deactivateBrand(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setBrandActive(actorUserId, companyId, id, false, ip, userAgent);
+  }
+
+  async deleteBrand(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireBrand(companyId, id);
+    try {
+      const links = await this.prisma.inventoryBrandSupplier.count({ where: { companyId, brandId: existing.id } });
+      if (links > 0) {
+        throw new ConflictException('Brand is linked to suppliers and cannot be deleted. Deactivate instead.');
+      }
+      await this.prisma.inventoryBrand.delete({ where: { id: existing.id } });
+      await this.logCompany(actorUserId, companyId, 'company.inventory.brand.delete', 'inventory_brand', existing.id, { status: 'success' }, ip, userAgent);
+      return { ok: true };
+    } catch (error) {
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        'company.inventory.brand.delete',
+        'inventory_brand',
+        existing.id,
+        { status: 'failed', reason: error instanceof Error ? error.message : 'unknown' },
+        ip,
+        userAgent
+      );
+      throw error;
+    }
+  }
+
+  async linkBrandSupplier(actorUserId: string, companyId: string, brandId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryBrandSupplierLinkSchema.parse(payload);
+    const brand = await this.requireBrand(companyId, brandId);
+    const supplier = await this.requireSupplier(companyId, body.supplierId);
+
+    const row = await this.prisma.inventoryBrandSupplier.upsert({
+      where: {
+        companyId_brandId_supplierId: {
+          companyId,
+          brandId: brand.id,
+          supplierId: supplier.id
+        }
+      },
+      create: {
+        companyId,
+        brandId: brand.id,
+        supplierId: supplier.id
+      },
+      update: {}
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.brand_supplier.link',
+      'inventory_brand_supplier',
+      row.id,
+      { brandId: brand.id, supplierId: supplier.id },
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async unlinkBrandSupplier(actorUserId: string, companyId: string, brandId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryBrandSupplierLinkSchema.parse(payload);
+    const brand = await this.requireBrand(companyId, brandId);
+    const supplier = await this.requireSupplier(companyId, body.supplierId);
+
+    const existing = await this.prisma.inventoryBrandSupplier.findFirst({
+      where: { companyId, brandId: brand.id, supplierId: supplier.id }
+    });
+    if (!existing) {
+      throw new NotFoundException('Brand-supplier link not found');
+    }
+
+    await this.prisma.inventoryBrandSupplier.delete({ where: { id: existing.id } });
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.brand_supplier.unlink',
+      'inventory_brand_supplier',
+      existing.id,
+      { brandId: brand.id, supplierId: supplier.id },
+      ip,
+      userAgent
+    );
+    return { ok: true };
   }
 
   async listMovements(companyId: string, query: unknown) {
@@ -377,6 +604,102 @@ export class InventoryService {
       throw new NotFoundException('Warehouse not found');
     }
     return row;
+  }
+
+  private async requireSupplier(companyId: string, id: string) {
+    const row = await this.prisma.inventorySupplier.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Supplier not found');
+    }
+    return row;
+  }
+
+  private async requireBrand(companyId: string, id: string) {
+    const row = await this.prisma.inventoryBrand.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Brand not found');
+    }
+    return row;
+  }
+
+  private async setSupplierActive(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    isActive: boolean,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const existing = await this.requireSupplier(companyId, id);
+    try {
+      const row = await this.prisma.inventorySupplier.update({
+        where: { id: existing.id },
+        data: { isActive }
+      });
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        isActive ? 'company.inventory.supplier.activate' : 'company.inventory.supplier.deactivate',
+        'inventory_supplier',
+        row.id,
+        { status: 'success', isActive },
+        ip,
+        userAgent
+      );
+      return row;
+    } catch (error) {
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        isActive ? 'company.inventory.supplier.activate' : 'company.inventory.supplier.deactivate',
+        'inventory_supplier',
+        existing.id,
+        { status: 'failed', reason: error instanceof Error ? error.message : 'unknown', isActive },
+        ip,
+        userAgent
+      );
+      throw error;
+    }
+  }
+
+  private async setBrandActive(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    isActive: boolean,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const existing = await this.requireBrand(companyId, id);
+    try {
+      const row = await this.prisma.inventoryBrand.update({
+        where: { id: existing.id },
+        data: { isActive }
+      });
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        isActive ? 'company.inventory.brand.activate' : 'company.inventory.brand.deactivate',
+        'inventory_brand',
+        row.id,
+        { status: 'success', isActive },
+        ip,
+        userAgent
+      );
+      return row;
+    } catch (error) {
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        isActive ? 'company.inventory.brand.activate' : 'company.inventory.brand.deactivate',
+        'inventory_brand',
+        existing.id,
+        { status: 'failed', reason: error instanceof Error ? error.message : 'unknown', isActive },
+        ip,
+        userAgent
+      );
+      throw error;
+    }
   }
 
   private async requireItem(companyId: string, id: string) {

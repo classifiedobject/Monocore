@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { apiFetch, handleApiError } from '../../../lib/api';
 
 type InventoryCapabilities = {
@@ -240,6 +241,11 @@ export default function InventoryPage() {
       <header>
         <h1 className="text-3xl font-bold">Inventory Core</h1>
         <p className="text-sm text-slate-600">Manage items, warehouses, movements and transfers for this tenant.</p>
+        <div className="mt-2">
+          <Link href="/app/inventory/suppliers" className="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100">
+            Manage Suppliers & Brands
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-wrap gap-2">

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
@@ -95,5 +95,105 @@ export class InventoryController {
   @RequirePermissions('module:inventory-core.movement.read')
   stockBalance(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
     return this.inventory.stockBalance(req.companyId, query);
+  }
+
+  @Get('suppliers')
+  @RequirePermissions('module:inventory-core.suppliers.read')
+  listSuppliers(@Req() req: Request & { companyId: string }) {
+    return this.inventory.listSuppliers(req.companyId);
+  }
+
+  @Post('suppliers')
+  @RequirePermissions('module:inventory-core.suppliers.manage')
+  createSupplier(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.createSupplier(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('suppliers/:id')
+  @RequirePermissions('module:inventory-core.suppliers.manage')
+  updateSupplier(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.updateSupplier(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('suppliers/:id/activate')
+  @RequirePermissions('module:inventory-core.suppliers.manage')
+  activateSupplier(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.activateSupplier(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('suppliers/:id/deactivate')
+  @RequirePermissions('module:inventory-core.suppliers.manage')
+  deactivateSupplier(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deactivateSupplier(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('suppliers/:id')
+  @RequirePermissions('module:inventory-core.suppliers.manage')
+  deleteSupplier(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deleteSupplier(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('brands')
+  @RequirePermissions('module:inventory-core.brands.read')
+  listBrands(@Req() req: Request & { companyId: string }) {
+    return this.inventory.listBrands(req.companyId);
+  }
+
+  @Post('brands')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  createBrand(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.createBrand(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('brands/:id')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  updateBrand(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.updateBrand(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('brands/:id/activate')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  activateBrand(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.activateBrand(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('brands/:id/deactivate')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  deactivateBrand(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deactivateBrand(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('brands/:id')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  deleteBrand(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deleteBrand(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('brands/:id/link-supplier')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  linkBrandSupplier(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.linkBrandSupplier(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('brands/:id/unlink-supplier')
+  @RequirePermissions('module:inventory-core.brands.manage')
+  unlinkBrandSupplier(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.unlinkBrandSupplier(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
   }
 }
