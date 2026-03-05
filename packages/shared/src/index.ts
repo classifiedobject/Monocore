@@ -46,7 +46,7 @@ export const companyDepartmentSchema = z.object({
 export const companyTitleSchema = z.object({
   departmentId: z.string().uuid(),
   name: z.string().min(2).max(120),
-  tipWeight: z.coerce.number().positive().max(1000),
+  tipWeight: z.coerce.number().nonnegative().max(1000),
   isTipEligible: z.boolean().default(true),
   departmentAggregate: z.boolean().default(false),
   isActive: z.boolean().optional()
