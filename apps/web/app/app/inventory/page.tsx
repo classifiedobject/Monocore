@@ -242,6 +242,9 @@ export default function InventoryPage() {
         <h1 className="text-3xl font-bold">Inventory Core</h1>
         <p className="text-sm text-slate-600">Manage items, warehouses, movements and transfers for this tenant.</p>
         <div className="mt-2">
+          <Link href="/app/inventory/items" className="mr-2 rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100">
+            Item Master Data
+          </Link>
           <Link href="/app/inventory/suppliers" className="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100">
             Manage Suppliers & Brands
           </Link>

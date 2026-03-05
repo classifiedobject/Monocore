@@ -424,13 +424,39 @@ export const inventoryWarehouseSchema = z.object({
   isActive: z.boolean().optional()
 });
 
-export const inventoryItemSchema = z.object({
+const inventoryItemBaseSchema = z.object({
   name: z.string().min(2).max(160),
   sku: z.string().max(80).nullable().optional(),
-  unit: z.string().min(1).max(20),
+  unit: z.string().min(1).max(20).default('piece'),
+  brandId: z.string().uuid().nullable().optional(),
+  supplierId: z.string().uuid().nullable().optional(),
+  mainStockArea: z.enum(['BAR', 'KITCHEN', 'OTHER']).default('OTHER'),
+  attributeCategory: z.enum(['ALCOHOL', 'SOFT', 'KITCHEN', 'OTHER']).default('OTHER'),
+  subCategory: z.string().max(120).nullable().optional(),
+  baseUom: z.enum(['CL', 'ML', 'GRAM', 'KG', 'PIECE']).default('PIECE'),
+  packageUom: z.enum(['BOTTLE', 'PACK', 'PIECE']).nullable().optional(),
+  packageSizeBase: z.coerce.number().positive().nullable().optional(),
+  purchaseVatRate: z.coerce.number().min(0).max(1).default(0.2),
+  listPriceExVat: z.coerce.number().nonnegative().nullable().optional(),
+  discountRate: z.coerce.number().min(0).max(1).default(0),
+  sortOrder: z.coerce.number().int().min(0).default(1000),
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable().optional(),
   isActive: z.boolean().optional()
 });
+
+function validateInventoryItemPackage(value: { packageUom?: unknown; packageSizeBase?: unknown }, ctx: z.RefinementCtx) {
+  if (value.packageUom && (value.packageSizeBase === null || value.packageSizeBase === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packageSizeBase'],
+      message: 'packageSizeBase is required when packageUom is provided'
+    });
+  }
+}
+
+export const inventoryItemSchema = inventoryItemBaseSchema.superRefine(validateInventoryItemPackage);
+
+export const inventoryItemUpdateSchema = inventoryItemBaseSchema.partial().superRefine(validateInventoryItemPackage);
 
 export const inventoryItemCostSchema = z.object({
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable()

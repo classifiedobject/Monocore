@@ -4,6 +4,7 @@ import {
   inventoryBrandSchema,
   inventoryBrandSupplierLinkSchema,
   inventoryItemSchema,
+  inventoryItemUpdateSchema,
   inventoryItemCostSchema,
   inventoryMovementQuerySchema,
   inventoryMovementSchema,
@@ -47,8 +48,9 @@ export class InventoryService {
     const keys = new Set(membership.roles.flatMap((row) => row.role.permissions.map((perm) => perm.permission.key)));
     return {
       permissions: Array.from(keys),
-      manageItem: keys.has('module:inventory-core.item.manage'),
-      manageItemCost: keys.has('module:inventory-core.item.cost.manage'),
+      manageItem: keys.has('module:inventory-core.items.manage') || keys.has('module:inventory-core.item.manage'),
+      manageItemCost: keys.has('module:inventory-core.items.manage') || keys.has('module:inventory-core.item.cost.manage'),
+      readItems: keys.has('module:inventory-core.items.read') || keys.has('module:inventory-core.movement.read'),
       manageWarehouse: keys.has('module:inventory-core.warehouse.manage'),
       manageMovement: keys.has('module:inventory-core.movement.manage'),
       readMovement: keys.has('module:inventory-core.movement.read'),
@@ -101,20 +103,46 @@ export class InventoryService {
   listItems(companyId: string) {
     return this.prisma.inventoryItem.findMany({
       where: { companyId },
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }]
+      include: { brand: true, supplier: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
     });
   }
 
   async createItem(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
     const body = inventoryItemSchema.parse(payload);
+    const mappedBaseUom = this.unitToBaseUom(body.unit);
+    const finalBaseUom = body.baseUom === 'PIECE' && mappedBaseUom !== 'PIECE' ? mappedBaseUom : body.baseUom;
+    if (body.brandId) await this.requireBrand(companyId, body.brandId);
+    if (body.supplierId) await this.requireSupplier(companyId, body.supplierId);
+    const computedPriceIncVat = this.computePriceIncVat(body.listPriceExVat ?? null, body.discountRate ?? 0, body.purchaseVatRate ?? 0.2);
     const row = await this.prisma.inventoryItem.create({
       data: {
         companyId,
         name: body.name,
         sku: body.sku ?? null,
-        unit: body.unit,
-        isActive: body.isActive ?? true
-      }
+        unit: finalBaseUom.toLowerCase(),
+        brandId: body.brandId ?? null,
+        supplierId: body.supplierId ?? null,
+        mainStockArea: body.mainStockArea ?? 'OTHER',
+        attributeCategory: body.attributeCategory ?? 'OTHER',
+        subCategory: body.subCategory ?? null,
+        baseUom: finalBaseUom,
+        packageUom: body.packageUom ?? null,
+        packageSizeBase: body.packageSizeBase === undefined || body.packageSizeBase === null ? null : new Prisma.Decimal(body.packageSizeBase),
+        purchaseVatRate: new Prisma.Decimal(body.purchaseVatRate ?? 0.2),
+        listPriceExVat: body.listPriceExVat === undefined || body.listPriceExVat === null ? null : new Prisma.Decimal(body.listPriceExVat),
+        discountRate: new Prisma.Decimal(body.discountRate ?? 0),
+        computedPriceIncVat: computedPriceIncVat === null ? null : new Prisma.Decimal(computedPriceIncVat),
+        lastPurchaseUnitCost:
+          body.lastPurchaseUnitCost === undefined || body.lastPurchaseUnitCost === null
+            ? computedPriceIncVat === null
+              ? null
+              : new Prisma.Decimal(computedPriceIncVat)
+            : new Prisma.Decimal(body.lastPurchaseUnitCost),
+        isActive: body.isActive ?? true,
+        sortOrder: body.sortOrder ?? 1000
+      },
+      include: { brand: true, supplier: true }
     });
 
     await this.logCompany(actorUserId, companyId, 'company.inventory.item.create', 'inventory_item', row.id, body, ip, userAgent);
@@ -122,8 +150,18 @@ export class InventoryService {
   }
 
   async updateItem(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
-    const body = inventoryItemSchema.partial().parse(payload);
+    const body = inventoryItemUpdateSchema.parse(payload);
     const existing = await this.requireItem(companyId, id);
+    const baseUomFromUnit = body.unit !== undefined ? this.unitToBaseUom(body.unit) : undefined;
+    const effectiveBaseUom = body.baseUom ?? baseUomFromUnit;
+    const nextBrandId = body.brandId === undefined ? existing.brandId : body.brandId;
+    const nextSupplierId = body.supplierId === undefined ? existing.supplierId : body.supplierId;
+    const nextListPrice = body.listPriceExVat === undefined ? this.toNumberOrNull(existing.listPriceExVat) : body.listPriceExVat;
+    const nextDiscount = body.discountRate === undefined ? Number(existing.discountRate) : body.discountRate;
+    const nextVat = body.purchaseVatRate === undefined ? Number(existing.purchaseVatRate) : body.purchaseVatRate;
+    if (nextBrandId) await this.requireBrand(companyId, nextBrandId);
+    if (nextSupplierId) await this.requireSupplier(companyId, nextSupplierId);
+    const computedPriceIncVat = this.computePriceIncVat(nextListPrice, nextDiscount, nextVat);
 
     const row = await this.prisma.inventoryItem.update({
       where: { id: existing.id },
@@ -131,8 +169,29 @@ export class InventoryService {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.sku !== undefined ? { sku: body.sku } : {}),
         ...(body.unit !== undefined ? { unit: body.unit } : {}),
-        ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
-      }
+        ...(body.brandId !== undefined ? { brandId: body.brandId } : {}),
+        ...(body.supplierId !== undefined ? { supplierId: body.supplierId } : {}),
+        ...(body.mainStockArea !== undefined ? { mainStockArea: body.mainStockArea } : {}),
+        ...(body.attributeCategory !== undefined ? { attributeCategory: body.attributeCategory } : {}),
+        ...(body.subCategory !== undefined ? { subCategory: body.subCategory } : {}),
+        ...(effectiveBaseUom !== undefined ? { baseUom: effectiveBaseUom, unit: effectiveBaseUom.toLowerCase() } : {}),
+        ...(body.packageUom !== undefined ? { packageUom: body.packageUom } : {}),
+        ...(body.packageSizeBase !== undefined
+          ? { packageSizeBase: body.packageSizeBase === null ? null : new Prisma.Decimal(body.packageSizeBase) }
+          : {}),
+        ...(body.purchaseVatRate !== undefined ? { purchaseVatRate: new Prisma.Decimal(body.purchaseVatRate) } : {}),
+        ...(body.listPriceExVat !== undefined
+          ? { listPriceExVat: body.listPriceExVat === null ? null : new Prisma.Decimal(body.listPriceExVat) }
+          : {}),
+        ...(body.discountRate !== undefined ? { discountRate: new Prisma.Decimal(body.discountRate) } : {}),
+        computedPriceIncVat: computedPriceIncVat === null ? null : new Prisma.Decimal(computedPriceIncVat),
+        ...(body.lastPurchaseUnitCost !== undefined
+          ? { lastPurchaseUnitCost: body.lastPurchaseUnitCost === null ? null : new Prisma.Decimal(body.lastPurchaseUnitCost) }
+          : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {})
+      },
+      include: { brand: true, supplier: true }
     });
 
     await this.logCompany(actorUserId, companyId, 'company.inventory.item.update', 'inventory_item', row.id, body, ip, userAgent);
@@ -162,6 +221,14 @@ export class InventoryService {
     );
 
     return row;
+  }
+
+  async activateItem(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setItemActive(actorUserId, companyId, id, true, ip, userAgent);
+  }
+
+  async deactivateItem(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setItemActive(actorUserId, companyId, id, false, ip, userAgent);
   }
 
   listSuppliers(companyId: string) {
@@ -700,6 +767,74 @@ export class InventoryService {
       );
       throw error;
     }
+  }
+
+  private async setItemActive(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    isActive: boolean,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const existing = await this.requireItem(companyId, id);
+    try {
+      const row = await this.prisma.inventoryItem.update({
+        where: { id: existing.id },
+        data: { isActive },
+        include: { brand: true, supplier: true }
+      });
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        isActive ? 'company.inventory.item.activate' : 'company.inventory.item.deactivate',
+        'inventory_item',
+        row.id,
+        { status: 'success', isActive },
+        ip,
+        userAgent
+      );
+      return row;
+    } catch (error) {
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        isActive ? 'company.inventory.item.activate' : 'company.inventory.item.deactivate',
+        'inventory_item',
+        existing.id,
+        { status: 'failed', reason: error instanceof Error ? error.message : 'unknown', isActive },
+        ip,
+        userAgent
+      );
+      throw error;
+    }
+  }
+
+  private toNumberOrNull(value: Prisma.Decimal | number | null | undefined) {
+    if (value === null || value === undefined) return null;
+    return Number(value);
+  }
+
+  private computePriceIncVat(
+    listPriceExVat: number | null | undefined,
+    discountRate: number | null | undefined,
+    purchaseVatRate: number | null | undefined
+  ) {
+    if (listPriceExVat === null || listPriceExVat === undefined) return null;
+    const discount = discountRate ?? 0;
+    const vat = purchaseVatRate ?? 0.2;
+    const netExVat = listPriceExVat * (1 - discount);
+    const netIncVat = netExVat * (1 + vat);
+    return Number(netIncVat.toFixed(4));
+  }
+
+  private unitToBaseUom(unit: string | null | undefined): 'CL' | 'ML' | 'GRAM' | 'KG' | 'PIECE' {
+    const normalized = (unit ?? '').trim().toLowerCase();
+    if (normalized === 'cl') return 'CL';
+    if (normalized === 'ml') return 'ML';
+    if (normalized === 'gram' || normalized === 'gr') return 'GRAM';
+    if (normalized === 'kg') return 'KG';
+    return 'PIECE';
   }
 
   private async requireItem(companyId: string, id: string) {

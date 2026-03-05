@@ -42,19 +42,19 @@ export class InventoryController {
   }
 
   @Get('items')
-  @RequirePermissions('module:inventory-core.movement.read')
+  @RequirePermissions('module:inventory-core.items.read')
   listItems(@Req() req: Request & { companyId: string }) {
     return this.inventory.listItems(req.companyId);
   }
 
   @Post('items')
-  @RequirePermissions('module:inventory-core.item.manage')
+  @RequirePermissions('module:inventory-core.items.manage')
   createItem(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.inventory.createItem(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Patch('items/:id')
-  @RequirePermissions('module:inventory-core.item.manage')
+  @RequirePermissions('module:inventory-core.items.manage')
   updateItem(
     @Param('id') id: string,
     @Body() body: unknown,
@@ -64,13 +64,25 @@ export class InventoryController {
   }
 
   @Patch('items/:id/cost')
-  @RequirePermissions('module:inventory-core.item.cost.manage')
+  @RequirePermissions('module:inventory-core.items.manage')
   updateItemCost(
     @Param('id') id: string,
     @Body() body: unknown,
     @Req() req: Request & { user: { id: string }; companyId: string }
   ) {
     return this.inventory.updateItemCost(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/:id/activate')
+  @RequirePermissions('module:inventory-core.items.manage')
+  activateItem(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.activateItem(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/:id/deactivate')
+  @RequirePermissions('module:inventory-core.items.manage')
+  deactivateItem(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deactivateItem(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
   @Get('movements')

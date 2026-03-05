@@ -85,6 +85,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     }
     if (installedModuleKeys.includes('inventory-core')) {
       list.push({ href: '/app/inventory', label: 'Inventory' });
+      list.push({ href: '/app/inventory/items', label: 'Inventory Items' });
       list.push({ href: '/app/inventory/suppliers', label: 'Suppliers' });
     }
     if (installedModuleKeys.includes('recipe-core')) {
