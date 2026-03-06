@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { Prisma, type InventoryMovementType } from '@prisma/client';
 import {
   inventoryBrandQuerySchema,
+  inventorySupplierQuerySchema,
   inventoryBrandSchema,
   inventoryBrandSupplierLinkSchema,
   inventoryItemSchema,
@@ -236,10 +237,49 @@ export class InventoryService {
     return this.setItemActive(actorUserId, companyId, id, false, ip, userAgent);
   }
 
-  listSuppliers(companyId: string) {
-    return this.prisma.inventorySupplier.findMany({
-      where: { companyId },
-      orderBy: [{ sortOrder: 'asc' }, { shortName: 'asc' }]
+  async listSuppliers(companyId: string, query: unknown) {
+    const parsed = inventorySupplierQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const rows = await this.prisma.inventorySupplier.findMany({
+      where: {
+        companyId,
+        ...(parsed.filterMissingBrandLink ? { brandLinks: { none: {} } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { shortName: { contains: search, mode: 'insensitive' } },
+                { legalName: { contains: search, mode: 'insensitive' } },
+                { taxOffice: { contains: search, mode: 'insensitive' } },
+                { taxNumber: { contains: search, mode: 'insensitive' } }
+              ]
+            }
+          : {})
+      },
+      include: {
+        brandLinks: {
+          select: { id: true }
+        }
+      }
+    });
+
+    const defaultSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const aMissing = a.brandLinks.length === 0 ? 0 : 1;
+      const bMissing = b.brandLinks.length === 0 ? 0 : 1;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      return a.shortName.localeCompare(b.shortName, 'tr');
+    };
+
+    return rows.sort((a, b) => {
+      if (!parsed.sortBy) return defaultSort(a, b);
+      const direction = parsed.sortDirection === 'desc' ? -1 : 1;
+      if (parsed.sortBy === 'shortName') return direction * a.shortName.localeCompare(b.shortName, 'tr');
+      if (parsed.sortBy === 'legalName') return direction * a.legalName.localeCompare(b.legalName, 'tr');
+      if (parsed.sortBy === 'taxOffice') return direction * (a.taxOffice ?? '').localeCompare(b.taxOffice ?? '', 'tr');
+      if (parsed.sortBy === 'taxNumber') return direction * (a.taxNumber ?? '').localeCompare(b.taxNumber ?? '', 'tr');
+      if (a.isActive === b.isActive) return direction * a.shortName.localeCompare(b.shortName, 'tr');
+      const aValue = a.isActive ? 1 : 0;
+      const bValue = b.isActive ? 1 : 0;
+      return direction * (aValue - bValue);
     });
   }
 
@@ -250,7 +290,10 @@ export class InventoryService {
         companyId,
         shortName: body.shortName,
         legalName: body.legalName,
-        address: body.address ?? null,
+        address: body.addressLine ?? body.address ?? null,
+        addressLine: body.addressLine ?? body.address ?? null,
+        city: body.city ?? null,
+        district: body.district ?? null,
         taxOffice: body.taxOffice ?? null,
         taxNumber: body.taxNumber ?? null,
         contactName: body.contactName ?? null,
@@ -272,7 +315,10 @@ export class InventoryService {
       data: {
         ...(body.shortName !== undefined ? { shortName: body.shortName } : {}),
         ...(body.legalName !== undefined ? { legalName: body.legalName } : {}),
-        ...(body.address !== undefined ? { address: body.address } : {}),
+        ...(body.address !== undefined ? { address: body.address, addressLine: body.address } : {}),
+        ...(body.addressLine !== undefined ? { addressLine: body.addressLine, address: body.addressLine } : {}),
+        ...(body.city !== undefined ? { city: body.city } : {}),
+        ...(body.district !== undefined ? { district: body.district } : {}),
         ...(body.taxOffice !== undefined ? { taxOffice: body.taxOffice } : {}),
         ...(body.taxNumber !== undefined ? { taxNumber: body.taxNumber } : {}),
         ...(body.contactName !== undefined ? { contactName: body.contactName } : {}),
