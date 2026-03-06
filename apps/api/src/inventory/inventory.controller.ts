@@ -155,8 +155,8 @@ export class InventoryController {
 
   @Get('suppliers')
   @RequirePermissions('module:inventory-core.suppliers.read')
-  listSuppliers(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listSuppliers(req.companyId);
+  listSuppliers(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listSuppliers(req.companyId, query);
   }
 
   @Post('suppliers')
