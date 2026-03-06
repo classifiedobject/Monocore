@@ -395,7 +395,16 @@ export class InventoryService {
       },
       include: {
         supplierLinks: {
-          include: { supplier: true },
+          include: {
+            supplier: {
+              select: {
+                id: true,
+                shortName: true,
+                legalName: true,
+                isActive: true
+              }
+            }
+          },
           orderBy: [{ supplier: { shortName: 'asc' } }, { supplier: { legalName: 'asc' } }]
         }
       }

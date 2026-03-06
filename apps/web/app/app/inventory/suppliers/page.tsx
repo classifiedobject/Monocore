@@ -552,9 +552,13 @@ export default function InventorySuppliersPage() {
                   <tr key={row.id} className={`border-t ${missingBrandLink ? 'bg-amber-50' : ''}`}>
                     <td className="px-3 py-2">
                       <div className="font-medium">{row.shortName}</div>
-                      {missingBrandLink ? <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">Marka Linki Eksik</span> : null}
                     </td>
-                    <td className="px-3 py-2">{row.legalName}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span>{row.legalName}</span>
+                        {missingBrandLink ? <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">Marka Linki Eksik</span> : null}
+                      </div>
+                    </td>
                     <td className="px-3 py-2">{row.taxOffice ?? '-'}</td>
                     <td className="px-3 py-2">{row.taxNumber ?? '-'}</td>
                     <td className="px-3 py-2">{row.isActive ? 'Active' : 'Inactive'}</td>
