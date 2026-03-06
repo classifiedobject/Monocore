@@ -9,6 +9,8 @@ import {
   inventoryMovementQuerySchema,
   inventoryMovementSchema,
   inventoryStockBalanceQuerySchema,
+  inventoryStockCountLineUpsertSchema,
+  inventoryStockCountSessionSchema,
   inventorySupplierSchema,
   inventoryTransferSchema,
   inventoryWarehouseSchema
@@ -54,6 +56,8 @@ export class InventoryService {
       manageWarehouse: keys.has('module:inventory-core.warehouse.manage'),
       manageMovement: keys.has('module:inventory-core.movement.manage'),
       readMovement: keys.has('module:inventory-core.movement.read'),
+      manageStockCount: keys.has('module:inventory-core.stock-count.manage'),
+      readStockCount: keys.has('module:inventory-core.stock-count.read'),
       manageSuppliers: keys.has('module:inventory-core.suppliers.manage'),
       readSuppliers: keys.has('module:inventory-core.suppliers.read'),
       manageBrands: keys.has('module:inventory-core.brands.manage'),
@@ -639,6 +643,260 @@ export class InventoryService {
     return Array.from(map.values()).sort((a, b) => a.itemName.localeCompare(b.itemName) || a.warehouseName.localeCompare(b.warehouseName));
   }
 
+  listStockCounts(companyId: string) {
+    return this.prisma.inventoryStockCountSession.findMany({
+      where: { companyId },
+      include: { warehouse: true, createdByUser: true, _count: { select: { lines: true } } },
+      orderBy: [{ countDate: 'desc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async createStockCountSession(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryStockCountSessionSchema.parse(payload);
+    const warehouse = await this.requireWarehouse(companyId, body.warehouseId);
+    if (!warehouse.isActive) {
+      throw new BadRequestException('Warehouse is inactive');
+    }
+
+    try {
+      const row = await this.prisma.inventoryStockCountSession.create({
+        data: {
+          companyId,
+          warehouseId: body.warehouseId,
+          countDate: this.parseDateValue(body.countDate, false),
+          notes: body.notes ?? null,
+          createdByUserId: actorUserId
+        },
+        include: { warehouse: true, createdByUser: true, lines: { include: { item: true } } }
+      });
+
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        'company.inventory.stock_count.create',
+        'inventory_stock_count_session',
+        row.id,
+        body,
+        ip,
+        userAgent
+      );
+      return row;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Aynı depo ve tarih için zaten bir sayım oturumu var.');
+      }
+      throw error;
+    }
+  }
+
+  async getStockCountSession(companyId: string, id: string) {
+    const row = await this.prisma.inventoryStockCountSession.findUnique({
+      where: { id },
+      include: {
+        warehouse: true,
+        createdByUser: true,
+        lines: {
+          include: { item: true },
+          orderBy: { item: { name: 'asc' } }
+        }
+      }
+    });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Stock count session not found');
+    }
+    return row;
+  }
+
+  async upsertStockCountLine(
+    actorUserId: string,
+    companyId: string,
+    sessionId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = inventoryStockCountLineUpsertSchema.parse(payload);
+    const session = await this.requireStockCountSession(companyId, sessionId);
+    if (session.status !== 'DRAFT') {
+      throw new ConflictException('Posted sessions cannot be edited');
+    }
+
+    const item = await this.requireItem(companyId, body.itemId);
+
+    const packageSize = item.packageSizeBase ? Number(item.packageSizeBase) : null;
+    const isPackageItem = Boolean(item.packageUom && packageSize && packageSize > 0);
+
+    let countedQtyBase = body.countedQtyBase ?? null;
+    let closedPackageQty = body.closedPackageQty ?? null;
+    let openPackageCount = body.openPackageCount ?? null;
+    let openQtyBase = body.openQtyBase ?? null;
+
+    if (isPackageItem) {
+      const closed = closedPackageQty ?? 0;
+      const openCount = openPackageCount ?? 0;
+      const openQty = openQtyBase ?? 0;
+      if (openQty > openCount * (packageSize as number)) {
+        throw new ConflictException('Açık toplam miktar, açık paket adedinin kapasitesinden büyük olamaz.');
+      }
+      countedQtyBase = closed * (packageSize as number) + openQty;
+      closedPackageQty = closed;
+      openPackageCount = openCount;
+      openQtyBase = openQty;
+    } else {
+      if (countedQtyBase === null || countedQtyBase === undefined) {
+        throw new BadRequestException('countedQtyBase is required for non-package items');
+      }
+      if (countedQtyBase < 0) {
+        throw new BadRequestException('countedQtyBase cannot be negative');
+      }
+      closedPackageQty = null;
+      openPackageCount = null;
+      openQtyBase = null;
+    }
+
+    const row = await this.prisma.inventoryStockCountLine.upsert({
+      where: {
+        companyId_sessionId_itemId: {
+          companyId,
+          sessionId: session.id,
+          itemId: item.id
+        }
+      },
+      create: {
+        companyId,
+        sessionId: session.id,
+        itemId: item.id,
+        countedQtyBase: new Prisma.Decimal(countedQtyBase ?? 0),
+        closedPackageQty,
+        openPackageCount,
+        openQtyBase: openQtyBase === null ? null : new Prisma.Decimal(openQtyBase)
+      },
+      update: {
+        countedQtyBase: new Prisma.Decimal(countedQtyBase ?? 0),
+        closedPackageQty,
+        openPackageCount,
+        openQtyBase: openQtyBase === null ? null : new Prisma.Decimal(openQtyBase)
+      },
+      include: { item: true }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.stock_count.line.upsert',
+      'inventory_stock_count_line',
+      row.id,
+      {
+        sessionId: session.id,
+        itemId: item.id,
+        countedQtyBase: Number(row.countedQtyBase),
+        closedPackageQty: row.closedPackageQty,
+        openPackageCount: row.openPackageCount,
+        openQtyBase: row.openQtyBase ? Number(row.openQtyBase) : null
+      },
+      ip,
+      userAgent
+    );
+
+    return row;
+  }
+
+  async deleteStockCountLine(
+    actorUserId: string,
+    companyId: string,
+    sessionId: string,
+    lineId: string,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const session = await this.requireStockCountSession(companyId, sessionId);
+    if (session.status !== 'DRAFT') {
+      throw new ConflictException('Posted sessions cannot be edited');
+    }
+
+    const line = await this.prisma.inventoryStockCountLine.findUnique({ where: { id: lineId } });
+    if (!line || line.companyId !== companyId || line.sessionId !== session.id) {
+      throw new NotFoundException('Stock count line not found');
+    }
+
+    await this.prisma.inventoryStockCountLine.delete({ where: { id: line.id } });
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.stock_count.line.delete',
+      'inventory_stock_count_line',
+      line.id,
+      { sessionId: session.id, itemId: line.itemId },
+      ip,
+      userAgent
+    );
+    return { ok: true };
+  }
+
+  async postStockCountSession(actorUserId: string, companyId: string, sessionId: string, ip?: string, userAgent?: string) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const session = await tx.inventoryStockCountSession.findUnique({
+        where: { id: sessionId },
+        include: { lines: true, warehouse: true }
+      });
+
+      if (!session || session.companyId !== companyId) {
+        throw new NotFoundException('Stock count session not found');
+      }
+      if (session.status === 'POSTED') {
+        throw new ConflictException('Stock count session already posted');
+      }
+
+      const movements: Array<{ id: string; itemId: string; delta: number }> = [];
+      for (const line of session.lines) {
+        const current = await this.currentStockTx(tx, companyId, line.itemId, session.warehouseId);
+        const counted = Number(line.countedQtyBase);
+        const delta = Number((counted - current).toFixed(4));
+        if (Math.abs(delta) < 0.0001) continue;
+
+        const movement = await tx.inventoryStockMovement.create({
+          data: {
+            companyId,
+            itemId: line.itemId,
+            warehouseId: session.warehouseId,
+            type: 'ADJUSTMENT',
+            quantity: new Prisma.Decimal(delta),
+            reference: `COUNT-${session.id}`,
+            relatedDocumentType: 'stock_count',
+            relatedDocumentId: session.id,
+            createdByUserId: actorUserId
+          }
+        });
+        movements.push({ id: movement.id, itemId: line.itemId, delta });
+      }
+
+      const posted = await tx.inventoryStockCountSession.update({
+        where: { id: session.id },
+        data: { status: 'POSTED' },
+        include: { warehouse: true, lines: true }
+      });
+
+      return { posted, movements };
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.stock_count.post',
+      'inventory_stock_count_session',
+      result.posted.id,
+      {
+        warehouseId: result.posted.warehouseId,
+        lineCount: result.posted.lines.length,
+        movementCount: result.movements.length
+      },
+      ip,
+      userAgent
+    );
+
+    return result;
+  }
+
   private toStockDelta(type: InventoryMovementType, quantity: number) {
     if (type === 'IN' || type === 'TRANSFER_IN') return quantity;
     if (type === 'OUT' || type === 'TRANSFER_OUT') return -quantity;
@@ -663,6 +921,31 @@ export class InventoryService {
       total += this.toStockDelta(row.type, Number(row.quantity));
     }
     return total;
+  }
+
+  private async currentStockTx(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    itemId: string,
+    warehouseId: string
+  ) {
+    const rows = await tx.inventoryStockMovement.findMany({
+      where: { companyId, itemId, warehouseId },
+      select: { type: true, quantity: true }
+    });
+    let total = 0;
+    for (const row of rows) {
+      total += this.toStockDelta(row.type, Number(row.quantity));
+    }
+    return total;
+  }
+
+  private async requireStockCountSession(companyId: string, id: string) {
+    const row = await this.prisma.inventoryStockCountSession.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Stock count session not found');
+    }
+    return row;
   }
 
   private async requireWarehouse(companyId: string, id: string) {

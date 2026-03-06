@@ -149,6 +149,11 @@ enum InventoryPackageUom {
   PIECE
 }
 
+enum InventoryStockCountSessionStatus {
+  DRAFT
+  POSTED
+}
+
 enum SalesOrderStatus {
   DRAFT
   POSTED
@@ -227,6 +232,7 @@ model User {
   taskInstancesAssigned TaskInstance[] @relation("task_instance_assignee_user")
   taskCommentsAuthored TaskComment[] @relation("task_comment_author")
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
+  inventoryStockCountsCreated InventoryStockCountSession[] @relation("inventory_stock_count_creator")
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
   reservationsCreated Reservation[] @relation("reservation_creator")
   tipAdvancesApproved TipAdvance[] @relation("tip_advance_approver")
@@ -344,6 +350,8 @@ model Company {
   inventoryBrands InventoryBrand[]
   inventoryBrandSuppliers InventoryBrandSupplier[]
   inventoryStockMovements InventoryStockMovement[]
+  inventoryStockCountSessions InventoryStockCountSession[]
+  inventoryStockCountLines InventoryStockCountLine[]
   salesProducts   SalesProduct[]
   recipes         Recipe[]
   recipeLines     RecipeLine[]
@@ -1184,6 +1192,7 @@ model InventoryWarehouse {
   updatedAt DateTime @updatedAt
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   movements InventoryStockMovement[]
+  stockCountSessions InventoryStockCountSession[]
   salesOrders SalesOrder[]
 
   @@unique([companyId, name])
@@ -1217,6 +1226,7 @@ model InventoryItem {
   brand               InventoryBrand? @relation(fields: [brandId], references: [id], onDelete: SetNull)
   supplier            InventorySupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   movements           InventoryStockMovement[]
+  stockCountLines     InventoryStockCountLine[]
   recipeLines         RecipeLine[]
 
   @@unique([companyId, sku])
@@ -1301,6 +1311,45 @@ model InventoryStockMovement {
   @@index([companyId, warehouseId])
   @@index([companyId, itemId, warehouseId])
   @@index([companyId, createdAt])
+}
+
+model InventoryStockCountSession {
+  id              String   @id @default(uuid())
+  companyId       String
+  warehouseId     String
+  countDate       DateTime
+  status          InventoryStockCountSessionStatus @default(DRAFT)
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  company         Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  warehouse       InventoryWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdByUser   User @relation("inventory_stock_count_creator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  lines           InventoryStockCountLine[]
+
+  @@unique([companyId, warehouseId, countDate])
+  @@index([companyId, status, countDate])
+}
+
+model InventoryStockCountLine {
+  id               String   @id @default(uuid())
+  companyId        String
+  sessionId        String
+  itemId           String
+  countedQtyBase   Decimal  @db.Decimal(14, 4)
+  closedPackageQty Int?
+  openPackageCount Int?
+  openQtyBase      Decimal? @db.Decimal(14, 4)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  session          InventoryStockCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  item             InventoryItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, sessionId, itemId])
+  @@index([companyId, sessionId])
+  @@index([companyId, itemId])
 }
 
 model SalesProduct {

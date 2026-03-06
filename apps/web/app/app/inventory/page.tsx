@@ -245,6 +245,9 @@ export default function InventoryPage() {
           <Link href="/app/inventory/items" className="mr-2 rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100">
             Item Master Data
           </Link>
+          <Link href="/app/inventory/stock-counts" className="mr-2 rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100">
+            Stock Count Sessions
+          </Link>
           <Link href="/app/inventory/suppliers" className="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100">
             Manage Suppliers & Brands
           </Link>

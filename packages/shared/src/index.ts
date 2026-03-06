@@ -492,6 +492,20 @@ export const inventoryStockBalanceQuerySchema = z.object({
   warehouseId: z.string().uuid().optional()
 });
 
+export const inventoryStockCountSessionSchema = z.object({
+  warehouseId: z.string().uuid(),
+  countDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  notes: z.string().max(1000).nullable().optional()
+});
+
+export const inventoryStockCountLineUpsertSchema = z.object({
+  itemId: z.string().uuid(),
+  countedQtyBase: z.coerce.number().min(0).nullable().optional(),
+  closedPackageQty: z.coerce.number().int().min(0).nullable().optional(),
+  openPackageCount: z.coerce.number().int().min(0).nullable().optional(),
+  openQtyBase: z.coerce.number().min(0).nullable().optional()
+});
+
 export const inventorySupplierSchema = z.object({
   shortName: z.string().min(1).max(140),
   legalName: z.string().min(1).max(240),
