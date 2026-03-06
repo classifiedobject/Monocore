@@ -526,6 +526,20 @@ export const inventoryBrandSchema = z.object({
   sortOrder: z.coerce.number().int().min(0).optional()
 });
 
+export const inventoryBrandQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  sortBy: z.enum(['name', 'status', 'supplier']).optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  filterMissingSupplier: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      return value === 'true';
+    })
+});
+
 export const inventoryBrandSupplierLinkSchema = z.object({
   supplierId: z.string().uuid()
 });

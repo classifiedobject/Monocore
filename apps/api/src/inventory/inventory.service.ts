@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type InventoryMovementType } from '@prisma/client';
 import {
+  inventoryBrandQuerySchema,
   inventoryBrandSchema,
   inventoryBrandSupplierLinkSchema,
   inventoryItemSchema,
@@ -318,17 +319,75 @@ export class InventoryService {
     }
   }
 
-  listBrands(companyId: string) {
-    return this.prisma.inventoryBrand.findMany({
-      where: { companyId },
+  async listBrands(companyId: string, query: unknown) {
+    const parsed = inventoryBrandQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const rows = await this.prisma.inventoryBrand.findMany({
+      where: {
+        companyId,
+        ...(parsed.filterMissingSupplier ? { supplierLinks: { none: {} } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { shortName: { contains: search, mode: 'insensitive' } },
+                {
+                  supplierLinks: {
+                    some: {
+                      supplier: {
+                        OR: [
+                          { shortName: { contains: search, mode: 'insensitive' } },
+                          { legalName: { contains: search, mode: 'insensitive' } }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
+      },
       include: {
         supplierLinks: {
           include: { supplier: true },
-          orderBy: { createdAt: 'asc' }
+          orderBy: [{ supplier: { shortName: 'asc' } }, { supplier: { legalName: 'asc' } }]
         }
-      },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+      }
     });
+
+    const linkedSupplierName = (row: (typeof rows)[number]) =>
+      row.supplierLinks[0]?.supplier?.shortName?.trim() ||
+      row.supplierLinks[0]?.supplier?.legalName?.trim() ||
+      '';
+
+    const defaultSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const aMissing = a.supplierLinks.length === 0 ? 0 : 1;
+      const bMissing = b.supplierLinks.length === 0 ? 0 : 1;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      return a.name.localeCompare(b.name, 'tr');
+    };
+
+    const sorted = rows.sort((a, b) => {
+      const direction = parsed.sortDirection === 'desc' ? -1 : 1;
+      if (!parsed.sortBy) return defaultSort(a, b);
+      if (parsed.sortBy === 'name') {
+        return direction * a.name.localeCompare(b.name, 'tr');
+      }
+      if (parsed.sortBy === 'status') {
+        if (a.isActive === b.isActive) return direction * a.name.localeCompare(b.name, 'tr');
+        const aValue = a.isActive ? 1 : 0;
+        const bValue = b.isActive ? 1 : 0;
+        return direction * (aValue - bValue);
+      }
+
+      const aSupplier = linkedSupplierName(a);
+      const bSupplier = linkedSupplierName(b);
+      const supplierCmp = aSupplier.localeCompare(bSupplier, 'tr');
+      if (supplierCmp !== 0) return direction * supplierCmp;
+      return direction * a.name.localeCompare(b.name, 'tr');
+    });
+
+    return sorted;
   }
 
   async createBrand(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
