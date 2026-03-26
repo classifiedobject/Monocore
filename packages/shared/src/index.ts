@@ -510,8 +510,16 @@ export const inventorySupplierSchema = z.object({
   shortName: z.string().min(1).max(140),
   legalName: z.string().min(1).max(240),
   address: z.string().max(400).nullable().optional(),
+  addressLine: z.string().max(400).nullable().optional(),
+  city: z.string().max(120).nullable().optional(),
+  district: z.string().max(120).nullable().optional(),
   taxOffice: z.string().max(120).nullable().optional(),
-  taxNumber: z.string().max(80).nullable().optional(),
+  taxNumber: z
+    .string()
+    .max(80)
+    .regex(/^\d*$/, 'taxNumber must contain only digits')
+    .nullable()
+    .optional(),
   contactName: z.string().max(140).nullable().optional(),
   contactPhone: z.string().max(80).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
@@ -519,11 +527,39 @@ export const inventorySupplierSchema = z.object({
   sortOrder: z.coerce.number().int().min(0).optional()
 });
 
+export const inventorySupplierQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  sortBy: z.enum(['shortName', 'legalName', 'taxOffice', 'taxNumber', 'status']).optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  filterMissingBrandLink: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      return value === 'true';
+    })
+});
+
 export const inventoryBrandSchema = z.object({
   name: z.string().min(1).max(160),
   shortName: z.string().max(80).nullable().optional(),
   isActive: z.boolean().optional(),
   sortOrder: z.coerce.number().int().min(0).optional()
+});
+
+export const inventoryBrandQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  sortBy: z.enum(['name', 'status', 'supplier']).optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  filterMissingSupplier: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      return value === 'true';
+    })
 });
 
 export const inventoryBrandSupplierLinkSchema = z.object({

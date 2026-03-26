@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type InventoryMovementType } from '@prisma/client';
 import {
+  inventoryBrandQuerySchema,
+  inventorySupplierQuerySchema,
   inventoryBrandSchema,
   inventoryBrandSupplierLinkSchema,
   inventoryItemSchema,
@@ -235,10 +237,49 @@ export class InventoryService {
     return this.setItemActive(actorUserId, companyId, id, false, ip, userAgent);
   }
 
-  listSuppliers(companyId: string) {
-    return this.prisma.inventorySupplier.findMany({
-      where: { companyId },
-      orderBy: [{ sortOrder: 'asc' }, { shortName: 'asc' }]
+  async listSuppliers(companyId: string, query: unknown) {
+    const parsed = inventorySupplierQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const rows = await this.prisma.inventorySupplier.findMany({
+      where: {
+        companyId,
+        ...(parsed.filterMissingBrandLink ? { brandLinks: { none: {} } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { shortName: { contains: search, mode: 'insensitive' } },
+                { legalName: { contains: search, mode: 'insensitive' } },
+                { taxOffice: { contains: search, mode: 'insensitive' } },
+                { taxNumber: { contains: search, mode: 'insensitive' } }
+              ]
+            }
+          : {})
+      },
+      include: {
+        brandLinks: {
+          select: { id: true }
+        }
+      }
+    });
+
+    const defaultSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const aMissing = a.brandLinks.length === 0 ? 0 : 1;
+      const bMissing = b.brandLinks.length === 0 ? 0 : 1;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      return a.shortName.localeCompare(b.shortName, 'tr');
+    };
+
+    return rows.sort((a, b) => {
+      if (!parsed.sortBy) return defaultSort(a, b);
+      const direction = parsed.sortDirection === 'desc' ? -1 : 1;
+      if (parsed.sortBy === 'shortName') return direction * a.shortName.localeCompare(b.shortName, 'tr');
+      if (parsed.sortBy === 'legalName') return direction * a.legalName.localeCompare(b.legalName, 'tr');
+      if (parsed.sortBy === 'taxOffice') return direction * (a.taxOffice ?? '').localeCompare(b.taxOffice ?? '', 'tr');
+      if (parsed.sortBy === 'taxNumber') return direction * (a.taxNumber ?? '').localeCompare(b.taxNumber ?? '', 'tr');
+      if (a.isActive === b.isActive) return direction * a.shortName.localeCompare(b.shortName, 'tr');
+      const aValue = a.isActive ? 1 : 0;
+      const bValue = b.isActive ? 1 : 0;
+      return direction * (aValue - bValue);
     });
   }
 
@@ -249,7 +290,10 @@ export class InventoryService {
         companyId,
         shortName: body.shortName,
         legalName: body.legalName,
-        address: body.address ?? null,
+        address: body.addressLine ?? body.address ?? null,
+        addressLine: body.addressLine ?? body.address ?? null,
+        city: body.city ?? null,
+        district: body.district ?? null,
         taxOffice: body.taxOffice ?? null,
         taxNumber: body.taxNumber ?? null,
         contactName: body.contactName ?? null,
@@ -271,7 +315,10 @@ export class InventoryService {
       data: {
         ...(body.shortName !== undefined ? { shortName: body.shortName } : {}),
         ...(body.legalName !== undefined ? { legalName: body.legalName } : {}),
-        ...(body.address !== undefined ? { address: body.address } : {}),
+        ...(body.address !== undefined ? { address: body.address, addressLine: body.address } : {}),
+        ...(body.addressLine !== undefined ? { addressLine: body.addressLine, address: body.addressLine } : {}),
+        ...(body.city !== undefined ? { city: body.city } : {}),
+        ...(body.district !== undefined ? { district: body.district } : {}),
         ...(body.taxOffice !== undefined ? { taxOffice: body.taxOffice } : {}),
         ...(body.taxNumber !== undefined ? { taxNumber: body.taxNumber } : {}),
         ...(body.contactName !== undefined ? { contactName: body.contactName } : {}),
@@ -318,17 +365,75 @@ export class InventoryService {
     }
   }
 
-  listBrands(companyId: string) {
-    return this.prisma.inventoryBrand.findMany({
-      where: { companyId },
+  async listBrands(companyId: string, query: unknown) {
+    const parsed = inventoryBrandQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const rows = await this.prisma.inventoryBrand.findMany({
+      where: {
+        companyId,
+        ...(parsed.filterMissingSupplier ? { supplierLinks: { none: {} } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { shortName: { contains: search, mode: 'insensitive' } },
+                {
+                  supplierLinks: {
+                    some: {
+                      supplier: {
+                        OR: [
+                          { shortName: { contains: search, mode: 'insensitive' } },
+                          { legalName: { contains: search, mode: 'insensitive' } }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
+      },
       include: {
         supplierLinks: {
           include: { supplier: true },
-          orderBy: { createdAt: 'asc' }
+          orderBy: [{ supplier: { shortName: 'asc' } }, { supplier: { legalName: 'asc' } }]
         }
-      },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+      }
     });
+
+    const linkedSupplierName = (row: (typeof rows)[number]) =>
+      row.supplierLinks[0]?.supplier?.shortName?.trim() ||
+      row.supplierLinks[0]?.supplier?.legalName?.trim() ||
+      '';
+
+    const defaultSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const aMissing = a.supplierLinks.length === 0 ? 0 : 1;
+      const bMissing = b.supplierLinks.length === 0 ? 0 : 1;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      return a.name.localeCompare(b.name, 'tr');
+    };
+
+    const sorted = rows.sort((a, b) => {
+      const direction = parsed.sortDirection === 'desc' ? -1 : 1;
+      if (!parsed.sortBy) return defaultSort(a, b);
+      if (parsed.sortBy === 'name') {
+        return direction * a.name.localeCompare(b.name, 'tr');
+      }
+      if (parsed.sortBy === 'status') {
+        if (a.isActive === b.isActive) return direction * a.name.localeCompare(b.name, 'tr');
+        const aValue = a.isActive ? 1 : 0;
+        const bValue = b.isActive ? 1 : 0;
+        return direction * (aValue - bValue);
+      }
+
+      const aSupplier = linkedSupplierName(a);
+      const bSupplier = linkedSupplierName(b);
+      const supplierCmp = aSupplier.localeCompare(bSupplier, 'tr');
+      if (supplierCmp !== 0) return direction * supplierCmp;
+      return direction * a.name.localeCompare(b.name, 'tr');
+    });
+
+    return sorted;
   }
 
   async createBrand(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {

@@ -1242,6 +1242,9 @@ model InventorySupplier {
   shortName    String
   legalName    String
   address      String?
+  addressLine  String?
+  city         String?
+  district     String?
   taxOffice    String?
   taxNumber    String?
   contactName  String?

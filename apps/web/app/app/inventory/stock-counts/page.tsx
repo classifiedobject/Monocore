@@ -104,6 +104,7 @@ export default function InventoryStockCountsPage() {
   }
 
   useEffect(() => {
+<<<<<<< HEAD
     const init = async () => {
       const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
         apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
@@ -119,6 +120,9 @@ export default function InventoryStockCountsPage() {
       setLineItemId((current) => current || itemRes[0]?.id || '');
     };
     init().catch(handleApiError);
+=======
+    loadInitial().catch(handleApiError);
+>>>>>>> origin/main
   }, []);
 
   useEffect(() => {
@@ -365,3 +369,7 @@ export default function InventoryStockCountsPage() {
     </section>
   );
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/main
