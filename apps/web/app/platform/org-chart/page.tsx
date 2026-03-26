@@ -48,7 +48,20 @@ export default function OrgChartPage() {
   };
 
   useEffect(() => {
-    load().catch(handleApiError);
+    const init = async () => {
+      const [deps, ts, teamRows, profileRows] = await Promise.all([
+        apiFetch('/platform-api/org/departments'),
+        apiFetch('/platform-api/org/titles'),
+        apiFetch('/platform-api/team'),
+        apiFetch('/platform-api/org/profiles')
+      ]);
+      setDepartments(deps);
+      setTitles(ts);
+      setTeam(teamRows);
+      setProfiles(profileRows);
+      setProfileUserId((current) => current || teamRows[0]?.user?.id || '');
+    };
+    init().catch(handleApiError);
   }, []);
 
   async function addDepartment(e: FormEvent) {
