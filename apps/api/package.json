@@ -11,13 +11,13 @@
     "test": "echo 'api tests placeholder'"
   },
   "dependencies": {
-    "@prisma/client": "6.4.1",
     "@monocore/db": "workspace:*",
     "@monocore/shared": "workspace:*",
     "@nestjs/common": "11.0.11",
     "@nestjs/core": "11.0.11",
     "@nestjs/platform-express": "11.0.11",
     "@nestjs/throttler": "6.4.0",
+    "@prisma/client": "6.4.1",
     "argon2": "0.41.1",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.1",
@@ -26,6 +26,7 @@
     "ioredis": "5.5.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "xlsx": "0.18.5",
     "zod": "3.24.2"
   },
   "devDependencies": {

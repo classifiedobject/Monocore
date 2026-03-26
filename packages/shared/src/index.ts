@@ -427,6 +427,7 @@ export const inventoryWarehouseSchema = z.object({
 const inventoryItemBaseSchema = z.object({
   name: z.string().min(2).max(160),
   sku: z.string().max(80).nullable().optional(),
+  code: z.string().max(80).optional(),
   unit: z.string().min(1).max(20).default('piece'),
   brandId: z.string().uuid().nullable().optional(),
   supplierId: z.string().uuid().nullable().optional(),
@@ -439,6 +440,7 @@ const inventoryItemBaseSchema = z.object({
   purchaseVatRate: z.coerce.number().min(0).max(1).default(0.2),
   listPriceExVat: z.coerce.number().nonnegative().nullable().optional(),
   discountRate: z.coerce.number().min(0).max(1).default(0),
+  priceDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
   sortOrder: z.coerce.number().int().min(0).default(1000),
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable().optional(),
   isActive: z.boolean().optional()
@@ -460,6 +462,43 @@ export const inventoryItemUpdateSchema = inventoryItemBaseSchema.partial().super
 
 export const inventoryItemCostSchema = z.object({
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable()
+});
+
+export const inventoryItemQuerySchema = z.object({
+  sortBy: z
+    .enum(['code', 'brand', 'packageSizeBase', 'subCategory', 'priceDate', 'listPriceExVat', 'discountRate', 'grossPrice', 'status', 'name'])
+    .optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  search: z.string().max(160).optional(),
+  brandId: z.string().uuid().optional(),
+  status: z.enum(['active', 'inactive', 'all']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50)
+});
+
+export const inventoryItemsExportQuerySchema = inventoryItemQuerySchema.extend({
+  scope: z.enum(['filtered', 'all']).default('filtered')
+});
+
+export const inventoryItemImportRowSchema = z.object({
+  anaFirma: z.string().min(1).optional(),
+  urunAdi: z.string().min(1),
+  miktari: z.union([z.string(), z.number()]),
+  stokTakipBirimi: z.string().min(1),
+  listeFiyatiKdvHaric: z.union([z.string(), z.number()]).optional(),
+  iskontosu: z.union([z.string(), z.number()]).optional(),
+  fiyatTarihi: z.string().optional(),
+  alisKdvOrani: z.union([z.string(), z.number()]).optional(),
+  gelirMerkeziKategorisi: z.string().optional(),
+  stokKategorisi: z.string().optional(),
+  urunGrubu: z.string().optional(),
+  distributor: z.string().optional(),
+  paketTipi: z.string().optional(),
+  aktifMi: z.union([z.string(), z.boolean()]).optional()
+});
+
+export const inventoryItemImportConfirmSchema = z.object({
+  rows: z.array(inventoryItemImportRowSchema).min(1)
 });
 
 export const inventoryMovementSchema = z.object({
