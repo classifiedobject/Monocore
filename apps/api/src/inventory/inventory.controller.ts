@@ -66,12 +66,12 @@ export class InventoryController {
   async exportItemsXlsx(
     @Req() req: Request & { user: { id: string }; companyId: string },
     @Query() query: unknown,
-    @Res({ passthrough: true }) res: Response
+    @Res() res: Response
   ) {
     const buffer = await this.inventory.exportItemsXlsx(req.user.id, req.companyId, query, req.ip, req.get('user-agent'));
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="inventory-items.xlsx"');
-    return buffer;
+    res.send(buffer);
   }
 
   @Get('items/import/template.csv')
@@ -85,11 +85,11 @@ export class InventoryController {
 
   @Get('items/import/template.xlsx')
   @RequirePermissions('module:inventory-core.items.manage')
-  downloadItemsImportTemplateXlsx(@Res({ passthrough: true }) res: Response) {
+  downloadItemsImportTemplateXlsx(@Res() res: Response) {
     const buffer = this.inventory.getItemsImportTemplateXlsx();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="inventory-items-template.xlsx"');
-    return buffer;
+    res.send(buffer);
   }
 
   @Post('items/import/preview')
