@@ -42,8 +42,21 @@ export default function LogsCenterPage() {
   };
 
   useEffect(() => {
-    load().catch(handleApiError);
-  }, []);
+    const init = async () => {
+      const params = new URLSearchParams({ page: '1', pageSize: String(pageSize) });
+      const response = (await apiFetch(`/platform-api/audit-logs?${params.toString()}`)) as {
+        items: LogItem[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+
+      setItems(response.items);
+      setTotal(response.total);
+      setPage(response.page);
+    };
+    init().catch(handleApiError);
+  }, [pageSize]);
 
   const maxPage = Math.max(1, Math.ceil(total / pageSize));
 

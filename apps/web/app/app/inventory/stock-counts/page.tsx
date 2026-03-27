@@ -104,7 +104,21 @@ export default function InventoryStockCountsPage() {
   }
 
   useEffect(() => {
-    loadInitial().catch(handleApiError);
+    const init = async () => {
+      const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
+        apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
+        apiFetch('/app-api/inventory/warehouses') as Promise<Warehouse[]>,
+        apiFetch('/app-api/inventory/items') as Promise<Item[]>,
+        apiFetch('/app-api/inventory/stock-counts') as Promise<Session[]>
+      ]);
+      setCaps(capsRes);
+      setWarehouses(warehouseRes);
+      setItems(itemRes);
+      setSessions(sessionRes);
+      setWarehouseId((current) => current || warehouseRes[0]?.id || '');
+      setLineItemId((current) => current || itemRes[0]?.id || '');
+    };
+    init().catch(handleApiError);
   }, []);
 
   useEffect(() => {
@@ -351,4 +365,3 @@ export default function InventoryStockCountsPage() {
     </section>
   );
 }
-
