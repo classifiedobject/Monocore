@@ -1204,6 +1204,7 @@ model InventoryItem {
   companyId           String
   name                String
   sku                 String?
+  code                String?
   unit                String
   brandId             String?
   supplierId          String?
@@ -1216,6 +1217,7 @@ model InventoryItem {
   purchaseVatRate     Decimal  @default(0.2) @db.Decimal(6, 4)
   listPriceExVat      Decimal? @db.Decimal(14, 4)
   discountRate        Decimal  @default(0) @db.Decimal(6, 4)
+  priceDate           DateTime @default(now())
   computedPriceIncVat Decimal? @db.Decimal(14, 4)
   lastPurchaseUnitCost Decimal? @db.Decimal(14, 4)
   isActive            Boolean  @default(true)
@@ -1230,6 +1232,7 @@ model InventoryItem {
   recipeLines         RecipeLine[]
 
   @@unique([companyId, sku])
+  @@unique([companyId, code])
   @@index([companyId, isActive])
   @@index([companyId, name])
   @@index([companyId, brandId])
@@ -1242,6 +1245,9 @@ model InventorySupplier {
   shortName    String
   legalName    String
   address      String?
+  addressLine  String?
+  city         String?
+  district     String?
   taxOffice    String?
   taxNumber    String?
   contactName  String?

@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Request, Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from '../common/guards/module-installed.guard.js';
@@ -43,8 +44,71 @@ export class InventoryController {
 
   @Get('items')
   @RequirePermissions('module:inventory-core.items.read')
-  listItems(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listItems(req.companyId);
+  listItems(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listItems(req.companyId, query);
+  }
+
+  @Get('items/export.csv')
+  @RequirePermissions('module:inventory-core.items.read')
+  async exportItemsCsv(
+    @Req() req: Request & { user: { id: string }; companyId: string },
+    @Query() query: unknown,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const csv = await this.inventory.exportItemsCsv(req.user.id, req.companyId, query, req.ip, req.get('user-agent'));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items.csv"');
+    return csv;
+  }
+
+  @Get('items/export.xlsx')
+  @RequirePermissions('module:inventory-core.items.read')
+  async exportItemsXlsx(
+    @Req() req: Request & { user: { id: string }; companyId: string },
+    @Query() query: unknown,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const buffer = await this.inventory.exportItemsXlsx(req.user.id, req.companyId, query, req.ip, req.get('user-agent'));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items.xlsx"');
+    return buffer;
+  }
+
+  @Get('items/import/template.csv')
+  @RequirePermissions('module:inventory-core.items.manage')
+  downloadItemsImportTemplateCsv(@Res({ passthrough: true }) res: Response) {
+    const csv = this.inventory.getItemsImportTemplateCsv();
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items-template.csv"');
+    return csv;
+  }
+
+  @Get('items/import/template.xlsx')
+  @RequirePermissions('module:inventory-core.items.manage')
+  downloadItemsImportTemplateXlsx(@Res({ passthrough: true }) res: Response) {
+    const buffer = this.inventory.getItemsImportTemplateXlsx();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items-template.xlsx"');
+    return buffer;
+  }
+
+  @Post('items/import/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  @RequirePermissions('module:inventory-core.items.manage')
+  previewItemsImport(
+    @UploadedFile() file: { originalname?: string; buffer: Buffer } | undefined,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.previewItemImport(req.user.id, req.companyId, file, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/import/confirm')
+  @RequirePermissions('module:inventory-core.items.manage')
+  confirmItemsImport(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.confirmItemImport(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Post('items')
@@ -155,8 +219,8 @@ export class InventoryController {
 
   @Get('suppliers')
   @RequirePermissions('module:inventory-core.suppliers.read')
-  listSuppliers(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listSuppliers(req.companyId);
+  listSuppliers(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listSuppliers(req.companyId, query);
   }
 
   @Post('suppliers')
@@ -195,8 +259,8 @@ export class InventoryController {
 
   @Get('brands')
   @RequirePermissions('module:inventory-core.brands.read')
-  listBrands(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listBrands(req.companyId);
+  listBrands(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listBrands(req.companyId, query);
   }
 
   @Post('brands')

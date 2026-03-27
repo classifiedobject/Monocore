@@ -28,6 +28,22 @@ type FinanceEntryWithCategory = {
   category: { type: 'INCOME' | 'EXPENSE'; name: string };
 };
 
+type ExecutiveSnapshot = {
+  financeEntries: FinanceEntryWithCategory[];
+  cashflowRows: Array<{ paymentDate: Date; direction: 'OUTGOING' | 'INCOMING'; amount: Prisma.Decimal }>;
+  outstandingReceivables: number;
+  outstandingPayables: number;
+  cashPosition: number;
+  inventory: {
+    totalValue: number;
+    lowStockItems: Array<{ itemId: string; name: string; quantity: number; threshold: number }>;
+  };
+  reservationCount: number;
+  taskOverdueCount: number;
+  overdueInvoices: number;
+  overdueTasks: Array<{ id: string; title: string; dueDate: Date; assigneeUser: { fullName: string } | null }>;
+};
+
 @Injectable()
 export class ExecutiveService {
   constructor(
@@ -39,8 +55,9 @@ export class ExecutiveService {
     const parsed = executiveDashboardQuerySchema.parse(query);
     const { from, to } = this.resolveDateRange(parsed.from, parsed.to);
     const bucket = this.bucketMode(from, to);
-
-    const [
+    const asOf = this.startOfDay(new Date());
+    const snapshot = await this.loadDashboardSnapshot(companyId, from, to, asOf);
+    const {
       financeEntries,
       cashflowRows,
       outstandingReceivables,
@@ -51,50 +68,7 @@ export class ExecutiveService {
       taskOverdueCount,
       overdueInvoices,
       overdueTasks
-    ] = await Promise.all([
-      this.prisma.financeEntry.findMany({
-        where: {
-          companyId,
-          date: { gte: from, lte: to }
-        },
-        include: { category: true },
-        orderBy: { date: 'asc' }
-      }),
-      this.prisma.financePayment.findMany({
-        where: { companyId, paymentDate: { gte: from, lte: to } },
-        select: { paymentDate: true, direction: true, amount: true },
-        orderBy: { paymentDate: 'asc' }
-      }),
-      this.outstandingInvoiceTotal(companyId, 'RECEIVABLE'),
-      this.outstandingInvoiceTotal(companyId, 'PAYABLE'),
-      this.calculateCashPosition(companyId),
-      this.inventorySnapshot(companyId),
-      this.prisma.reservation.count({ where: { companyId, reservationDate: { gte: from, lte: to } } }),
-      this.prisma.taskInstance.count({
-        where: {
-          companyId,
-          status: { in: ['OPEN', 'IN_PROGRESS'] },
-          dueDate: { lt: this.startOfDay(new Date()) }
-        }
-      }),
-      this.prisma.financeInvoice.count({
-        where: {
-          companyId,
-          dueDate: { lt: this.startOfDay(new Date()) },
-          status: { in: ['ISSUED', 'PARTIALLY_PAID'] }
-        }
-      }),
-      this.prisma.taskInstance.findMany({
-        where: {
-          companyId,
-          status: { in: ['OPEN', 'IN_PROGRESS'] },
-          dueDate: { lt: this.startOfDay(new Date()) }
-        },
-        select: { id: true, title: true, dueDate: true, assigneeUser: { select: { fullName: true } } },
-        orderBy: [{ dueDate: 'asc' }],
-        take: 8
-      })
-    ]);
+    } = snapshot;
 
     const revenue = this.sum(
       financeEntries
@@ -188,6 +162,84 @@ export class ExecutiveService {
     };
   }
 
+  private async loadDashboardSnapshot(companyId: string, from: Date, to: Date, asOf: Date): Promise<ExecutiveSnapshot> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const [
+          financeEntries,
+          cashflowRows,
+          outstandingReceivables,
+          outstandingPayables,
+          cashPosition,
+          inventory,
+          reservationCount,
+          taskOverdueCount,
+          overdueInvoices,
+          overdueTasks
+        ] = await Promise.all([
+          tx.financeEntry.findMany({
+            where: {
+              companyId,
+              date: { gte: from, lte: to }
+            },
+            include: { category: true },
+            orderBy: { date: 'asc' }
+          }),
+          tx.financePayment.findMany({
+            where: { companyId, paymentDate: { gte: from, lte: to } },
+            select: { paymentDate: true, direction: true, amount: true },
+            orderBy: { paymentDate: 'asc' }
+          }),
+          this.outstandingInvoiceTotal(tx, companyId, 'RECEIVABLE'),
+          this.outstandingInvoiceTotal(tx, companyId, 'PAYABLE'),
+          this.calculateCashPosition(tx, companyId),
+          this.inventorySnapshot(tx, companyId),
+          tx.reservation.count({ where: { companyId, reservationDate: { gte: from, lte: to } } }),
+          tx.taskInstance.count({
+            where: {
+              companyId,
+              status: { in: ['OPEN', 'IN_PROGRESS'] },
+              dueDate: { lt: asOf }
+            }
+          }),
+          tx.financeInvoice.count({
+            where: {
+              companyId,
+              dueDate: { lt: asOf },
+              status: { in: ['ISSUED', 'PARTIALLY_PAID'] }
+            }
+          }),
+          tx.taskInstance.findMany({
+            where: {
+              companyId,
+              status: { in: ['OPEN', 'IN_PROGRESS'] },
+              dueDate: { lt: asOf }
+            },
+            select: { id: true, title: true, dueDate: true, assigneeUser: { select: { fullName: true } } },
+            orderBy: [{ dueDate: 'asc' }],
+            take: 8
+          })
+        ]);
+
+        return {
+          financeEntries,
+          cashflowRows,
+          outstandingReceivables,
+          outstandingPayables,
+          cashPosition,
+          inventory,
+          reservationCount,
+          taskOverdueCount,
+          overdueInvoices,
+          overdueTasks
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead
+      }
+    );
+  }
+
   private buildFinanceTrend(rows: Array<{ date: Date; amount: Prisma.Decimal }>, from: Date, to: Date, mode: 'daily' | 'weekly'): TrendPoint[] {
     const map = new Map<string, number>();
     for (const row of rows) {
@@ -222,8 +274,12 @@ export class ExecutiveService {
     return this.fillBuckets(from, to, mode).map((date) => ({ date, value: map.get(date) ?? 0 }));
   }
 
-  private async outstandingInvoiceTotal(companyId: string, direction: 'RECEIVABLE' | 'PAYABLE') {
-    const rows = await this.prisma.financeInvoice.findMany({
+  private async outstandingInvoiceTotal(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    direction: 'RECEIVABLE' | 'PAYABLE'
+  ) {
+    const rows = await tx.financeInvoice.findMany({
       where: {
         companyId,
         direction,
@@ -244,8 +300,8 @@ export class ExecutiveService {
     return total;
   }
 
-  private async calculateCashPosition(companyId: string) {
-    const rows = await this.prisma.financeEntry.findMany({
+  private async calculateCashPosition(tx: Prisma.TransactionClient, companyId: string) {
+    const rows = await tx.financeEntry.findMany({
       where: {
         companyId,
         account: { type: { in: ['CASH', 'BANK'] } }
@@ -259,13 +315,13 @@ export class ExecutiveService {
     }, 0);
   }
 
-  private async inventorySnapshot(companyId: string) {
+  private async inventorySnapshot(tx: Prisma.TransactionClient, companyId: string) {
     const [items, movements] = await Promise.all([
-      this.prisma.inventoryItem.findMany({
+      tx.inventoryItem.findMany({
         where: { companyId, isActive: true },
         select: { id: true, name: true, lastPurchaseUnitCost: true }
       }),
-      this.prisma.inventoryStockMovement.groupBy({
+      tx.inventoryStockMovement.groupBy({
         by: ['itemId', 'type'],
         where: { companyId },
         _sum: { quantity: true }
