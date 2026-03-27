@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ApiError, apiFetch, handleApiError } from '../../../../lib/api';
 import { getWebEnv } from '../../../../lib/env';
@@ -255,11 +255,37 @@ export default function InventoryItemsPage() {
   const [isConfirmingImport, setIsConfirmingImport] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [editForm, setEditForm] = useState<EditFormState>(defaultEditForm);
+  const [initialEditForm, setInitialEditForm] = useState<EditFormState>(defaultEditForm);
+  const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('create');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const firstInputRef = useRef<HTMLInputElement | null>(null);
 
   const computedPreview = useMemo(
     () => computeIncVat(createForm.listPriceExVat, createForm.discountRatePercent, createForm.purchaseVatRatePercent),
     [createForm.discountRatePercent, createForm.listPriceExVat, createForm.purchaseVatRatePercent]
   );
+  const editComputedPreview = useMemo(
+    () => computeIncVat(editForm.listPriceExVat, editForm.discountRatePercent, editForm.purchaseVatRatePercent),
+    [editForm.discountRatePercent, editForm.listPriceExVat, editForm.purchaseVatRatePercent]
+  );
+  const isCreateDirty = useMemo(() => JSON.stringify(createForm) !== JSON.stringify(defaultCreateForm), [createForm]);
+  const isEditDirty = useMemo(() => JSON.stringify(editForm) !== JSON.stringify(initialEditForm), [editForm, initialEditForm]);
+  const isDrawerDirty = drawerMode === 'create' ? isCreateDirty : isEditDirty;
+  const requestCloseDrawer = useCallback(() => {
+    if (isDrawerDirty && !window.confirm('Kaydedilmemiş değişiklikler var. Formu kapatmak istediğinize emin misiniz?')) {
+      return;
+    }
+    setIsDrawerOpen(false);
+    setPageError(null);
+    if (drawerMode === 'create') {
+      setCreateForm(defaultCreateForm);
+      return;
+    }
+    setEditingItem(null);
+    setInitialEditForm(defaultEditForm);
+    setEditForm(defaultEditForm);
+  }, [drawerMode, isDrawerDirty]);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
 
@@ -312,6 +338,23 @@ export default function InventoryItemsPage() {
     loadItems().catch(handleApiError);
   }, [brandFilter, debouncedSearch, page, pageSize, sortBy, sortDirection, statusFilter]);
 
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    const timer = window.setTimeout(() => firstInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [isDrawerOpen, drawerMode]);
+
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      requestCloseDrawer();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isDrawerOpen, requestCloseDrawer]);
+
   function resetItemPage() {
     setPage(1);
   }
@@ -349,50 +392,62 @@ export default function InventoryItemsPage() {
 
   async function submitCreateForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setIsSubmitting(true);
 
-    const vatPercent = parseMaybeNumber(createForm.purchaseVatRatePercent);
-    const discountPercent = parseMaybeNumber(createForm.discountRatePercent);
-    const packageSize = parseMaybeNumber(createForm.packageSizeBase);
-    const listPriceExVat = parseMaybeNumber(createForm.listPriceExVat);
+    try {
+      const vatPercent = parseMaybeNumber(createForm.purchaseVatRatePercent);
+      const discountPercent = parseMaybeNumber(createForm.discountRatePercent);
+      const packageSize = parseMaybeNumber(createForm.packageSizeBase);
+      const listPriceExVat = parseMaybeNumber(createForm.listPriceExVat);
 
-    if (vatPercent === null || vatPercent < 0 || vatPercent > 100) {
-      setPageError('Alış KDV oranı 0 ile 100 arasında olmalı.');
-      return;
+      if (vatPercent === null || vatPercent < 0 || vatPercent > 100) {
+        setPageError('Alış KDV oranı 0 ile 100 arasında olmalı.');
+        return;
+      }
+      if (discountPercent === null || discountPercent < 0 || discountPercent > 100) {
+        setPageError('İskonto oranı 0 ile 100 arasında olmalı.');
+        return;
+      }
+      if (packageSize === null || packageSize <= 0) {
+        setPageError('Miktarı 0’dan büyük olmalı.');
+        return;
+      }
+
+      await apiFetch('/app-api/inventory/items', {
+        method: 'POST',
+        body: JSON.stringify({
+          brandId: createForm.brandId || null,
+          name: createForm.name,
+          packageSizeBase: packageSize,
+          baseUom: createForm.baseUom,
+          listPriceExVat,
+          discountRate: discountPercent / 100,
+          priceDate: createForm.priceDate || undefined,
+          purchaseVatRate: vatPercent / 100,
+          mainStockArea: createForm.mainStockArea,
+          attributeCategory: createForm.attributeCategory,
+          subCategory: createForm.subCategory || null
+        })
+      });
+
+      setImportMessage('Ürün başarıyla oluşturuldu.');
+      setCreateForm(defaultCreateForm);
+      setIsDrawerOpen(false);
+      await reloadItems();
+    } finally {
+      setIsSubmitting(false);
     }
-    if (discountPercent === null || discountPercent < 0 || discountPercent > 100) {
-      setPageError('İskonto oranı 0 ile 100 arasında olmalı.');
-      return;
-    }
-    if (packageSize === null || packageSize <= 0) {
-      setPageError('Miktarı 0’dan büyük olmalı.');
-      return;
-    }
+  }
 
-    await apiFetch('/app-api/inventory/items', {
-      method: 'POST',
-      body: JSON.stringify({
-        brandId: createForm.brandId || null,
-        name: createForm.name,
-        packageSizeBase: packageSize,
-        baseUom: createForm.baseUom,
-        listPriceExVat,
-        discountRate: discountPercent / 100,
-        priceDate: createForm.priceDate || undefined,
-        purchaseVatRate: vatPercent / 100,
-        mainStockArea: createForm.mainStockArea,
-        attributeCategory: createForm.attributeCategory,
-        subCategory: createForm.subCategory || null
-      })
-    });
-
+  function openCreateDrawer() {
+    setDrawerMode('create');
     setCreateForm(defaultCreateForm);
-    resetItemPage();
-    await reloadItems();
+    setPageError(null);
+    setIsDrawerOpen(true);
   }
 
   function startEdit(item: Item) {
-    setEditingItem(item);
-    setEditForm({
+    const nextForm = {
       brandId: item.brandId ?? '',
       name: item.name,
       packageSizeBase: item.packageSizeBase ?? '',
@@ -405,52 +460,66 @@ export default function InventoryItemsPage() {
       attributeCategory: item.attributeCategory,
       subCategory: item.subCategory ?? '',
       packageUom: item.packageUom ?? ''
-    });
+    } satisfies EditFormState;
+    setEditingItem(item);
+    setInitialEditForm(nextForm);
+    setEditForm(nextForm);
+    setDrawerMode('edit');
+    setPageError(null);
+    setIsDrawerOpen(true);
   }
 
   async function submitEditForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingItem) return;
+    setIsSubmitting(true);
 
-    const vatPercent = parseMaybeNumber(editForm.purchaseVatRatePercent);
-    const discountPercent = parseMaybeNumber(editForm.discountRatePercent);
-    const packageSize = parseMaybeNumber(editForm.packageSizeBase);
-    const listPriceExVat = parseMaybeNumber(editForm.listPriceExVat);
+    try {
+      const vatPercent = parseMaybeNumber(editForm.purchaseVatRatePercent);
+      const discountPercent = parseMaybeNumber(editForm.discountRatePercent);
+      const packageSize = parseMaybeNumber(editForm.packageSizeBase);
+      const listPriceExVat = parseMaybeNumber(editForm.listPriceExVat);
 
-    if (vatPercent === null || vatPercent < 0 || vatPercent > 100) {
-      setPageError('Alış KDV oranı 0 ile 100 arasında olmalı.');
-      return;
+      if (vatPercent === null || vatPercent < 0 || vatPercent > 100) {
+        setPageError('Alış KDV oranı 0 ile 100 arasında olmalı.');
+        return;
+      }
+      if (discountPercent === null || discountPercent < 0 || discountPercent > 100) {
+        setPageError('İskonto oranı 0 ile 100 arasında olmalı.');
+        return;
+      }
+      if (packageSize === null || packageSize <= 0) {
+        setPageError('Miktarı 0’dan büyük olmalı.');
+        return;
+      }
+
+      await apiFetch(`/app-api/inventory/items/${editingItem.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          brandId: editForm.brandId || null,
+          name: editForm.name,
+          packageSizeBase: packageSize,
+          baseUom: editForm.baseUom,
+          listPriceExVat,
+          discountRate: discountPercent / 100,
+          priceDate: editForm.priceDate || undefined,
+          purchaseVatRate: vatPercent / 100,
+          mainStockArea: editForm.mainStockArea,
+          attributeCategory: editForm.attributeCategory,
+          subCategory: editForm.subCategory || null,
+          packageUom: editForm.packageUom || null
+        })
+      });
+
+      setImportMessage('Ürün başarıyla güncellendi.');
+      setIsDrawerOpen(false);
+      setEditingItem(null);
+      setInitialEditForm(defaultEditForm);
+      setEditForm(defaultEditForm);
+      await reloadItems();
+    } finally {
+      setIsSubmitting(false);
     }
-    if (discountPercent === null || discountPercent < 0 || discountPercent > 100) {
-      setPageError('İskonto oranı 0 ile 100 arasında olmalı.');
-      return;
-    }
-    if (packageSize === null || packageSize <= 0) {
-      setPageError('Miktarı 0’dan büyük olmalı.');
-      return;
-    }
-
-    await apiFetch(`/app-api/inventory/items/${editingItem.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        brandId: editForm.brandId || null,
-        name: editForm.name,
-        packageSizeBase: packageSize,
-        baseUom: editForm.baseUom,
-        listPriceExVat,
-        discountRate: discountPercent / 100,
-        priceDate: editForm.priceDate || undefined,
-        purchaseVatRate: vatPercent / 100,
-        mainStockArea: editForm.mainStockArea,
-        attributeCategory: editForm.attributeCategory,
-        subCategory: editForm.subCategory || null,
-        packageUom: editForm.packageUom || null
-      })
-    });
-
-    setEditingItem(null);
-    setEditForm(defaultEditForm);
-    await reloadItems();
   }
 
   async function toggleItem(item: Item) {
@@ -580,6 +649,11 @@ export default function InventoryItemsPage() {
           <p className="text-sm text-slate-600">Stok ana verisini arama, sayfalama, dışa aktarma ve toplu içe aktarma ile yönetin.</p>
         </div>
         <div className="flex gap-2">
+          {caps.manageItem ? (
+            <button type="button" className="rounded bg-mono-500 px-3 py-2 text-sm text-white hover:bg-mono-600" onClick={openCreateDrawer}>
+              Yeni Ürün
+            </button>
+          ) : null}
           <Link href="/app/inventory/suppliers" className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100">
             Marka & Distribütör
           </Link>
@@ -592,98 +666,6 @@ export default function InventoryItemsPage() {
       {pageError ? <div className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">{pageError}</div> : null}
       {importError ? <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{importError}</div> : null}
       {importMessage ? <div className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{importMessage}</div> : null}
-
-      {caps.manageItem ? (
-        <form className="space-y-4 rounded bg-white p-4 shadow-sm" onSubmit={(event) => submitCreateForm(event).catch(handleApiError)}>
-          <div className="rounded border p-3">
-            <h2 className="mb-3 font-semibold">Grup 1: Temel Ürün Kimliği</h2>
-            <div className="grid gap-3 md:grid-cols-4">
-              <label className="space-y-1 text-sm">
-                <span>Ana Firma</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={createForm.brandId} onChange={(event) => setCreateForm((prev) => ({ ...prev, brandId: event.target.value }))}>
-                  <option value="">Seçiniz</option>
-                  {brands.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Ürün Adı</span>
-                <input className="h-10 w-full rounded border px-3 py-2" value={createForm.name} onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))} required />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Miktarı</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0.0001} step="0.0001" value={createForm.packageSizeBase} onChange={(event) => setCreateForm((prev) => ({ ...prev, packageSizeBase: event.target.value }))} required />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Stok Takip Birimi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={createForm.baseUom} onChange={(event) => setCreateForm((prev) => ({ ...prev, baseUom: event.target.value as CreateFormState['baseUom'] }))}>
-                  <option value="CL">cl</option>
-                  <option value="ML">ml</option>
-                  <option value="GRAM">gram</option>
-                  <option value="KG">kg</option>
-                  <option value="PIECE">adet</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div className="rounded border p-3">
-            <h2 className="mb-3 font-semibold">Grup 2: Satın Alma Fiyatlandırma</h2>
-            <div className="grid gap-3 md:grid-cols-4">
-              <label className="space-y-1 text-sm">
-                <span>Liste Fiyatı (KDV Hariç)</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} step="0.0001" value={createForm.listPriceExVat} onChange={(event) => setCreateForm((prev) => ({ ...prev, listPriceExVat: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>İskontosu</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={createForm.discountRatePercent} onChange={(event) => setCreateForm((prev) => ({ ...prev, discountRatePercent: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Fiyat Tarihi</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="date" value={createForm.priceDate} onChange={(event) => setCreateForm((prev) => ({ ...prev, priceDate: event.target.value }))} />
-                <span className="block text-xs text-slate-500">Boş bırakılırsa ürün oluşturma tarihi kullanılır.</span>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Alış KDV Oranı</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={createForm.purchaseVatRatePercent} onChange={(event) => setCreateForm((prev) => ({ ...prev, purchaseVatRatePercent: event.target.value }))} />
-              </label>
-            </div>
-            <p className="mt-2 text-sm text-slate-600">Hesaplanan net alış (KDV dahil): <strong>{computedPreview === null ? '-' : toMoney(computedPreview)}</strong></p>
-          </div>
-
-          <div className="rounded border p-3">
-            <h2 className="mb-3 font-semibold">Grup 3: Sınıflandırma</h2>
-            <div className="grid gap-3 md:grid-cols-3">
-              <label className="space-y-1 text-sm">
-                <span>Gelir Merkezi Kategorisi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={createForm.mainStockArea} onChange={(event) => setCreateForm((prev) => ({ ...prev, mainStockArea: event.target.value as CreateFormState['mainStockArea'] }))}>
-                  <option value="BAR">Bar</option>
-                  <option value="KITCHEN">Mutfak</option>
-                  <option value="OTHER">Diğer</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Stok Kategorisi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={createForm.attributeCategory} onChange={(event) => setCreateForm((prev) => ({ ...prev, attributeCategory: event.target.value as CreateFormState['attributeCategory'] }))}>
-                  <option value="ALCOHOL">Alkol</option>
-                  <option value="SOFT">Soft</option>
-                  <option value="KITCHEN">Mutfak</option>
-                  <option value="OTHER">Diğer</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Ürün Grubu</span>
-                <input className="h-10 w-full rounded border px-3 py-2" value={createForm.subCategory} onChange={(event) => setCreateForm((prev) => ({ ...prev, subCategory: event.target.value }))} />
-              </label>
-            </div>
-          </div>
-
-          <button className="rounded bg-mono-500 px-3 py-2 text-white">Ürün Oluştur</button>
-        </form>
-      ) : null}
 
       <section className="space-y-4 rounded bg-white p-4 shadow-sm">
         <div className="flex flex-wrap gap-3">
@@ -932,89 +914,240 @@ export default function InventoryItemsPage() {
         </div>
       </section>
 
-      {editingItem ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-3xl rounded bg-white p-5 shadow-lg">
-            <h2 className="text-lg font-semibold">Ürün Düzenle</h2>
-            <form className="mt-4 grid gap-3 md:grid-cols-3" onSubmit={(event) => submitEditForm(event).catch(handleApiError)}>
-              <label className="space-y-1 text-sm">
-                <span>Ana Firma</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={editForm.brandId} onChange={(event) => setEditForm((prev) => ({ ...prev, brandId: event.target.value }))}>
-                  <option value="">Seçiniz</option>
-                  {brands.map((row) => (
-                    <option key={row.id} value={row.id}>{row.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Ürün Adı</span>
-                <input className="h-10 w-full rounded border px-3 py-2" value={editForm.name} onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))} required />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Miktarı</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0.0001} step="0.0001" value={editForm.packageSizeBase} onChange={(event) => setEditForm((prev) => ({ ...prev, packageSizeBase: event.target.value }))} required />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Stok Takip Birimi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={editForm.baseUom} onChange={(event) => setEditForm((prev) => ({ ...prev, baseUom: event.target.value as EditFormState['baseUom'] }))}>
-                  <option value="CL">cl</option>
-                  <option value="ML">ml</option>
-                  <option value="GRAM">gram</option>
-                  <option value="KG">kg</option>
-                  <option value="PIECE">adet</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Paket Tipi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={editForm.packageUom} onChange={(event) => setEditForm((prev) => ({ ...prev, packageUom: event.target.value as EditFormState['packageUom'] }))}>
-                  <option value="">Seçiniz</option>
-                  <option value="BOTTLE">Şişe</option>
-                  <option value="PACK">Paket</option>
-                  <option value="PIECE">Adet</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Liste Fiyatı (KDV Hariç)</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} step="0.0001" value={editForm.listPriceExVat} onChange={(event) => setEditForm((prev) => ({ ...prev, listPriceExVat: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>İskontosu</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={editForm.discountRatePercent} onChange={(event) => setEditForm((prev) => ({ ...prev, discountRatePercent: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Fiyat Tarihi</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="date" value={editForm.priceDate} onChange={(event) => setEditForm((prev) => ({ ...prev, priceDate: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Alış KDV Oranı</span>
-                <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={editForm.purchaseVatRatePercent} onChange={(event) => setEditForm((prev) => ({ ...prev, purchaseVatRatePercent: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Gelir Merkezi Kategorisi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={editForm.mainStockArea} onChange={(event) => setEditForm((prev) => ({ ...prev, mainStockArea: event.target.value as EditFormState['mainStockArea'] }))}>
-                  <option value="BAR">Bar</option>
-                  <option value="KITCHEN">Mutfak</option>
-                  <option value="OTHER">Diğer</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Stok Kategorisi</span>
-                <select className="h-10 w-full rounded border px-3 py-2" value={editForm.attributeCategory} onChange={(event) => setEditForm((prev) => ({ ...prev, attributeCategory: event.target.value as EditFormState['attributeCategory'] }))}>
-                  <option value="ALCOHOL">Alkol</option>
-                  <option value="SOFT">Soft</option>
-                  <option value="KITCHEN">Mutfak</option>
-                  <option value="OTHER">Diğer</option>
-                </select>
-              </label>
-              <label className="space-y-1 text-sm">
-                <span>Ürün Grubu</span>
-                <input className="h-10 w-full rounded border px-3 py-2" value={editForm.subCategory} onChange={(event) => setEditForm((prev) => ({ ...prev, subCategory: event.target.value }))} />
-              </label>
-              <div className="flex justify-end gap-2 md:col-span-3">
-                <button type="button" className="rounded border px-3 py-2 text-sm" onClick={() => setEditingItem(null)}>Vazgeç</button>
-                <button className="rounded bg-mono-500 px-3 py-2 text-sm text-white">Kaydet</button>
+      {isDrawerOpen ? (
+        <div className="fixed inset-0 z-50 bg-slate-900/40">
+          <div className="absolute inset-y-0 right-0 flex w-full max-w-3xl flex-col bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div>
+                <h2 className="text-lg font-semibold">{drawerMode === 'create' ? 'Yeni Ürün' : 'Ürün Düzenle'}</h2>
+                <p className="text-sm text-slate-500">
+                  {drawerMode === 'create'
+                    ? 'Yeni stok kartı oluşturun. Liste filtreleri ve sayfalama olduğu gibi korunur.'
+                    : 'Ürünü düzenleyin. Kaydettikten sonra mevcut liste görünümü korunur.'}
+                </p>
               </div>
-            </form>
+              <button type="button" className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100" onClick={requestCloseDrawer}>
+                Kapat
+              </button>
+            </div>
+
+            {drawerMode === 'create' ? (
+              <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => submitCreateForm(event).catch(handleApiError)}>
+                <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                  <div className="rounded border p-3">
+                    <h3 className="mb-3 font-semibold">Temel Ürün Kimliği</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-sm">
+                        <span>Ana Firma</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={createForm.brandId} onChange={(event) => setCreateForm((prev) => ({ ...prev, brandId: event.target.value }))}>
+                          <option value="">Seçiniz</option>
+                          {brands.map((row) => (
+                            <option key={row.id} value={row.id}>
+                              {row.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Ürün Adı</span>
+                        <input ref={firstInputRef} className="h-10 w-full rounded border px-3 py-2" value={createForm.name} onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))} required />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Miktarı</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0.0001} step="0.0001" value={createForm.packageSizeBase} onChange={(event) => setCreateForm((prev) => ({ ...prev, packageSizeBase: event.target.value }))} required />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Stok Takip Birimi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={createForm.baseUom} onChange={(event) => setCreateForm((prev) => ({ ...prev, baseUom: event.target.value as CreateFormState['baseUom'] }))}>
+                          <option value="CL">cl</option>
+                          <option value="ML">ml</option>
+                          <option value="GRAM">gram</option>
+                          <option value="KG">kg</option>
+                          <option value="PIECE">adet</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded border p-3">
+                    <h3 className="mb-3 font-semibold">Satın Alma Fiyatlandırma</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-sm">
+                        <span>Liste Fiyatı (KDV Hariç)</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} step="0.0001" value={createForm.listPriceExVat} onChange={(event) => setCreateForm((prev) => ({ ...prev, listPriceExVat: event.target.value }))} />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>İskontosu</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={createForm.discountRatePercent} onChange={(event) => setCreateForm((prev) => ({ ...prev, discountRatePercent: event.target.value }))} />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Fiyat Tarihi</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="date" value={createForm.priceDate} onChange={(event) => setCreateForm((prev) => ({ ...prev, priceDate: event.target.value }))} />
+                        <span className="block text-xs text-slate-500">Boş bırakılırsa ürün oluşturma tarihi kullanılır.</span>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Alış KDV Oranı</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={createForm.purchaseVatRatePercent} onChange={(event) => setCreateForm((prev) => ({ ...prev, purchaseVatRatePercent: event.target.value }))} />
+                      </label>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Hesaplanan net alış (KDV dahil): <strong>{computedPreview === null ? '-' : toMoney(computedPreview)}</strong>
+                    </p>
+                  </div>
+
+                  <div className="rounded border p-3">
+                    <h3 className="mb-3 font-semibold">Sınıflandırma</h3>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="space-y-1 text-sm">
+                        <span>Gelir Merkezi Kategorisi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={createForm.mainStockArea} onChange={(event) => setCreateForm((prev) => ({ ...prev, mainStockArea: event.target.value as CreateFormState['mainStockArea'] }))}>
+                          <option value="BAR">Bar</option>
+                          <option value="KITCHEN">Mutfak</option>
+                          <option value="OTHER">Diğer</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Stok Kategorisi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={createForm.attributeCategory} onChange={(event) => setCreateForm((prev) => ({ ...prev, attributeCategory: event.target.value as CreateFormState['attributeCategory'] }))}>
+                          <option value="ALCOHOL">Alkol</option>
+                          <option value="SOFT">Soft</option>
+                          <option value="KITCHEN">Mutfak</option>
+                          <option value="OTHER">Diğer</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Ürün Grubu</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" value={createForm.subCategory} onChange={(event) => setCreateForm((prev) => ({ ...prev, subCategory: event.target.value }))} />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t bg-white px-5 py-4">
+                  <div className="flex justify-end gap-2">
+                    <button type="button" className="rounded border border-slate-300 px-4 py-2 text-sm hover:bg-slate-100" onClick={requestCloseDrawer}>
+                      İptal
+                    </button>
+                    <button className="rounded bg-mono-500 px-4 py-2 text-sm text-white disabled:opacity-50" disabled={isSubmitting}>
+                      {isSubmitting ? 'Kaydediliyor...' : 'Kaydet'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => submitEditForm(event).catch(handleApiError)}>
+                <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                  <div className="rounded border p-3">
+                    <h3 className="mb-3 font-semibold">Temel Ürün Kimliği</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-sm">
+                        <span>Ana Firma</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={editForm.brandId} onChange={(event) => setEditForm((prev) => ({ ...prev, brandId: event.target.value }))}>
+                          <option value="">Seçiniz</option>
+                          {brands.map((row) => (
+                            <option key={row.id} value={row.id}>
+                              {row.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Ürün Adı</span>
+                        <input ref={firstInputRef} className="h-10 w-full rounded border px-3 py-2" value={editForm.name} onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))} required />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Miktarı</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0.0001} step="0.0001" value={editForm.packageSizeBase} onChange={(event) => setEditForm((prev) => ({ ...prev, packageSizeBase: event.target.value }))} required />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Stok Takip Birimi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={editForm.baseUom} onChange={(event) => setEditForm((prev) => ({ ...prev, baseUom: event.target.value as EditFormState['baseUom'] }))}>
+                          <option value="CL">cl</option>
+                          <option value="ML">ml</option>
+                          <option value="GRAM">gram</option>
+                          <option value="KG">kg</option>
+                          <option value="PIECE">adet</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded border p-3">
+                    <h3 className="mb-3 font-semibold">Satın Alma Fiyatlandırma</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-sm">
+                        <span>Liste Fiyatı (KDV Hariç)</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} step="0.0001" value={editForm.listPriceExVat} onChange={(event) => setEditForm((prev) => ({ ...prev, listPriceExVat: event.target.value }))} />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>İskontosu</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={editForm.discountRatePercent} onChange={(event) => setEditForm((prev) => ({ ...prev, discountRatePercent: event.target.value }))} />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Fiyat Tarihi</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="date" value={editForm.priceDate} onChange={(event) => setEditForm((prev) => ({ ...prev, priceDate: event.target.value }))} />
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Alış KDV Oranı</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" type="number" min={0} max={100} step="0.01" value={editForm.purchaseVatRatePercent} onChange={(event) => setEditForm((prev) => ({ ...prev, purchaseVatRatePercent: event.target.value }))} />
+                      </label>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Hesaplanan net alış (KDV dahil): <strong>{editComputedPreview === null ? '-' : toMoney(editComputedPreview)}</strong>
+                    </p>
+                  </div>
+
+                  <div className="rounded border p-3">
+                    <h3 className="mb-3 font-semibold">Sınıflandırma</h3>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="space-y-1 text-sm">
+                        <span>Gelir Merkezi Kategorisi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={editForm.mainStockArea} onChange={(event) => setEditForm((prev) => ({ ...prev, mainStockArea: event.target.value as EditFormState['mainStockArea'] }))}>
+                          <option value="BAR">Bar</option>
+                          <option value="KITCHEN">Mutfak</option>
+                          <option value="OTHER">Diğer</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Stok Kategorisi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={editForm.attributeCategory} onChange={(event) => setEditForm((prev) => ({ ...prev, attributeCategory: event.target.value as EditFormState['attributeCategory'] }))}>
+                          <option value="ALCOHOL">Alkol</option>
+                          <option value="SOFT">Soft</option>
+                          <option value="KITCHEN">Mutfak</option>
+                          <option value="OTHER">Diğer</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">
+                        <span>Ürün Grubu</span>
+                        <input className="h-10 w-full rounded border px-3 py-2" value={editForm.subCategory} onChange={(event) => setEditForm((prev) => ({ ...prev, subCategory: event.target.value }))} />
+                      </label>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-sm">
+                        <span>Paket Tipi</span>
+                        <select className="h-10 w-full rounded border px-3 py-2" value={editForm.packageUom} onChange={(event) => setEditForm((prev) => ({ ...prev, packageUom: event.target.value as EditFormState['packageUom'] }))}>
+                          <option value="">Seçiniz</option>
+                          <option value="BOTTLE">Şişe</option>
+                          <option value="PACK">Paket</option>
+                          <option value="PIECE">Adet</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t bg-white px-5 py-4">
+                  <div className="flex justify-end gap-2">
+                    <button type="button" className="rounded border border-slate-300 px-4 py-2 text-sm hover:bg-slate-100" onClick={requestCloseDrawer}>
+                      İptal
+                    </button>
+                    <button className="rounded bg-mono-500 px-4 py-2 text-sm text-white disabled:opacity-50" disabled={isSubmitting}>
+                      {isSubmitting ? 'Güncelleniyor...' : 'Güncelle'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       ) : null}
