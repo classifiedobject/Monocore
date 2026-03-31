@@ -150,6 +150,21 @@ async function main() {
 
   assert(dashboard.summary.revenue > 0, 'Revenue should be greater than zero', dashboard.summary);
   assert(dashboard.summary.outstandingReceivables > 0, 'Receivables should be greater than zero', dashboard.summary);
+  assert(
+    Math.abs(dashboard.summary.grossProfit - (dashboard.summary.revenue - dashboard.summary.cogs)) < 0.0001,
+    'Gross profit should reconcile to revenue minus COGS in one coherent response',
+    dashboard.summary
+  );
+  assert(
+    typeof dashboard.summary.netProfit === 'number' && Number.isFinite(dashboard.summary.netProfit),
+    'Net profit should be present as a finite numeric value',
+    dashboard.summary
+  );
+  assert(
+    Array.isArray(dashboard.trends.revenueTrend) && Array.isArray(dashboard.trends.netProfitTrend) && Array.isArray(dashboard.trends.cashflowTrend),
+    'Trend payload should be present for snapshot-backed dashboard response',
+    dashboard.trends
+  );
   assert(Array.isArray(dashboard.alerts) && dashboard.alerts.length > 0, 'Expected at least one alert', dashboard.alerts);
 
   console.log(JSON.stringify({ ok: true, summary: dashboard.summary, alertCount: dashboard.alerts.length }, null, 2));

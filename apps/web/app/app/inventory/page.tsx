@@ -28,6 +28,14 @@ type Item = {
   isActive: boolean;
 };
 
+type ItemListResponse = {
+  rows: Item[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 type StockRow = {
   itemId: string;
   itemName: string;
@@ -118,8 +126,9 @@ export default function InventoryPage() {
   }
 
   async function loadItems() {
-    const response = (await apiFetch('/app-api/inventory/items')) as Item[] | { rows: Item[] };
-    setItems(Array.isArray(response) ? response : response.rows);
+    const response = (await apiFetch('/app-api/inventory/items')) as Item[] | ItemListResponse;
+    const rows = Array.isArray(response) ? response : response.rows;
+    setItems(rows);
   }
 
   async function loadWarehouses() {

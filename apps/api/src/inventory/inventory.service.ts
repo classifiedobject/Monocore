@@ -1,11 +1,17 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type InventoryMovementType } from '@prisma/client';
+import * as XLSX from 'xlsx';
 import {
+  inventoryBrandQuerySchema,
+  inventorySupplierQuerySchema,
   inventoryBrandSchema,
   inventoryBrandSupplierLinkSchema,
   inventoryItemBulkExportSchema,
   inventoryItemBulkStatusSchema,
   inventoryItemListQuerySchema,
+  inventoryItemImportConfirmSchema,
+  inventoryItemsExportQuerySchema,
+  inventoryItemQuerySchema,
   inventoryItemSchema,
   inventoryItemSavedViewSchema,
   inventoryItemSavedViewUpdateSchema,
@@ -24,6 +30,9 @@ import { PrismaService } from '../common/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
 
 type JsonObject = Record<string, Prisma.InputJsonValue | null>;
+type InventoryItemWithRefs = Prisma.InventoryItemGetPayload<{
+  include: { brand: true; supplier: true };
+}>;
 
 @Injectable()
 export class InventoryService {
@@ -346,12 +355,14 @@ export class InventoryService {
     const finalBaseUom = body.baseUom === 'PIECE' && mappedBaseUom !== 'PIECE' ? mappedBaseUom : body.baseUom;
     if (body.brandId) await this.requireBrand(companyId, body.brandId);
     if (body.supplierId) await this.requireSupplier(companyId, body.supplierId);
+    const generatedCode = await this.generateItemCode(companyId);
     const computedPriceIncVat = this.computePriceIncVat(body.listPriceExVat ?? null, body.discountRate ?? 0, body.purchaseVatRate ?? 0.2);
     const row = await this.prisma.inventoryItem.create({
       data: {
         companyId,
         name: body.name,
         sku: body.sku ?? null,
+        code: generatedCode,
         unit: finalBaseUom.toLowerCase(),
         brandId: body.brandId ?? null,
         supplierId: body.supplierId ?? null,
@@ -364,6 +375,7 @@ export class InventoryService {
         purchaseVatRate: new Prisma.Decimal(body.purchaseVatRate ?? 0.2),
         listPriceExVat: body.listPriceExVat === undefined || body.listPriceExVat === null ? null : new Prisma.Decimal(body.listPriceExVat),
         discountRate: new Prisma.Decimal(body.discountRate ?? 0),
+        priceDate: body.priceDate ? this.parseDateValue(body.priceDate, false) : new Date(),
         computedPriceIncVat: computedPriceIncVat === null ? null : new Prisma.Decimal(computedPriceIncVat),
         lastPurchaseUnitCost:
           body.lastPurchaseUnitCost === undefined || body.lastPurchaseUnitCost === null
@@ -377,7 +389,16 @@ export class InventoryService {
       include: { brand: true, supplier: true }
     });
 
-    await this.logCompany(actorUserId, companyId, 'company.inventory.item.create', 'inventory_item', row.id, body, ip, userAgent);
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.create',
+      'inventory_item',
+      row.id,
+      { ...body, generatedCode },
+      ip,
+      userAgent
+    );
     return row;
   }
 
@@ -416,6 +437,7 @@ export class InventoryService {
           ? { listPriceExVat: body.listPriceExVat === null ? null : new Prisma.Decimal(body.listPriceExVat) }
           : {}),
         ...(body.discountRate !== undefined ? { discountRate: new Prisma.Decimal(body.discountRate) } : {}),
+        ...(body.priceDate !== undefined ? { priceDate: this.parseDateValue(body.priceDate, false) } : {}),
         computedPriceIncVat: computedPriceIncVat === null ? null : new Prisma.Decimal(computedPriceIncVat),
         ...(body.lastPurchaseUnitCost !== undefined
           ? { lastPurchaseUnitCost: body.lastPurchaseUnitCost === null ? null : new Prisma.Decimal(body.lastPurchaseUnitCost) }
@@ -463,10 +485,280 @@ export class InventoryService {
     return this.setItemActive(actorUserId, companyId, id, false, ip, userAgent);
   }
 
-  listSuppliers(companyId: string) {
-    return this.prisma.inventorySupplier.findMany({
-      where: { companyId },
-      orderBy: [{ sortOrder: 'asc' }, { shortName: 'asc' }]
+  async exportItemsCsv(
+    actorUserId: string,
+    companyId: string,
+    query: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const parsed = inventoryItemsExportQuerySchema.parse(query);
+    const result = await this.queryItems(companyId, parsed, parsed.scope === 'all' ? 'all' : 'allFiltered');
+    const rows = this.mapItemsForExport(result.rows);
+    const csv = [
+      [
+        'ID',
+        'Ürün Adı',
+        'Ana Firma',
+        'Miktarı',
+        'Ürün Grubu',
+        'Fiyat Tarihi',
+        'Liste Fiyatı',
+        'İskontosu',
+        'Brüt Fiyatı',
+        'Durum'
+      ].join(','),
+      ...rows.map((row) =>
+        [
+          this.csvCell(row.code),
+          this.csvCell(row.name),
+          this.csvCell(row.brandName),
+          this.csvCell(row.quantity),
+          this.csvCell(row.subCategory),
+          this.csvCell(row.priceDate),
+          this.csvCell(row.listPriceExVat),
+          this.csvCell(row.discountRate),
+          this.csvCell(row.grossPrice),
+          this.csvCell(row.status)
+        ].join(',')
+      )
+    ].join('\n');
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.export',
+      'inventory_item',
+      undefined,
+      { format: 'csv', scope: parsed.scope, total: rows.length, search: parsed.search ?? null },
+      ip,
+      userAgent
+    );
+
+    return csv;
+  }
+
+  async exportItemsXlsx(
+    actorUserId: string,
+    companyId: string,
+    query: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const parsed = inventoryItemsExportQuerySchema.parse(query);
+    const result = await this.queryItems(companyId, parsed, parsed.scope === 'all' ? 'all' : 'allFiltered');
+    const rows = this.mapItemsForExport(result.rows).map((row) => ({
+      ID: row.code,
+      'Ürün Adı': row.name,
+      'Ana Firma': row.brandName,
+      'Miktarı': row.quantity,
+      'Ürün Grubu': row.subCategory,
+      'Fiyat Tarihi': row.priceDate,
+      'Liste Fiyatı': row.listPriceExVat,
+      'İskontosu': row.discountRate,
+      'Brüt Fiyatı': row.grossPrice,
+      Durum: row.status
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ürünler');
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.export',
+      'inventory_item',
+      undefined,
+      { format: 'xlsx', scope: parsed.scope, total: rows.length, search: parsed.search ?? null },
+      ip,
+      userAgent
+    );
+
+    return buffer;
+  }
+
+  getItemsImportTemplateCsv() {
+    const rows = [
+      [
+        'anaFirma',
+        'urunAdi',
+        'miktari',
+        'stokTakipBirimi',
+        'listeFiyatiKdvHaric',
+        'iskontosu',
+        'fiyatTarihi',
+        'alisKdvOrani',
+        'gelirMerkeziKategorisi',
+        'stokKategorisi',
+        'urunGrubu',
+        'distributor',
+        'paketTipi',
+        'aktifMi'
+      ],
+      ['Diageo', 'Johnnie Walker Black', '70', 'CL', '1250', '5', '2026-03-27', '20', 'Bar', 'Alkol', 'Viski', 'Gürpa', 'Bottle', 'true']
+    ];
+
+    return rows.map((row) => row.map((cell) => this.csvCell(cell)).join(',')).join('\n');
+  }
+
+  getItemsImportTemplateXlsx() {
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      [
+        'anaFirma',
+        'urunAdi',
+        'miktari',
+        'stokTakipBirimi',
+        'listeFiyatiKdvHaric',
+        'iskontosu',
+        'fiyatTarihi',
+        'alisKdvOrani',
+        'gelirMerkeziKategorisi',
+        'stokKategorisi',
+        'urunGrubu',
+        'distributor',
+        'paketTipi',
+        'aktifMi'
+      ],
+      ['Diageo', 'Johnnie Walker Black', '70', 'CL', '1250', '5', '2026-03-27', '20', 'Bar', 'Alkol', 'Viski', 'Gürpa', 'Bottle', 'true']
+    ]);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Şablon');
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+
+  async previewItemImport(
+    actorUserId: string,
+    companyId: string,
+    file: { originalname?: string; buffer: Buffer } | undefined,
+    ip?: string,
+    userAgent?: string
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('İçe aktarma dosyası bulunamadı');
+    }
+
+    const rows = this.readItemImportRows(file.buffer);
+    const preview = await this.buildItemImportPreview(companyId, rows);
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.import.preview',
+      'inventory_item',
+      undefined,
+      {
+        fileName: file.originalname ?? null,
+        totalRows: preview.summary.totalRows,
+        validRows: preview.summary.validRows,
+        invalidRows: preview.summary.invalidRows
+      },
+      ip,
+      userAgent
+    );
+
+    return preview;
+  }
+
+  async confirmItemImport(
+    actorUserId: string,
+    companyId: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = inventoryItemImportConfirmSchema.parse(payload);
+    const preview = await this.buildItemImportPreview(companyId, body.rows);
+
+    const createdIds: string[] = [];
+    const failures: Array<{ rowNumber: number; errors: string[] }> = [];
+
+    for (const row of preview.validRows) {
+      try {
+        const created = await this.createItem(
+          actorUserId,
+          companyId,
+          row.payload,
+          ip,
+          userAgent
+        );
+        createdIds.push(created.id);
+      } catch (error) {
+        failures.push({
+          rowNumber: row.rowNumber,
+          errors: [error instanceof Error ? error.message : 'Satır oluşturulamadı']
+        });
+      }
+    }
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.import.confirm',
+      'inventory_item',
+      undefined,
+      {
+        requestedRows: body.rows.length,
+        validRows: preview.validRows.length,
+        createdCount: createdIds.length,
+        failedCount: failures.length
+      },
+      ip,
+      userAgent
+    );
+
+    return {
+      createdCount: createdIds.length,
+      failedCount: failures.length,
+      createdIds,
+      failures
+    };
+  }
+
+  async listSuppliers(companyId: string, query: unknown) {
+    const parsed = inventorySupplierQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const rows = await this.prisma.inventorySupplier.findMany({
+      where: {
+        companyId,
+        ...(parsed.filterMissingBrandLink ? { brandLinks: { none: {} } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { shortName: { contains: search, mode: 'insensitive' } },
+                { legalName: { contains: search, mode: 'insensitive' } },
+                { taxOffice: { contains: search, mode: 'insensitive' } },
+                { taxNumber: { contains: search, mode: 'insensitive' } }
+              ]
+            }
+          : {})
+      },
+      include: {
+        brandLinks: {
+          select: { id: true }
+        }
+      }
+    });
+
+    const defaultSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const aMissing = a.brandLinks.length === 0 ? 0 : 1;
+      const bMissing = b.brandLinks.length === 0 ? 0 : 1;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      return a.shortName.localeCompare(b.shortName, 'tr');
+    };
+
+    return rows.sort((a, b) => {
+      if (!parsed.sortBy) return defaultSort(a, b);
+      const direction = parsed.sortDirection === 'desc' ? -1 : 1;
+      if (parsed.sortBy === 'shortName') return direction * a.shortName.localeCompare(b.shortName, 'tr');
+      if (parsed.sortBy === 'legalName') return direction * a.legalName.localeCompare(b.legalName, 'tr');
+      if (parsed.sortBy === 'taxOffice') return direction * (a.taxOffice ?? '').localeCompare(b.taxOffice ?? '', 'tr');
+      if (parsed.sortBy === 'taxNumber') return direction * (a.taxNumber ?? '').localeCompare(b.taxNumber ?? '', 'tr');
+      if (a.isActive === b.isActive) return direction * a.shortName.localeCompare(b.shortName, 'tr');
+      const aValue = a.isActive ? 1 : 0;
+      const bValue = b.isActive ? 1 : 0;
+      return direction * (aValue - bValue);
     });
   }
 
@@ -477,7 +769,10 @@ export class InventoryService {
         companyId,
         shortName: body.shortName,
         legalName: body.legalName,
-        address: body.address ?? null,
+        address: body.addressLine ?? body.address ?? null,
+        addressLine: body.addressLine ?? body.address ?? null,
+        city: body.city ?? null,
+        district: body.district ?? null,
         taxOffice: body.taxOffice ?? null,
         taxNumber: body.taxNumber ?? null,
         contactName: body.contactName ?? null,
@@ -499,7 +794,10 @@ export class InventoryService {
       data: {
         ...(body.shortName !== undefined ? { shortName: body.shortName } : {}),
         ...(body.legalName !== undefined ? { legalName: body.legalName } : {}),
-        ...(body.address !== undefined ? { address: body.address } : {}),
+        ...(body.address !== undefined ? { address: body.address, addressLine: body.address } : {}),
+        ...(body.addressLine !== undefined ? { addressLine: body.addressLine, address: body.addressLine } : {}),
+        ...(body.city !== undefined ? { city: body.city } : {}),
+        ...(body.district !== undefined ? { district: body.district } : {}),
         ...(body.taxOffice !== undefined ? { taxOffice: body.taxOffice } : {}),
         ...(body.taxNumber !== undefined ? { taxNumber: body.taxNumber } : {}),
         ...(body.contactName !== undefined ? { contactName: body.contactName } : {}),
@@ -546,17 +844,75 @@ export class InventoryService {
     }
   }
 
-  listBrands(companyId: string) {
-    return this.prisma.inventoryBrand.findMany({
-      where: { companyId },
+  async listBrands(companyId: string, query: unknown) {
+    const parsed = inventoryBrandQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const rows = await this.prisma.inventoryBrand.findMany({
+      where: {
+        companyId,
+        ...(parsed.filterMissingSupplier ? { supplierLinks: { none: {} } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { shortName: { contains: search, mode: 'insensitive' } },
+                {
+                  supplierLinks: {
+                    some: {
+                      supplier: {
+                        OR: [
+                          { shortName: { contains: search, mode: 'insensitive' } },
+                          { legalName: { contains: search, mode: 'insensitive' } }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
+      },
       include: {
         supplierLinks: {
           include: { supplier: true },
-          orderBy: { createdAt: 'asc' }
+          orderBy: [{ supplier: { shortName: 'asc' } }, { supplier: { legalName: 'asc' } }]
         }
-      },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+      }
     });
+
+    const linkedSupplierName = (row: (typeof rows)[number]) =>
+      row.supplierLinks[0]?.supplier?.shortName?.trim() ||
+      row.supplierLinks[0]?.supplier?.legalName?.trim() ||
+      '';
+
+    const defaultSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const aMissing = a.supplierLinks.length === 0 ? 0 : 1;
+      const bMissing = b.supplierLinks.length === 0 ? 0 : 1;
+      if (aMissing !== bMissing) return aMissing - bMissing;
+      return a.name.localeCompare(b.name, 'tr');
+    };
+
+    const sorted = rows.sort((a, b) => {
+      const direction = parsed.sortDirection === 'desc' ? -1 : 1;
+      if (!parsed.sortBy) return defaultSort(a, b);
+      if (parsed.sortBy === 'name') {
+        return direction * a.name.localeCompare(b.name, 'tr');
+      }
+      if (parsed.sortBy === 'status') {
+        if (a.isActive === b.isActive) return direction * a.name.localeCompare(b.name, 'tr');
+        const aValue = a.isActive ? 1 : 0;
+        const bValue = b.isActive ? 1 : 0;
+        return direction * (aValue - bValue);
+      }
+
+      const aSupplier = linkedSupplierName(a);
+      const bSupplier = linkedSupplierName(b);
+      const supplierCmp = aSupplier.localeCompare(bSupplier, 'tr');
+      if (supplierCmp !== 0) return direction * supplierCmp;
+      return direction * a.name.localeCompare(b.name, 'tr');
+    });
+
+    return sorted;
   }
 
   async createBrand(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
@@ -1369,6 +1725,439 @@ export class InventoryService {
     return (Number(value) * 100).toFixed(2).replace('.', ',');
   }
 
+  private async queryItems(
+    companyId: string,
+    parsed: ReturnType<typeof inventoryItemQuerySchema.parse>,
+    mode: 'page' | 'allFiltered' | 'all'
+  ) {
+    const rows = await this.prisma.inventoryItem.findMany({
+      where: {
+        companyId,
+        ...(mode === 'all' ? {} : parsed.brandId ? { brandId: parsed.brandId } : {}),
+        ...(mode === 'all'
+          ? {}
+          : parsed.status === 'active'
+            ? { isActive: true }
+            : parsed.status === 'inactive'
+              ? { isActive: false }
+              : {})
+      },
+      include: {
+        brand: true,
+        supplier: true
+      }
+    });
+
+    const filtered =
+      mode === 'all' || !parsed.search?.trim()
+        ? rows
+        : rows.filter((row) => this.itemMatchesSearch(row, parsed.search ?? ''));
+
+    const sorted = filtered.sort((a, b) => this.sortInventoryItems(a, b, parsed.sortBy, parsed.sortDirection));
+    const total = sorted.length;
+    const page = parsed.page ?? 1;
+    const pageSize = parsed.pageSize ?? 50;
+    const start = (page - 1) * pageSize;
+
+    return {
+      rows: mode === 'page' ? sorted.slice(start, start + pageSize) : sorted,
+      total,
+      page,
+      pageSize
+    };
+  }
+
+  private itemMatchesSearch(row: InventoryItemWithRefs, rawSearch: string) {
+    const search = this.normalizeSearch(rawSearch);
+    if (!search) return true;
+
+    const grossPrice = row.lastPurchaseUnitCost ?? row.computedPriceIncVat;
+    const fields = [
+      row.code,
+      row.name,
+      row.brand?.name,
+      row.supplier?.shortName,
+      row.supplier?.legalName,
+      this.mainStockAreaLabel(row.mainStockArea),
+      row.mainStockArea,
+      this.attributeCategoryLabel(row.attributeCategory),
+      row.attributeCategory,
+      row.subCategory,
+      row.packageSizeBase?.toString(),
+      this.baseUomLabel(row.baseUom),
+      row.baseUom,
+      row.priceDate.toISOString().slice(0, 10),
+      row.priceDate.toLocaleDateString('tr-TR'),
+      this.toDisplayMoney(row.listPriceExVat),
+      this.toDisplayPercent(row.discountRate),
+      this.toDisplayMoney(grossPrice),
+      row.isActive ? 'aktif' : 'pasif'
+    ];
+
+    return fields.some((field) => this.normalizeSearch(field).includes(search));
+  }
+
+  private sortInventoryItems(
+    a: InventoryItemWithRefs,
+    b: InventoryItemWithRefs,
+    sortBy: ReturnType<typeof inventoryItemQuerySchema.parse>['sortBy'],
+    sortDirection: ReturnType<typeof inventoryItemQuerySchema.parse>['sortDirection']
+  ) {
+    const direction = sortDirection === 'desc' ? -1 : 1;
+    const defaultSort = () => a.name.localeCompare(b.name, 'tr');
+
+    if (!sortBy) return defaultSort();
+    if (sortBy === 'code') return direction * (a.code ?? '').localeCompare(b.code ?? '', 'tr');
+    if (sortBy === 'brand') return direction * (a.brand?.name ?? '').localeCompare(b.brand?.name ?? '', 'tr');
+    if (sortBy === 'name') return direction * a.name.localeCompare(b.name, 'tr');
+    if (sortBy === 'packageSizeBase') return direction * (Number(a.packageSizeBase ?? 0) - Number(b.packageSizeBase ?? 0));
+    if (sortBy === 'subCategory') return direction * (a.subCategory ?? '').localeCompare(b.subCategory ?? '', 'tr');
+    if (sortBy === 'priceDate') return direction * (new Date(a.priceDate).getTime() - new Date(b.priceDate).getTime());
+    if (sortBy === 'listPriceExVat') return direction * (Number(a.listPriceExVat ?? 0) - Number(b.listPriceExVat ?? 0));
+    if (sortBy === 'discountRate') return direction * (Number(a.discountRate) - Number(b.discountRate));
+    if (sortBy === 'grossPrice') {
+      return direction * (Number(a.lastPurchaseUnitCost ?? a.computedPriceIncVat ?? 0) - Number(b.lastPurchaseUnitCost ?? b.computedPriceIncVat ?? 0));
+    }
+    if (sortBy === 'status') {
+      if (a.isActive === b.isActive) return direction * defaultSort();
+      return direction * ((a.isActive ? 1 : 0) - (b.isActive ? 1 : 0));
+    }
+    return defaultSort();
+  }
+
+  private mapItemsForExport(rows: InventoryItemWithRefs[]) {
+    return rows.map((row) => ({
+      code: row.code ?? '-',
+      name: row.name,
+      brandName: row.brand?.name ?? '-',
+      quantity: this.toDisplayQuantity(row.packageSizeBase),
+      subCategory: row.subCategory ?? '-',
+      priceDate: row.priceDate.toISOString().slice(0, 10),
+      listPriceExVat: this.toDisplayMoney(row.listPriceExVat),
+      discountRate: `%${this.toDisplayPercent(row.discountRate)}`,
+      grossPrice: this.toDisplayMoney(row.lastPurchaseUnitCost ?? row.computedPriceIncVat),
+      status: row.isActive ? 'Aktif' : 'Pasif'
+    }));
+  }
+
+  private readItemImportRows(buffer: Buffer) {
+    const workbook = XLSX.read(buffer, { type: 'buffer', raw: false });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!firstSheet) {
+      throw new BadRequestException('Dosyada okunabilir sayfa bulunamadı');
+    }
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
+      defval: '',
+      raw: false
+    });
+
+    return rows.map((row) =>
+      Object.fromEntries(Object.entries(row).map(([key, value]) => [String(key).trim().replace(/^\uFEFF/, ''), value]))
+    );
+  }
+
+  private async buildItemImportPreview(companyId: string, rows: Record<string, unknown>[]) {
+    const brands = await this.prisma.inventoryBrand.findMany({
+      where: { companyId },
+      select: { id: true, name: true, shortName: true }
+    });
+    const suppliers = await this.prisma.inventorySupplier.findMany({
+      where: { companyId },
+      select: { id: true, shortName: true, legalName: true }
+    });
+    const existingItems = await this.prisma.inventoryItem.findMany({
+      where: { companyId },
+      select: { brandId: true, name: true, packageSizeBase: true, baseUom: true }
+    });
+
+    const brandMap = new Map<string, { id: string; name: string }>();
+    for (const brand of brands) {
+      brandMap.set(this.normalizeSearch(brand.name), { id: brand.id, name: brand.name });
+      if (brand.shortName) brandMap.set(this.normalizeSearch(brand.shortName), { id: brand.id, name: brand.name });
+    }
+
+    const supplierMap = new Map<string, { id: string; name: string }>();
+    for (const supplier of suppliers) {
+      supplierMap.set(this.normalizeSearch(supplier.shortName), { id: supplier.id, name: supplier.shortName });
+      supplierMap.set(this.normalizeSearch(supplier.legalName), { id: supplier.id, name: supplier.shortName });
+    }
+
+    const existingKeys = new Set(
+      existingItems.map((item) => this.inventoryImportDuplicateKey(item.brandId, item.name, item.packageSizeBase, item.baseUom))
+    );
+    const importKeys = new Set<string>();
+    const validRows: Array<{ rowNumber: number; raw: Record<string, unknown>; payload: Record<string, unknown>; display: Record<string, string> }> = [];
+    const invalidRows: Array<{ rowNumber: number; raw: Record<string, unknown>; errors: string[] }> = [];
+
+    rows.forEach((rawRow, index) => {
+      const rowNumber = index + 2;
+      const errors: string[] = [];
+      const parsed = this.parseImportRow(rawRow);
+
+      if (!parsed.urunAdi) errors.push('Ürün Adı zorunlu');
+      if (!parsed.anaFirma) errors.push('Ana Firma zorunlu');
+
+      const brand = parsed.anaFirma ? brandMap.get(this.normalizeSearch(parsed.anaFirma)) : undefined;
+      if (parsed.anaFirma && !brand) errors.push('Ana Firma bulunamadı');
+
+      const supplier = parsed.distributor ? supplierMap.get(this.normalizeSearch(parsed.distributor)) : undefined;
+      if (parsed.distributor && !supplier) errors.push('Distribütör bulunamadı');
+
+      const quantity = this.parseImportedNumber(parsed.miktari);
+      if (quantity === null || quantity <= 0) errors.push('Miktarı sayısal ve 0’dan büyük olmalı');
+
+      const baseUom = this.parseImportedBaseUom(parsed.stokTakipBirimi);
+      if (!baseUom) errors.push('Stok Takip Birimi geçersiz');
+
+      const listPriceExVat = this.parseImportedNumber(parsed.listeFiyatiKdvHaric);
+      if (parsed.listeFiyatiKdvHaric && listPriceExVat === null) errors.push('Liste Fiyatı sayısal olmalı');
+
+      const discountRate = this.parseImportedRate(parsed.iskontosu);
+      if (parsed.iskontosu && discountRate === null) errors.push('İskonto değeri geçersiz');
+
+      const purchaseVatRate = this.parseImportedRate(parsed.alisKdvOrani);
+      if (parsed.alisKdvOrani && purchaseVatRate === null) errors.push('Alış KDV Oranı değeri geçersiz');
+
+      const mainStockArea = this.parseImportedMainStockArea(parsed.gelirMerkeziKategorisi);
+      if (parsed.gelirMerkeziKategorisi && !mainStockArea) errors.push('Gelir Merkezi Kategorisi geçersiz');
+
+      const attributeCategory = this.parseImportedAttributeCategory(parsed.stokKategorisi);
+      if (parsed.stokKategorisi && !attributeCategory) errors.push('Stok Kategorisi geçersiz');
+
+      const packageUom = this.parseImportedPackageUom(parsed.paketTipi);
+      if (parsed.paketTipi && !packageUom) errors.push('Paket Tipi geçersiz');
+
+      let priceDate: string | undefined;
+      if (parsed.fiyatTarihi) {
+        try {
+          priceDate = this.parseDateValue(parsed.fiyatTarihi, false).toISOString().slice(0, 10);
+        } catch {
+          errors.push('Fiyat Tarihi geçersiz');
+        }
+      }
+
+      const duplicateKey =
+        brand && baseUom && quantity !== null
+          ? this.inventoryImportDuplicateKey(brand.id, parsed.urunAdi, quantity, baseUom)
+          : null;
+
+      if (duplicateKey && existingKeys.has(duplicateKey)) errors.push('Bu ürün zaten mevcut');
+      if (duplicateKey && importKeys.has(duplicateKey)) errors.push('Dosya içinde tekrarlanan ürün');
+
+      if (errors.length > 0 || !brand || !baseUom || quantity === null) {
+        invalidRows.push({ rowNumber, raw: rawRow, errors });
+        return;
+      }
+
+      importKeys.add(duplicateKey!);
+      validRows.push({
+        rowNumber,
+        raw: rawRow,
+        payload: {
+          brandId: brand.id,
+          supplierId: supplier?.id ?? null,
+          name: parsed.urunAdi,
+          packageSizeBase: quantity,
+          baseUom,
+          listPriceExVat,
+          discountRate: discountRate ?? 0,
+          priceDate,
+          purchaseVatRate: purchaseVatRate ?? 0.2,
+          mainStockArea: mainStockArea ?? 'OTHER',
+          attributeCategory: attributeCategory ?? 'OTHER',
+          subCategory: parsed.urunGrubu || null,
+          packageUom: packageUom ?? null,
+          isActive: this.parseImportedBoolean(parsed.aktifMi) ?? true
+        },
+        display: {
+          anaFirma: brand.name,
+          urunAdi: parsed.urunAdi,
+          miktari: this.toDisplayQuantity(quantity),
+          stokTakipBirimi: this.baseUomLabel(baseUom),
+          fiyatTarihi: priceDate ?? 'Oluşturma tarihi',
+          listeFiyatiKdvHaric: listPriceExVat === null ? '-' : this.toDisplayMoney(listPriceExVat),
+          iskontosu: `%${this.toDisplayPercentFromNumber(discountRate ?? 0)}`,
+          alisKdvOrani: `%${this.toDisplayPercentFromNumber(purchaseVatRate ?? 0.2)}`,
+          gelirMerkeziKategorisi: this.mainStockAreaLabel(mainStockArea ?? 'OTHER'),
+          stokKategorisi: this.attributeCategoryLabel(attributeCategory ?? 'OTHER'),
+          urunGrubu: parsed.urunGrubu || '-',
+          distributor: supplier?.name ?? '-'
+        }
+      });
+    });
+
+    return {
+      summary: {
+        totalRows: rows.length,
+        validRows: validRows.length,
+        invalidRows: invalidRows.length
+      },
+      validRows,
+      invalidRows
+    };
+  }
+
+  private parseImportRow(raw: Record<string, unknown>) {
+    const read = (key: string) => {
+      const value = raw[key];
+      return value === undefined || value === null ? '' : String(value).trim();
+    };
+
+    return {
+      anaFirma: read('anaFirma'),
+      urunAdi: read('urunAdi'),
+      miktari: read('miktari'),
+      stokTakipBirimi: read('stokTakipBirimi'),
+      listeFiyatiKdvHaric: read('listeFiyatiKdvHaric'),
+      iskontosu: read('iskontosu'),
+      fiyatTarihi: read('fiyatTarihi'),
+      alisKdvOrani: read('alisKdvOrani'),
+      gelirMerkeziKategorisi: read('gelirMerkeziKategorisi'),
+      stokKategorisi: read('stokKategorisi'),
+      urunGrubu: read('urunGrubu'),
+      distributor: read('distributor'),
+      paketTipi: read('paketTipi'),
+      aktifMi: read('aktifMi')
+    };
+  }
+
+  private inventoryImportDuplicateKey(
+    brandId: string | null,
+    name: string,
+    packageSizeBase: Prisma.Decimal | string | number | null,
+    baseUom: string
+  ) {
+    return [brandId ?? '', this.normalizeSearch(name), packageSizeBase?.toString() ?? '', baseUom].join('::');
+  }
+
+  private parseImportedNumber(value: string) {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const normalized = trimmed.includes(',') ? trimmed.replace(/\./g, '').replace(',', '.') : trimmed;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private parseImportedRate(value: string) {
+    if (!value) return null;
+    const parsed = this.parseImportedNumber(value);
+    if (parsed === null) return null;
+    const decimal = parsed > 1 ? parsed / 100 : parsed;
+    if (decimal < 0 || decimal > 1) return null;
+    return decimal;
+  }
+
+  private parseImportedBoolean(value: string) {
+    const normalized = this.normalizeSearch(value);
+    if (!normalized) return null;
+    if (['true', 'evet', 'aktif', '1'].includes(normalized)) return true;
+    if (['false', 'hayir', 'pasif', '0'].includes(normalized)) return false;
+    return null;
+  }
+
+  private parseImportedBaseUom(value: string): 'CL' | 'ML' | 'GRAM' | 'KG' | 'PIECE' | null {
+    const normalized = this.normalizeSearch(value);
+    if (normalized === 'cl') return 'CL';
+    if (normalized === 'ml') return 'ML';
+    if (['gram', 'gr'].includes(normalized)) return 'GRAM';
+    if (['kg', 'kilogram'].includes(normalized)) return 'KG';
+    if (['adet', 'ad', 'piece'].includes(normalized)) return 'PIECE';
+    return null;
+  }
+
+  private parseImportedPackageUom(value: string): 'BOTTLE' | 'PACK' | 'PIECE' | null {
+    const normalized = this.normalizeSearch(value);
+    if (!normalized) return null;
+    if (['bottle', 'sise', 'şişe'].includes(normalized)) return 'BOTTLE';
+    if (['pack', 'paket'].includes(normalized)) return 'PACK';
+    if (['adet', 'ad', 'piece'].includes(normalized)) return 'PIECE';
+    return null;
+  }
+
+  private parseImportedMainStockArea(value: string): 'BAR' | 'KITCHEN' | 'OTHER' | null {
+    const normalized = this.normalizeSearch(value);
+    if (!normalized) return null;
+    if (normalized === 'bar') return 'BAR';
+    if (['mutfak', 'kitchen'].includes(normalized)) return 'KITCHEN';
+    if (['diger', 'diğer', 'other'].includes(normalized)) return 'OTHER';
+    return null;
+  }
+
+  private parseImportedAttributeCategory(value: string): 'ALCOHOL' | 'SOFT' | 'KITCHEN' | 'OTHER' | null {
+    const normalized = this.normalizeSearch(value);
+    if (!normalized) return null;
+    if (['alkol', 'alcohol'].includes(normalized)) return 'ALCOHOL';
+    if (normalized === 'soft') return 'SOFT';
+    if (['mutfak', 'kitchen'].includes(normalized)) return 'KITCHEN';
+    if (['diger', 'diğer', 'other'].includes(normalized)) return 'OTHER';
+    return null;
+  }
+
+  private normalizeSearch(value: unknown) {
+    return String(value ?? '')
+      .trim()
+      .toLocaleLowerCase('tr-TR')
+      .replaceAll('ı', 'i')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ü', 'u')
+      .replaceAll('ş', 's')
+      .replaceAll('ö', 'o')
+      .replaceAll('ç', 'c');
+  }
+
+  private baseUomLabel(value: 'CL' | 'ML' | 'GRAM' | 'KG' | 'PIECE') {
+    if (value === 'CL') return 'cl';
+    if (value === 'ML') return 'ml';
+    if (value === 'GRAM') return 'gram';
+    if (value === 'KG') return 'kg';
+    return 'adet';
+  }
+
+  private mainStockAreaLabel(value: 'BAR' | 'KITCHEN' | 'OTHER') {
+    if (value === 'BAR') return 'Bar';
+    if (value === 'KITCHEN') return 'Mutfak';
+    return 'Diğer';
+  }
+
+  private attributeCategoryLabel(value: 'ALCOHOL' | 'SOFT' | 'KITCHEN' | 'OTHER') {
+    if (value === 'ALCOHOL') return 'Alkol';
+    if (value === 'SOFT') return 'Soft';
+    if (value === 'KITCHEN') return 'Mutfak';
+    return 'Diğer';
+  }
+
+  private toDisplayMoney(value: Prisma.Decimal | string | number | null | undefined) {
+    if (value === null || value === undefined || value === '') return '-';
+    const asNumber = Number(value);
+    if (!Number.isFinite(asNumber)) return '-';
+    return asNumber.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  private toDisplayQuantity(value: Prisma.Decimal | string | number | null | undefined) {
+    if (value === null || value === undefined || value === '') return '-';
+    const asNumber = Number(value);
+    if (!Number.isFinite(asNumber)) return '-';
+    return asNumber.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  }
+
+  private toDisplayPercent(value: Prisma.Decimal | string | number | null | undefined) {
+    if (value === null || value === undefined || value === '') return '0';
+    const asNumber = Number(value);
+    if (!Number.isFinite(asNumber)) return '0';
+    return this.toDisplayPercentFromNumber(asNumber);
+  }
+
+  private toDisplayPercentFromNumber(value: number) {
+    return String((value * 100).toFixed(2)).replace(/\.00$/, '');
+  }
+
+  private csvCell(value: string) {
+    const escaped = value.replaceAll('"', '""');
+    return `"${escaped}"`;
+  }
+
   private computePriceIncVat(
     listPriceExVat: number | null | undefined,
     discountRate: number | null | undefined,
@@ -1380,6 +2169,21 @@ export class InventoryService {
     const netExVat = listPriceExVat * (1 - discount);
     const netIncVat = netExVat * (1 + vat);
     return Number(netIncVat.toFixed(4));
+  }
+
+  private async generateItemCode(companyId: string) {
+    const total = await this.prisma.inventoryItem.count({ where: { companyId } });
+    let counter = total + 1;
+    while (counter < total + 10000) {
+      const code = `ITM-${String(counter).padStart(6, '0')}`.toUpperCase();
+      const existing = await this.prisma.inventoryItem.findFirst({
+        where: { companyId, code },
+        select: { id: true }
+      });
+      if (!existing) return code;
+      counter += 1;
+    }
+    return `ITM-${Date.now().toString().slice(-8)}`.toUpperCase();
   }
 
   private unitToBaseUom(unit: string | null | undefined): 'CL' | 'ML' | 'GRAM' | 'KG' | 'PIECE' {

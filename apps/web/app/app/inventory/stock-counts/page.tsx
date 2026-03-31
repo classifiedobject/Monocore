@@ -25,6 +25,13 @@ type Item = {
   isActive: boolean;
 };
 
+type ItemListResponse = {
+  rows: Item[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
 type Session = {
   id: string;
   warehouseId: string;
@@ -78,22 +85,6 @@ export default function InventoryStockCountsPage() {
   const isPackageItem = Boolean(selectedItem?.packageUom && packageSize > 0);
   const computedTotal = isPackageItem ? asNum(closedPackageQty) * packageSize + asNum(openQtyBase) : asNum(countedQtyBase);
 
-  async function loadInitial() {
-    const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
-      apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
-      apiFetch('/app-api/inventory/warehouses') as Promise<Warehouse[]>,
-      apiFetch('/app-api/inventory/items') as Promise<Item[] | { rows: Item[] }>,
-      apiFetch('/app-api/inventory/stock-counts') as Promise<Session[]>
-    ]);
-    const normalizedItems = Array.isArray(itemRes) ? itemRes : itemRes.rows;
-    setCaps(capsRes);
-    setWarehouses(warehouseRes);
-    setItems(normalizedItems);
-    setSessions(sessionRes);
-    if (!warehouseId && warehouseRes[0]?.id) setWarehouseId(warehouseRes[0].id);
-    if (!lineItemId && normalizedItems[0]?.id) setLineItemId(normalizedItems[0].id);
-  }
-
   async function loadSessions() {
     const rows = (await apiFetch('/app-api/inventory/stock-counts')) as Session[];
     setSessions(rows);
@@ -105,7 +96,22 @@ export default function InventoryStockCountsPage() {
   }
 
   useEffect(() => {
-    loadInitial().catch(handleApiError);
+    const init = async () => {
+      const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
+        apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
+        apiFetch('/app-api/inventory/warehouses') as Promise<Warehouse[]>,
+        apiFetch('/app-api/inventory/items') as Promise<Item[] | ItemListResponse>,
+        apiFetch('/app-api/inventory/stock-counts') as Promise<Session[]>
+      ]);
+      const itemRows = Array.isArray(itemRes) ? itemRes : itemRes.rows;
+      setCaps(capsRes);
+      setWarehouses(warehouseRes);
+      setItems(itemRows);
+      setSessions(sessionRes);
+      setWarehouseId((current) => current || warehouseRes[0]?.id || '');
+      setLineItemId((current) => current || itemRows[0]?.id || '');
+    };
+    init().catch(handleApiError);
   }, []);
 
   useEffect(() => {
