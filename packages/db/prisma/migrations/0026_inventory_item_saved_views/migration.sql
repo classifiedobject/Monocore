@@ -1,6 +1,6 @@
 CREATE TABLE "InventoryItemSavedView" (
-    "id" TEXT NOT NULL,
-    "companyId" TEXT NOT NULL,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "companyId" UUID NOT NULL,
     "name" TEXT NOT NULL,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
     "filtersJson" JSONB NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE "InventoryItemSavedView" (
     "sortBy" TEXT,
     "sortDirection" TEXT,
     "pageSize" INTEGER,
-    "createdByUserId" TEXT NOT NULL,
+    "createdByUserId" UUID NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
