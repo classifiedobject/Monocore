@@ -118,8 +118,8 @@ export default function InventoryPage() {
   }
 
   async function loadItems() {
-    const rows = (await apiFetch('/app-api/inventory/items')) as Item[];
-    setItems(rows);
+    const response = (await apiFetch('/app-api/inventory/items')) as Item[] | { rows: Item[] };
+    setItems(Array.isArray(response) ? response : response.rows);
   }
 
   async function loadWarehouses() {

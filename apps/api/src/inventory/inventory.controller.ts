@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from '../common/guards/module-installed.guard.js';
@@ -43,8 +43,42 @@ export class InventoryController {
 
   @Get('items')
   @RequirePermissions('module:inventory-core.items.read')
-  listItems(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listItems(req.companyId);
+  listItems(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.inventory.listItems(req.companyId, query);
+  }
+
+  @Get('items/saved-views')
+  @RequirePermissions('module:inventory-core.items.read')
+  listItemSavedViews(@Req() req: Request & { companyId: string }) {
+    return this.inventory.listItemSavedViews(req.companyId);
+  }
+
+  @Post('items/saved-views')
+  @RequirePermissions('module:inventory-core.items.manage')
+  createItemSavedView(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.createItemSavedView(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('items/saved-views/:id')
+  @RequirePermissions('module:inventory-core.items.manage')
+  updateItemSavedView(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.updateItemSavedView(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('items/saved-views/:id')
+  @RequirePermissions('module:inventory-core.items.manage')
+  deleteItemSavedView(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deleteItemSavedView(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/saved-views/:id/set-default')
+  @RequirePermissions('module:inventory-core.items.manage')
+  setDefaultItemSavedView(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.setDefaultItemSavedView(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
   @Post('items')
@@ -83,6 +117,28 @@ export class InventoryController {
   @RequirePermissions('module:inventory-core.items.manage')
   deactivateItem(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.inventory.deactivateItem(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/bulk-status')
+  @RequirePermissions('module:inventory-core.items.manage')
+  bulkSetItemStatus(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.bulkSetItemStatus(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/bulk-export')
+  @RequirePermissions('module:inventory-core.items.read')
+  async bulkExportItems(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string },
+    @Res() res: Response
+  ) {
+    const file = await this.inventory.bulkExportItems(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
   }
 
   @Get('movements')

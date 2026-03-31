@@ -82,15 +82,16 @@ export default function InventoryStockCountsPage() {
     const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
       apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
       apiFetch('/app-api/inventory/warehouses') as Promise<Warehouse[]>,
-      apiFetch('/app-api/inventory/items') as Promise<Item[]>,
+      apiFetch('/app-api/inventory/items') as Promise<Item[] | { rows: Item[] }>,
       apiFetch('/app-api/inventory/stock-counts') as Promise<Session[]>
     ]);
+    const normalizedItems = Array.isArray(itemRes) ? itemRes : itemRes.rows;
     setCaps(capsRes);
     setWarehouses(warehouseRes);
-    setItems(itemRes);
+    setItems(normalizedItems);
     setSessions(sessionRes);
     if (!warehouseId && warehouseRes[0]?.id) setWarehouseId(warehouseRes[0].id);
-    if (!lineItemId && itemRes[0]?.id) setLineItemId(itemRes[0].id);
+    if (!lineItemId && normalizedItems[0]?.id) setLineItemId(normalizedItems[0].id);
   }
 
   async function loadSessions() {
@@ -351,4 +352,3 @@ export default function InventoryStockCountsPage() {
     </section>
   );
 }
-
