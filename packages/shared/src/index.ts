@@ -462,6 +462,64 @@ export const inventoryItemCostSchema = z.object({
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable()
 });
 
+export const inventoryItemBulkStatusSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  isActive: z.boolean()
+});
+
+export const inventoryItemBulkExportSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  format: z.enum(['csv', 'excel'])
+});
+
+export const inventoryItemListQuerySchema = z.object({
+  search: z.string().trim().min(1).optional(),
+  brandId: z.string().uuid().optional(),
+  status: z.enum(['all', 'active', 'inactive']).optional(),
+  mainStockArea: z.enum(['BAR', 'KITCHEN', 'OTHER']).optional(),
+  attributeCategory: z.enum(['ALCOHOL', 'SOFT', 'KITCHEN', 'OTHER']).optional(),
+  subCategory: z.string().trim().min(1).optional(),
+  sortBy: z
+    .enum([
+      'name',
+      'brand',
+      'supplier',
+      'mainStockArea',
+      'attributeCategory',
+      'baseUom',
+      'purchaseVatRate',
+      'listPriceExVat',
+      'discountRate',
+      'computedPriceIncVat',
+      'isActive',
+      'sortOrder'
+    ])
+    .optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional()
+});
+
+const inventoryItemSavedViewFiltersSchema = z.object({
+  brandId: z.string().uuid().nullable().optional(),
+  status: z.enum(['all', 'active', 'inactive']).nullable().optional(),
+  mainStockArea: z.enum(['BAR', 'KITCHEN', 'OTHER']).nullable().optional(),
+  attributeCategory: z.enum(['ALCOHOL', 'SOFT', 'KITCHEN', 'OTHER']).nullable().optional(),
+  subCategory: z.string().trim().max(120).nullable().optional()
+});
+
+export const inventoryItemSavedViewSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  isDefault: z.boolean().optional(),
+  filtersJson: inventoryItemSavedViewFiltersSchema.default({}),
+  searchQuery: z.string().trim().max(200).nullable().optional(),
+  sortBy: inventoryItemListQuerySchema.shape.sortBy.nullable().optional(),
+  sortDirection: inventoryItemListQuerySchema.shape.sortDirection.nullable().optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).nullable().optional()
+});
+
+export const inventoryItemSavedViewUpdateSchema = inventoryItemSavedViewSchema.partial();
+
 export const inventoryMovementSchema = z.object({
   itemId: z.string().uuid(),
   warehouseId: z.string().uuid(),

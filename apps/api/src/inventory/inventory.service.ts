@@ -3,7 +3,12 @@ import { Prisma, type InventoryMovementType } from '@prisma/client';
 import {
   inventoryBrandSchema,
   inventoryBrandSupplierLinkSchema,
+  inventoryItemBulkExportSchema,
+  inventoryItemBulkStatusSchema,
+  inventoryItemListQuerySchema,
   inventoryItemSchema,
+  inventoryItemSavedViewSchema,
+  inventoryItemSavedViewUpdateSchema,
   inventoryItemUpdateSchema,
   inventoryItemCostSchema,
   inventoryMovementQuerySchema,
@@ -104,12 +109,235 @@ export class InventoryService {
     return row;
   }
 
-  listItems(companyId: string) {
-    return this.prisma.inventoryItem.findMany({
-      where: { companyId },
+  async listItems(companyId: string, query?: unknown) {
+    const parsed = inventoryItemListQuerySchema.parse(query ?? {});
+    const page = parsed.page ?? 1;
+    const pageSize = parsed.pageSize ?? 50;
+    const search = parsed.search?.trim();
+    const where: Prisma.InventoryItemWhereInput = {
+      companyId,
+      ...(parsed.brandId ? { brandId: parsed.brandId } : {}),
+      ...(parsed.status === 'active' ? { isActive: true } : {}),
+      ...(parsed.status === 'inactive' ? { isActive: false } : {}),
+      ...(parsed.mainStockArea ? { mainStockArea: parsed.mainStockArea } : {}),
+      ...(parsed.attributeCategory ? { attributeCategory: parsed.attributeCategory } : {}),
+      ...(parsed.subCategory ? { subCategory: { contains: parsed.subCategory, mode: 'insensitive' } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { sku: { contains: search, mode: 'insensitive' } },
+              { subCategory: { contains: search, mode: 'insensitive' } },
+              { mainStockArea: { equals: this.normalizeMainStockAreaSearch(search) ?? undefined } },
+              { attributeCategory: { equals: this.normalizeAttributeCategorySearch(search) ?? undefined } },
+              { brand: { name: { contains: search, mode: 'insensitive' } } },
+              { supplier: { shortName: { contains: search, mode: 'insensitive' } } }
+            ].filter(Boolean) as Prisma.InventoryItemWhereInput[]
+          }
+        : {})
+    };
+
+    const orderBy = this.itemOrderBy(parsed.sortBy ?? null, parsed.sortDirection ?? null);
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.inventoryItem.count({ where }),
+      this.prisma.inventoryItem.findMany({
+        where,
+        include: { brand: true, supplier: true },
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      })
+    ]);
+
+    return {
+      rows,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
+    };
+  }
+
+  async bulkSetItemStatus(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryItemBulkStatusSchema.parse(payload);
+    const rows = await this.prisma.inventoryItem.findMany({
+      where: { companyId, id: { in: body.ids } },
+      select: { id: true }
+    });
+    const foundIds = new Set(rows.map((row) => row.id));
+    const missingIds = body.ids.filter((id) => !foundIds.has(id));
+    if (missingIds.length > 0) {
+      await this.logCompany(
+        actorUserId,
+        companyId,
+        body.isActive ? 'company.inventory.item.bulk_activate' : 'company.inventory.item.bulk_deactivate',
+        'inventory_item',
+        undefined,
+        { status: 'failed', reason: 'missing_items', missingIds, count: body.ids.length, isActive: body.isActive },
+        ip,
+        userAgent
+      );
+      throw new NotFoundException('Some selected items could not be found.');
+    }
+
+    await this.prisma.inventoryItem.updateMany({
+      where: { companyId, id: { in: body.ids } },
+      data: { isActive: body.isActive }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      body.isActive ? 'company.inventory.item.bulk_activate' : 'company.inventory.item.bulk_deactivate',
+      'inventory_item',
+      undefined,
+      { status: 'success', ids: body.ids, count: body.ids.length, isActive: body.isActive },
+      ip,
+      userAgent
+    );
+
+    return { ok: true, count: body.ids.length, isActive: body.isActive };
+  }
+
+  async bulkExportItems(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryItemBulkExportSchema.parse(payload);
+    const rows = await this.prisma.inventoryItem.findMany({
+      where: { companyId, id: { in: body.ids } },
       include: { brand: true, supplier: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
     });
+
+    if (rows.length === 0) {
+      throw new NotFoundException('No inventory items found for export.');
+    }
+
+    const exportRows = rows.map((row) => ({
+      'Ürün Adı': row.name,
+      'Ana Firma': row.brand?.name ?? '-',
+      'Distribütör': row.supplier?.shortName ?? '-',
+      'Ana Stok': row.mainStockArea,
+      'Nitelik': row.attributeCategory,
+      'Takip Birimi': row.baseUom.toLowerCase(),
+      Paket: row.packageUom ? `${row.packageUom} (${row.packageSizeBase ?? '-'})` : '-',
+      'Alış KDV %': this.percentString(row.purchaseVatRate),
+      'Liste Fiyatı': this.moneyString(row.listPriceExVat),
+      'İskonto %': this.percentString(row.discountRate),
+      'Net Alış (KDV Dahil)': this.moneyString(row.computedPriceIncVat),
+      Durum: row.isActive ? 'Aktif' : 'Pasif'
+    }));
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.inventory.item.bulk_export',
+      'inventory_item',
+      undefined,
+      { status: 'success', ids: body.ids, count: body.ids.length, format: body.format },
+      ip,
+      userAgent
+    );
+
+    if (body.format === 'csv') {
+      return {
+        filename: 'inventory-items-selected.csv',
+        contentType: 'text/csv; charset=utf-8',
+        buffer: Buffer.from(this.toCsv(exportRows), 'utf-8')
+      };
+    }
+
+    return {
+      filename: 'inventory-items-selected.xls',
+      contentType: 'application/vnd.ms-excel; charset=utf-8',
+      buffer: Buffer.from(this.toExcelXml('Inventory Items', exportRows), 'utf-8')
+    };
+  }
+
+  listItemSavedViews(companyId: string) {
+    return this.prisma.inventoryItemSavedView.findMany({
+      where: { companyId },
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }]
+    });
+  }
+
+  async createItemSavedView(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryItemSavedViewSchema.parse(payload);
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (body.isDefault) {
+        await tx.inventoryItemSavedView.updateMany({
+          where: { companyId, isDefault: true },
+          data: { isDefault: false }
+        });
+      }
+      return tx.inventoryItemSavedView.create({
+        data: {
+          companyId,
+          name: body.name,
+          isDefault: body.isDefault ?? false,
+          filtersJson: (body.filtersJson ?? {}) as Prisma.InputJsonValue,
+          searchQuery: body.searchQuery ?? null,
+          sortBy: body.sortBy ?? null,
+          sortDirection: body.sortDirection ?? null,
+          pageSize: body.pageSize ?? null,
+          createdByUserId: actorUserId
+        }
+      });
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.create', 'inventory_item_saved_view', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async updateItemSavedView(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = inventoryItemSavedViewUpdateSchema.parse(payload);
+    const existing = await this.requireItemSavedView(companyId, id);
+    const row = await this.prisma.$transaction(async (tx) => {
+      if (body.isDefault) {
+        await tx.inventoryItemSavedView.updateMany({
+          where: { companyId, isDefault: true, NOT: { id: existing.id } },
+          data: { isDefault: false }
+        });
+      }
+
+      return tx.inventoryItemSavedView.update({
+        where: { id: existing.id },
+        data: {
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.isDefault !== undefined ? { isDefault: body.isDefault } : {}),
+          ...(body.filtersJson !== undefined ? { filtersJson: body.filtersJson as Prisma.InputJsonValue } : {}),
+          ...(body.searchQuery !== undefined ? { searchQuery: body.searchQuery ?? null } : {}),
+          ...(body.sortBy !== undefined ? { sortBy: body.sortBy ?? null } : {}),
+          ...(body.sortDirection !== undefined ? { sortDirection: body.sortDirection ?? null } : {}),
+          ...(body.pageSize !== undefined ? { pageSize: body.pageSize ?? null } : {})
+        }
+      });
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.update', 'inventory_item_saved_view', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async deleteItemSavedView(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireItemSavedView(companyId, id);
+    await this.prisma.inventoryItemSavedView.delete({ where: { id: existing.id } });
+    await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.delete', 'inventory_item_saved_view', existing.id, { name: existing.name }, ip, userAgent);
+    return { ok: true };
+  }
+
+  async setDefaultItemSavedView(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireItemSavedView(companyId, id);
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.inventoryItemSavedView.updateMany({
+        where: { companyId, isDefault: true },
+        data: { isDefault: false }
+      });
+      return tx.inventoryItemSavedView.update({
+        where: { id: existing.id },
+        data: { isDefault: true }
+      });
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.set_default', 'inventory_item_saved_view', row.id, { name: row.name }, ip, userAgent);
+    return row;
   }
 
   async createItem(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
@@ -1098,6 +1326,49 @@ export class InventoryService {
     return Number(value);
   }
 
+  private toCsv(rows: Array<Record<string, string>>) {
+    const headers = Object.keys(rows[0] ?? {});
+    const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
+    return [headers.map(escape).join(','), ...rows.map((row) => headers.map((header) => escape(row[header] ?? '')).join(','))].join('\n');
+  }
+
+  private toExcelXml(sheetName: string, rows: Array<Record<string, string>>) {
+    const headers = Object.keys(rows[0] ?? {});
+    const escape = (value: string) =>
+      value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&apos;');
+    const cells = (values: string[]) =>
+      values.map((value) => `<Cell><Data ss:Type="String">${escape(value)}</Data></Cell>`).join('');
+
+    return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="${escape(sheetName)}">
+  <Table>
+   <Row>${cells(headers)}</Row>
+   ${rows.map((row) => `<Row>${cells(headers.map((header) => row[header] ?? ''))}</Row>`).join('')}
+  </Table>
+ </Worksheet>
+</Workbook>`;
+  }
+
+  private moneyString(value: Prisma.Decimal | null) {
+    if (!value) return '-';
+    return Number(value).toFixed(2).replace('.', ',');
+  }
+
+  private percentString(value: Prisma.Decimal | null) {
+    if (!value) return '0';
+    return (Number(value) * 100).toFixed(2).replace('.', ',');
+  }
+
   private computePriceIncVat(
     listPriceExVat: number | null | undefined,
     discountRate: number | null | undefined,
@@ -1126,6 +1397,63 @@ export class InventoryService {
       throw new NotFoundException('Item not found');
     }
     return row;
+  }
+
+  private async requireItemSavedView(companyId: string, id: string) {
+    const row = await this.prisma.inventoryItemSavedView.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) {
+      throw new NotFoundException('Saved view not found');
+    }
+    return row;
+  }
+
+  private itemOrderBy(sortBy: string | null, sortDirection: string | null): Prisma.InventoryItemOrderByWithRelationInput[] {
+    const direction = sortDirection === 'desc' ? 'desc' : 'asc';
+    switch (sortBy) {
+      case 'brand':
+        return [{ brand: { name: direction } }, { name: 'asc' }];
+      case 'supplier':
+        return [{ supplier: { shortName: direction } }, { name: 'asc' }];
+      case 'mainStockArea':
+        return [{ mainStockArea: direction }, { name: 'asc' }];
+      case 'attributeCategory':
+        return [{ attributeCategory: direction }, { name: 'asc' }];
+      case 'baseUom':
+        return [{ baseUom: direction }, { name: 'asc' }];
+      case 'purchaseVatRate':
+        return [{ purchaseVatRate: direction }, { name: 'asc' }];
+      case 'listPriceExVat':
+        return [{ listPriceExVat: direction }, { name: 'asc' }];
+      case 'discountRate':
+        return [{ discountRate: direction }, { name: 'asc' }];
+      case 'computedPriceIncVat':
+        return [{ computedPriceIncVat: direction }, { name: 'asc' }];
+      case 'isActive':
+        return [{ isActive: direction }, { name: 'asc' }];
+      case 'sortOrder':
+        return [{ sortOrder: direction }, { name: 'asc' }];
+      case 'name':
+        return [{ name: direction }];
+      default:
+        return [{ sortOrder: 'asc' }, { name: 'asc' }];
+    }
+  }
+
+  private normalizeMainStockAreaSearch(search: string): 'BAR' | 'KITCHEN' | 'OTHER' | null {
+    const normalized = search.trim().toLowerCase();
+    if (['bar'].includes(normalized)) return 'BAR';
+    if (['mutfak', 'kitchen'].includes(normalized)) return 'KITCHEN';
+    if (['diğer', 'diger', 'other'].includes(normalized)) return 'OTHER';
+    return null;
+  }
+
+  private normalizeAttributeCategorySearch(search: string): 'ALCOHOL' | 'SOFT' | 'KITCHEN' | 'OTHER' | null {
+    const normalized = search.trim().toLowerCase();
+    if (['alkol', 'alcohol'].includes(normalized)) return 'ALCOHOL';
+    if (['soft'].includes(normalized)) return 'SOFT';
+    if (['mutfak', 'kitchen'].includes(normalized)) return 'KITCHEN';
+    if (['diğer', 'diger', 'other'].includes(normalized)) return 'OTHER';
+    return null;
   }
 
   private parseDateValue(raw: string, endOfDay = false) {

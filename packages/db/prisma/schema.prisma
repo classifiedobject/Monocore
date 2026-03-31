@@ -233,6 +233,7 @@ model User {
   taskCommentsAuthored TaskComment[] @relation("task_comment_author")
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
   inventoryStockCountsCreated InventoryStockCountSession[] @relation("inventory_stock_count_creator")
+  inventoryItemSavedViewsCreated InventoryItemSavedView[]
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
   reservationsCreated Reservation[] @relation("reservation_creator")
   tipAdvancesApproved TipAdvance[] @relation("tip_advance_approver")
@@ -369,6 +370,7 @@ model Company {
   tipAdvances      TipAdvance[]
   tipDepartmentOverrides TipDepartmentOverride[]
   tipWeekDistributions TipWeekDistribution[]
+  inventoryItemSavedViews InventoryItemSavedView[]
   auditLogs      CompanyAuditLog[]
   invites        CompanyInvite[]
 }
@@ -1234,6 +1236,26 @@ model InventoryItem {
   @@index([companyId, name])
   @@index([companyId, brandId])
   @@index([companyId, supplierId])
+}
+
+model InventoryItemSavedView {
+  id            String   @id @default(uuid())
+  companyId     String
+  name          String
+  isDefault     Boolean  @default(false)
+  filtersJson   Json
+  searchQuery   String?
+  sortBy        String?
+  sortDirection String?
+  pageSize      Int?
+  createdByUserId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy     User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, isDefault])
+  @@index([companyId, name])
 }
 
 model InventorySupplier {
