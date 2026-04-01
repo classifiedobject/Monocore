@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ApiError, apiFetch, handleApiError } from '../../../../lib/api';
 import { getWebEnv } from '../../../../lib/env';
@@ -320,7 +320,25 @@ export default function InventoryItemsPage() {
     return chips;
   }, [brands, filters, searchQuery]);
 
-  async function loadMeta() {
+  const applySavedView = useCallback((view: SavedView, fromBootstrap = false) => {
+    setActiveSavedViewId(view.id);
+    setSearchDraft(view.searchQuery ?? '');
+    setSearchQuery(view.searchQuery ?? '');
+    setFilters({
+      brandId: view.filtersJson?.brandId ?? null,
+      status: view.filtersJson?.status ?? 'all',
+      mainStockArea: view.filtersJson?.mainStockArea ?? null,
+      attributeCategory: view.filtersJson?.attributeCategory ?? null,
+      subCategory: view.filtersJson?.subCategory ?? null
+    });
+    setSortBy(view.sortBy ?? null);
+    setSortDirection(view.sortDirection ?? null);
+    setPageSize(view.pageSize ?? 50);
+    setPage(1);
+    if (!fromBootstrap) setManageViewsOpen(false);
+  }, []);
+
+  const loadMeta = useCallback(async () => {
     setPageError(null);
     const [capsRes, brandsRes, suppliersRes, savedViewsRes] = await Promise.allSettled([
       apiFetch('/app-api/inventory/capabilities') as Promise<InventoryCapabilities>,
@@ -349,9 +367,9 @@ export default function InventoryItemsPage() {
     }
 
     setMetaLoaded(true);
-  }
+  }, [applySavedView]);
 
-  async function loadItems() {
+  const loadItems = useCallback(async () => {
     const params = new URLSearchParams();
     if (searchQuery.trim()) params.set('search', searchQuery.trim());
     if (filters.brandId) params.set('brandId', filters.brandId);
@@ -371,7 +389,7 @@ export default function InventoryItemsPage() {
     setPageSize(response.pageSize);
     setTotalPages(response.totalPages);
     setSelectedIds([]);
-  }
+  }, [filters, page, pageSize, searchQuery, sortBy, sortDirection]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -383,7 +401,7 @@ export default function InventoryItemsPage() {
 
   useEffect(() => {
     loadMeta().catch(handleApiError);
-  }, []);
+  }, [loadMeta]);
 
   useEffect(() => {
     if (!metaLoaded || !didBootstrapDefault.current) return;
@@ -395,7 +413,7 @@ export default function InventoryItemsPage() {
       }
       handleApiError(error);
     });
-  }, [metaLoaded, searchQuery, filters, sortBy, sortDirection, page, pageSize]);
+  }, [loadItems, metaLoaded]);
 
   function resetForm() {
     setForm(defaultForm);
@@ -584,24 +602,6 @@ export default function InventoryItemsPage() {
     setSortBy(null);
     setSortDirection(null);
     setPage(1);
-  }
-
-  function applySavedView(view: SavedView, fromBootstrap = false) {
-    setActiveSavedViewId(view.id);
-    setSearchDraft(view.searchQuery ?? '');
-    setSearchQuery(view.searchQuery ?? '');
-    setFilters({
-      brandId: view.filtersJson?.brandId ?? null,
-      status: view.filtersJson?.status ?? 'all',
-      mainStockArea: view.filtersJson?.mainStockArea ?? null,
-      attributeCategory: view.filtersJson?.attributeCategory ?? null,
-      subCategory: view.filtersJson?.subCategory ?? null
-    });
-    setSortBy(view.sortBy ?? null);
-    setSortDirection(view.sortDirection ?? null);
-    setPageSize(view.pageSize ?? 50);
-    setPage(1);
-    if (!fromBootstrap) setManageViewsOpen(false);
   }
 
   async function saveCurrentView() {
