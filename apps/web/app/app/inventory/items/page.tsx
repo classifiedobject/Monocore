@@ -401,8 +401,7 @@ export default function InventoryItemsPage() {
 
   useEffect(() => {
     loadMeta().catch(handleApiError);
-  }, [loadMeta]);
-
+  }, []);
   useEffect(() => {
     if (!metaLoaded || !didBootstrapDefault.current) return;
     loadItems().catch((error) => {
@@ -603,7 +602,6 @@ export default function InventoryItemsPage() {
     setSortDirection(null);
     setPage(1);
   }
-
   async function saveCurrentView() {
     if (!saveViewName.trim()) {
       setPageError('Görünüm adı boş olamaz.');
