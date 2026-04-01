@@ -139,9 +139,6 @@ export default function PayrollPage() {
       <header>
         <h1 className="text-3xl font-bold">Payroll Core</h1>
         <p className="text-sm text-slate-600">Employees, worklogs and payroll period posting.</p>
-        <a href="/app/tips" className="mt-2 inline-block text-sm text-blue-700 underline">
-          Open Tip Core (Advanced Tip Engine v2)
-        </a>
       </header>
 
       <div className="flex flex-wrap gap-2">
