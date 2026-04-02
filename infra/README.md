@@ -364,10 +364,15 @@ Tenant ownership is enforced with `companyId` checks on all customer writes.
   - Reservations/tasks: reservation volume and overdue task count.
 - Rule-based alerts (v1):
   - overdue invoices, negative cash, low gross margin, low stock, overdue tasks.
+- Dashboard consistency model:
+  - The KPI summary, alerts, trends, low-stock list, and overdue-task panel are read from a single PostgreSQL transaction snapshot.
+  - Monocore uses a repeatable-read transaction for executive dashboard aggregation so one response does not mix pre-commit finance data with post-commit inventory or AP/AR data from another transaction.
+  - Audit logging still happens after the snapshot read and is not part of the KPI transaction.
+  - Remaining acceptable eventual consistency is limited to separate dashboard requests made at different times; a single response is now internally coherent.
 - UI route:
   - `/app/executive` (summary cards, trend data, alerts, low stock list, overdue tasks).
 - Smoke flow:
-  - `pnpm executive:smoke` prepares sample finance/inventory/AP data and validates dashboard output + alert generation.
+  - `pnpm executive:smoke` prepares sample finance/inventory/AP data and validates dashboard output, trend payloads, alert generation, and core KPI reconciliation within one response snapshot.
 
 ## Pilot Readiness (Sprint 16)
 - Company role presets are generated automatically for each tenant:

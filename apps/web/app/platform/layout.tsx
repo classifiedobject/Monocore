@@ -1,7 +1,7 @@
-import { Shell } from '../../components/shell';
+import { Shell, type ShellLink } from '../../components/shell';
 import type { Route } from 'next';
 
-const links: Array<{ href: Route; label: string }> = [
+const links: ShellLink[] = [
   { href: '/platform/dashboard', label: 'Dashboard' },
   { href: '/platform/team', label: 'Platform Team' },
   { href: '/platform/roles', label: 'Roles & Permissions' },
@@ -14,5 +14,9 @@ const links: Array<{ href: Route; label: string }> = [
 ];
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
-  return <Shell title="Monocore Platform" links={links}>{children}</Shell>;
+  return (
+    <Shell title="Monocore Platform" coreLinks={links} moduleGroups={[]}>
+      {children}
+    </Shell>
+  );
 }

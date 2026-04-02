@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../lib/api';
 
 type LogItem = {
@@ -22,7 +22,7 @@ export default function LogsCenterPage() {
   const [action, setAction] = useState('');
   const [actorUserId, setActorUserId] = useState('');
 
-  const load = useCallback(async (targetPage = page) => {
+  const load = async (targetPage = page) => {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
     if (from) params.set('from', from);
     if (to) params.set('to', to);
@@ -39,11 +39,24 @@ export default function LogsCenterPage() {
     setItems(response.items);
     setTotal(response.total);
     setPage(response.page);
-  }, [action, actorUserId, from, page, pageSize, to]);
+  };
 
   useEffect(() => {
-    load().catch(handleApiError);
-  }, [load]);
+    const init = async () => {
+      const params = new URLSearchParams({ page: '1', pageSize: String(pageSize) });
+      const response = (await apiFetch(`/platform-api/audit-logs?${params.toString()}`)) as {
+        items: LogItem[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+
+      setItems(response.items);
+      setTotal(response.total);
+      setPage(response.page);
+    };
+    init().catch(handleApiError);
+  }, [pageSize]);
 
   const maxPage = Math.max(1, Math.ceil(total / pageSize));
 
