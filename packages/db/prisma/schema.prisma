@@ -380,6 +380,7 @@ model Company {
   payrollEmployees PayrollEmployee[]
   payrollEmploymentRecords PayrollEmploymentRecord[]
   payrollCompensationProfiles PayrollCompensationProfile[]
+  payrollCompensationMatrixRows PayrollCompensationMatrixRow[]
   employees       Employee[]
   workLogs        WorkLog[]
   payrollPeriods  PayrollPeriod[]
@@ -1596,6 +1597,23 @@ model PayrollCompensationProfile {
   @@index([companyId, employmentRecordId])
   @@index([companyId, isActive])
   @@index([companyId, effectiveFrom])
+}
+
+model PayrollCompensationMatrixRow {
+  id                  String   @id @default(uuid())
+  companyId           String
+  targetAccrualSalary Decimal  @db.Decimal(14, 2)
+  officialNetSalary   Decimal  @db.Decimal(14, 2)
+  isActive            Boolean  @default(true)
+  effectiveFrom       DateTime?
+  effectiveTo         DateTime?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, targetAccrualSalary])
+  @@index([companyId, isActive])
 }
 
 model WorkLog {
