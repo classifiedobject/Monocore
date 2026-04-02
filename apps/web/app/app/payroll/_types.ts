@@ -20,7 +20,11 @@ export type PayrollEmploymentRecord = {
   arrivalDate: string;
   accrualStartDate: string;
   sgkStartDate: string | null;
+  sgkEntryDocumentPath: string | null;
+  sgkEntryDocumentName: string | null;
   exitDate: string | null;
+  sgkExitDocumentPath: string | null;
+  sgkExitDocumentName: string | null;
   status: 'ACTIVE' | 'EXITED' | 'DRAFT';
   insuranceStatus: 'INSURED' | 'EXITED' | 'PENDING';
   createdAt: string;
@@ -32,6 +36,7 @@ export type PayrollEmploymentRecord = {
 export type PayrollCompensationProfile = {
   id: string;
   employmentRecordId: string;
+  matrixRowId: string | null;
   targetAccrualSalary: string;
   officialNetSalary: string;
   overtimeEligible: boolean;
@@ -43,6 +48,7 @@ export type PayrollCompensationProfile = {
   createdAt: string;
   updatedAt: string;
   employmentRecord: PayrollEmploymentRecord;
+  matrixRow?: PayrollCompensationMatrixRow | null;
 };
 
 export type PayrollCompensationMatrixRow = {
@@ -55,6 +61,37 @@ export type PayrollCompensationMatrixRow = {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type PayrollEmployeeImportPreviewRow = {
+  rowNumber: number;
+  firstName: string;
+  lastName: string;
+  identityNumber: string;
+  birthDate: string;
+  iban: string;
+  errors: string[];
+  valid: boolean;
+};
+
+export type PayrollEmployeeImportPreview = {
+  rows: PayrollEmployeeImportPreviewRow[];
+  validRows: PayrollEmployeeImportPreviewRow[];
+  invalidRows: PayrollEmployeeImportPreviewRow[];
+};
+
+export type CompanyDepartmentOption = {
+  id: string;
+  name: string;
+  isActive: boolean;
+};
+
+export type CompanyTitleOption = {
+  id: string;
+  departmentId: string;
+  name: string;
+  isActive: boolean;
+  department?: CompanyDepartmentOption | null;
 };
 export type LegacyWorklogEmployee = {
   id: string;

@@ -3,18 +3,23 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../../lib/api';
 import { PayrollDrawer, PayrollEmptyState, PayrollPageIntro, formatDate } from '../_components';
-import type { PayrollEmployee, PayrollEmploymentRecord } from '../_types';
+import type {
+  CompanyDepartmentOption,
+  CompanyTitleOption,
+  PayrollEmployee,
+  PayrollEmploymentRecord
+} from '../_types';
 
 type EmploymentFormState = {
   employeeId: string;
   departmentName: string;
   titleName: string;
   arrivalDate: string;
-  accrualStartDate: string;
   sgkStartDate: string;
   exitDate: string;
   insuranceStatus: 'insured' | 'exited' | 'pending';
   status: 'active' | 'exited' | 'draft';
+  identityNumberConfirmed: boolean;
 };
 
 const defaultForm: EmploymentFormState = {
@@ -22,11 +27,11 @@ const defaultForm: EmploymentFormState = {
   departmentName: '',
   titleName: '',
   arrivalDate: '',
-  accrualStartDate: '',
   sgkStartDate: '',
   exitDate: '',
   insuranceStatus: 'pending',
-  status: 'active'
+  status: 'active',
+  identityNumberConfirmed: false
 };
 
 function mapRecordToForm(record: PayrollEmploymentRecord): EmploymentFormState {
@@ -35,11 +40,11 @@ function mapRecordToForm(record: PayrollEmploymentRecord): EmploymentFormState {
     departmentName: record.departmentName ?? '',
     titleName: record.titleName ?? '',
     arrivalDate: record.arrivalDate.slice(0, 10),
-    accrualStartDate: record.accrualStartDate.slice(0, 10),
     sgkStartDate: record.sgkStartDate ? record.sgkStartDate.slice(0, 10) : '',
     exitDate: record.exitDate ? record.exitDate.slice(0, 10) : '',
     insuranceStatus: record.insuranceStatus.toLowerCase() as EmploymentFormState['insuranceStatus'],
-    status: record.status.toLowerCase() as EmploymentFormState['status']
+    status: record.status.toLowerCase() as EmploymentFormState['status'],
+    identityNumberConfirmed: false
   };
 }
 
@@ -51,17 +56,45 @@ function employmentStatusLabel(status: PayrollEmploymentRecord['status']) {
 
 export default function PayrollEmploymentPage() {
   const [employees, setEmployees] = useState<PayrollEmployee[]>([]);
+  const [departments, setDepartments] = useState<CompanyDepartmentOption[]>([]);
+  const [titles, setTitles] = useState<CompanyTitleOption[]>([]);
   const [records, setRecords] = useState<PayrollEmploymentRecord[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'all' | 'active' | 'exited' | 'draft'>('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<PayrollEmploymentRecord | null>(null);
   const [form, setForm] = useState<EmploymentFormState>(defaultForm);
+  const [entryFile, setEntryFile] = useState<File | null>(null);
+  const [exitFile, setExitFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function loadEmployees() {
-    const rows = (await apiFetch('/app-api/payroll/employees?status=active')) as PayrollEmployee[];
-    setEmployees(Array.isArray(rows) ? rows : []);
+  async function loadMeta() {
+    const [employeeRows, departmentRows, titleRows] = await Promise.all([
+      apiFetch('/app-api/payroll/employees?status=active') as Promise<PayrollEmployee[]>,
+      apiFetch('/app-api/company/org/departments') as Promise<CompanyDepartmentOption[]>,
+      apiFetch('/app-api/company/org/titles') as Promise<CompanyTitleOption[]>
+    ]);
+    setEmployees(
+      Array.isArray(employeeRows)
+        ? [...employeeRows].sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, 'tr'))
+        : []
+    );
+    setDepartments(
+      Array.isArray(departmentRows)
+        ? [...departmentRows].filter((row) => row.isActive).sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+        : []
+    );
+    setTitles(
+      Array.isArray(titleRows)
+        ? [...titleRows]
+            .filter((row) => row.isActive)
+            .sort((a, b) => {
+              const depCompare = (a.department?.name ?? '').localeCompare(b.department?.name ?? '', 'tr');
+              if (depCompare !== 0) return depCompare;
+              return a.name.localeCompare(b.name, 'tr');
+            })
+        : []
+    );
   }
 
   async function loadRecords(nextSearch = search, nextStatus = status) {
@@ -74,7 +107,7 @@ export default function PayrollEmploymentPage() {
   }
 
   useEffect(() => {
-    Promise.all([loadEmployees(), loadRecords()]).catch(handleApiError);
+    Promise.all([loadMeta(), loadRecords()]).catch(handleApiError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -82,29 +115,47 @@ export default function PayrollEmploymentPage() {
     () =>
       employees.map((employee) => ({
         id: employee.id,
-        label: `${employee.firstName} ${employee.lastName}`
+        label: `${employee.lastName} ${employee.firstName}`,
+        identityNumber: employee.identityNumber
       })),
     [employees]
+  );
+
+  const titleOptions = useMemo(() => {
+    if (!form.departmentName) return titles;
+    return titles.filter((title) => (title.department?.name ?? '') === form.departmentName);
+  }, [form.departmentName, titles]);
+
+  const selectedEmployee = useMemo(
+    () => employees.find((employee) => employee.id === form.employeeId) ?? null,
+    [employees, form.employeeId]
   );
 
   function resetAndClose() {
     setDrawerOpen(false);
     setEditing(null);
     setForm(defaultForm);
+    setEntryFile(null);
+    setExitFile(null);
   }
 
   function openCreateDrawer() {
     setEditing(null);
     setForm({
       ...defaultForm,
-      employeeId: employeeOptions[0]?.id ?? ''
+      employeeId: employeeOptions[0]?.id ?? '',
+      departmentName: departments[0]?.name ?? ''
     });
+    setEntryFile(null);
+    setExitFile(null);
     setDrawerOpen(true);
   }
 
   function openEditDrawer(record: PayrollEmploymentRecord) {
     setEditing(record);
     setForm(mapRecordToForm(record));
+    setEntryFile(null);
+    setExitFile(null);
     setDrawerOpen(true);
   }
 
@@ -112,27 +163,28 @@ export default function PayrollEmploymentPage() {
     event.preventDefault();
     setSubmitting(true);
     try {
-      const payload = {
-        employeeId: form.employeeId,
-        departmentName: form.departmentName || null,
-        titleName: form.titleName || null,
-        arrivalDate: form.arrivalDate,
-        accrualStartDate: form.accrualStartDate,
-        sgkStartDate: form.sgkStartDate || null,
-        exitDate: form.exitDate || null,
-        insuranceStatus: form.insuranceStatus,
-        status: form.status
-      };
+      const formData = new FormData();
+      formData.append('employeeId', form.employeeId);
+      formData.append('departmentName', form.departmentName);
+      formData.append('titleName', form.titleName);
+      formData.append('arrivalDate', form.arrivalDate);
+      formData.append('sgkStartDate', form.sgkStartDate || '');
+      formData.append('exitDate', form.exitDate || '');
+      formData.append('insuranceStatus', form.insuranceStatus);
+      formData.append('status', form.status);
+      formData.append('identityNumberConfirmed', String(form.identityNumberConfirmed));
+      if (entryFile) formData.append('sgkEntryDocument', entryFile);
+      if (exitFile) formData.append('sgkExitDocument', exitFile);
 
       if (editing) {
         await apiFetch(`/app-api/payroll/employment-records/${editing.id}`, {
           method: 'PATCH',
-          body: JSON.stringify(payload)
+          body: formData
         });
       } else {
         await apiFetch('/app-api/payroll/employment-records', {
           method: 'POST',
-          body: JSON.stringify(payload)
+          body: formData
         });
       }
 
@@ -164,7 +216,7 @@ export default function PayrollEmploymentPage() {
     <section className="space-y-6">
       <PayrollPageIntro
         title="Employment Records"
-        description="Çalışanların geliş, hakediş başlangıç ve SGK tarihlerini dönemsel olarak yönetin. Ayrılan çalışanlar geçmişte korunur."
+        description="İstihdam kayıtlarında geliş tarihi esas alınır; hakediş başlangıcı sistem tarafından geliş ve SGK tarihi içinden en erken tarihten türetilir."
         action={
           <button
             type="button"
@@ -214,7 +266,7 @@ export default function PayrollEmploymentPage() {
       {records.length === 0 ? (
         <PayrollEmptyState
           title="Henüz istihdam kaydı yok"
-          description="Bir çalışan oluşturup ardından geliş, hakediş ve SGK başlangıç tarihlerini içeren ilk istihdam kaydını ekleyin."
+          description="İlk istihdam kaydını eklediğinde SGK durumu, belge yükleme ve tarih temelli kayıt akışı hazır olacak."
           action={
             <button
               type="button"
@@ -228,7 +280,7 @@ export default function PayrollEmploymentPage() {
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1120px] text-sm">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
                   {[
@@ -278,7 +330,7 @@ export default function PayrollEmploymentPage() {
                           <button
                             type="button"
                             className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 transition hover:bg-slate-50"
-                            onClick={() => exitRecord(record)}
+                            onClick={() => exitRecord(record).catch(handleApiError)}
                           >
                             Çıkış Yap
                           </button>
@@ -317,17 +369,17 @@ export default function PayrollEmploymentPage() {
           </>
         }
       >
-        <form id="payroll-employment-form" className="space-y-6" onSubmit={submitForm}>
+        <form id="payroll-employment-form" className="space-y-5" onSubmit={submitForm}>
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Çalışan seç</span>
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Çalışan</span>
               <select
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
-                value={form.employeeId}
-                onChange={(event) => setForm((current) => ({ ...current, employeeId: event.target.value }))}
                 required
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                value={form.employeeId}
+                onChange={(event) => setForm((current) => ({ ...current, employeeId: event.target.value, identityNumberConfirmed: false }))}
               >
-                <option value="">Seçiniz</option>
+                <option value="">Çalışan seç</option>
                 {employeeOptions.map((employee) => (
                   <option key={employee.id} value={employee.id}>
                     {employee.label}
@@ -335,90 +387,148 @@ export default function PayrollEmploymentPage() {
                 ))}
               </select>
             </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Departman Adı</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300"
-                value={form.departmentName}
-                onChange={(event) => setForm((current) => ({ ...current, departmentName: event.target.value }))}
-              />
-            </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Ünvan Adı</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300"
-                value={form.titleName}
-                onChange={(event) => setForm((current) => ({ ...current, titleName: event.target.value }))}
-              />
-            </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Sigorta Durumu</span>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Sigorta Durumu</span>
               <select
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
                 value={form.insuranceStatus}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    insuranceStatus: event.target.value as EmploymentFormState['insuranceStatus']
+                    insuranceStatus: event.target.value as EmploymentFormState['insuranceStatus'],
+                    status: event.target.value === 'exited' ? 'exited' : current.status
                   }))
                 }
               >
-                <option value="pending">Beklemede</option>
+                <option value="pending">Bekleniyor</option>
                 <option value="insured">Sigortalı</option>
-                <option value="exited">Ayrıldı</option>
+                <option value="exited">Çıkış Yapıldı</option>
               </select>
             </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Geliş Tarihi</span>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Departman</span>
+              <select
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                value={form.departmentName}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    departmentName: event.target.value,
+                    titleName: ''
+                  }))
+                }
+              >
+                <option value="">Departman seç</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.name}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Ünvan</span>
+              <select
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                value={form.titleName}
+                onChange={(event) => setForm((current) => ({ ...current, titleName: event.target.value }))}
+              >
+                <option value="">Ünvan seç</option>
+                {titleOptions.map((title) => (
+                  <option key={title.id} value={title.name}>
+                    {title.department?.name ? `${title.department.name} · ${title.name}` : title.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Geliş Tarihi</span>
               <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
+                required
                 type="date"
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
                 value={form.arrivalDate}
                 onChange={(event) => setForm((current) => ({ ...current, arrivalDate: event.target.value }))}
-                required
               />
             </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Hakediş Başlangıç</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
-                type="date"
-                value={form.accrualStartDate}
-                onChange={(event) => setForm((current) => ({ ...current, accrualStartDate: event.target.value }))}
-                required
-              />
-            </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">SGK Tarihi</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
-                type="date"
-                value={form.sgkStartDate}
-                onChange={(event) => setForm((current) => ({ ...current, sgkStartDate: event.target.value }))}
-              />
-            </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Çıkış Tarihi</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
-                type="date"
-                value={form.exitDate}
-                onChange={(event) => setForm((current) => ({ ...current, exitDate: event.target.value }))}
-              />
-            </label>
-            <label className="space-y-2 text-sm text-slate-700 md:col-span-2">
-              <span className="font-medium">Durum</span>
-              <select
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
-                value={form.status}
-                onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as EmploymentFormState['status'] }))}
-              >
-                <option value="active">Aktif</option>
-                <option value="draft">Taslak</option>
-                <option value="exited">Ayrıldı</option>
-              </select>
-            </label>
+
+            {form.insuranceStatus !== 'pending' ? (
+              <label className="space-y-2 text-sm text-slate-600">
+                <span className="font-medium text-slate-800">SGK Başlangıç Tarihi</span>
+                <input
+                  type="date"
+                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                  value={form.sgkStartDate}
+                  onChange={(event) => setForm((current) => ({ ...current, sgkStartDate: event.target.value }))}
+                />
+              </label>
+            ) : null}
+
+            {form.insuranceStatus === 'exited' ? (
+              <label className="space-y-2 text-sm text-slate-600">
+                <span className="font-medium text-slate-800">Çıkış Tarihi</span>
+                <input
+                  type="date"
+                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                  value={form.exitDate}
+                  onChange={(event) => setForm((current) => ({ ...current, exitDate: event.target.value, status: 'exited' }))}
+                />
+              </label>
+            ) : null}
           </div>
+
+          {form.insuranceStatus === 'insured' ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2 text-sm text-slate-600">
+                <span className="font-medium text-slate-800">SGK Giriş Belgesi</span>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5"
+                  onChange={(event) => setEntryFile(event.target.files?.[0] ?? null)}
+                />
+                {editing?.sgkEntryDocumentName && !entryFile ? (
+                  <p className="text-xs text-slate-500">Mevcut belge: {editing.sgkEntryDocumentName}</p>
+                ) : null}
+              </label>
+            </div>
+          ) : null}
+
+          {form.insuranceStatus === 'exited' ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2 text-sm text-slate-600">
+                <span className="font-medium text-slate-800">SGK Çıkış Belgesi</span>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5"
+                  onChange={(event) => setExitFile(event.target.files?.[0] ?? null)}
+                />
+                {editing?.sgkExitDocumentName && !exitFile ? (
+                  <p className="text-xs text-slate-500">Mevcut belge: {editing.sgkExitDocumentName}</p>
+                ) : null}
+              </label>
+            </div>
+          ) : null}
+
+          {(entryFile || exitFile) ? (
+            <label className="inline-flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-amber-300 text-slate-900 focus:ring-0"
+                checked={form.identityNumberConfirmed}
+                onChange={(event) => setForm((current) => ({ ...current, identityNumberConfirmed: event.target.checked }))}
+              />
+              <span>
+                Çalışanın kimlik numarasını belge ile manuel olarak kontrol ettim.
+                {selectedEmployee?.identityNumber ? ` Kayıtlı kimlik no: ${selectedEmployee.identityNumber}` : ' Çalışan kaydında kimlik numarası bulunmuyor.'}
+              </span>
+            </label>
+          ) : null}
         </form>
       </PayrollDrawer>
     </section>
