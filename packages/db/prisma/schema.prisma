@@ -1566,9 +1566,17 @@ model PayrollEmploymentRecord {
   sgkStartDate       DateTime?
   sgkEntryDocumentPath String?
   sgkEntryDocumentName String?
+  sgkEntryParsedIdentityNumber String?
+  sgkEntryParsedFullName String?
+  sgkEntryParsedStartDate DateTime?
+  sgkEntryDocumentVerified Boolean @default(false)
   exitDate           DateTime?
   sgkExitDocumentPath String?
   sgkExitDocumentName String?
+  sgkExitParsedIdentityNumber String?
+  sgkExitParsedFullName String?
+  sgkExitParsedExitDate DateTime?
+  sgkExitDocumentVerified Boolean @default(false)
   status             PayrollEmploymentStatus @default(DRAFT)
   insuranceStatus    PayrollInsuranceStatus  @default(PENDING)
   createdAt          DateTime                @default(now())

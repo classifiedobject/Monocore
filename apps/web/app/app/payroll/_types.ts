@@ -22,9 +22,17 @@ export type PayrollEmploymentRecord = {
   sgkStartDate: string | null;
   sgkEntryDocumentPath: string | null;
   sgkEntryDocumentName: string | null;
+  sgkEntryParsedIdentityNumber: string | null;
+  sgkEntryParsedFullName: string | null;
+  sgkEntryParsedStartDate: string | null;
+  sgkEntryDocumentVerified: boolean;
   exitDate: string | null;
   sgkExitDocumentPath: string | null;
   sgkExitDocumentName: string | null;
+  sgkExitParsedIdentityNumber: string | null;
+  sgkExitParsedFullName: string | null;
+  sgkExitParsedExitDate: string | null;
+  sgkExitDocumentVerified: boolean;
   status: 'ACTIVE' | 'EXITED' | 'DRAFT';
   insuranceStatus: 'INSURED' | 'EXITED' | 'PENDING';
   createdAt: string;
