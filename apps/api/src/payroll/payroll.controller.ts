@@ -14,9 +14,9 @@ export class PayrollController {
   constructor(@Inject(PayrollService) private readonly payroll: PayrollService) {}
 
   @Get('employees')
-  @RequirePermissions('module:payroll-core.employee.manage')
-  listEmployees(@Req() req: Request & { companyId: string }) {
-    return this.payroll.listEmployees(req.companyId);
+  @RequirePermissions('module:payroll-core.employee.read')
+  listEmployees(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.payroll.listEmployees(req.companyId, query);
   }
 
   @Post('employees')
@@ -33,6 +33,90 @@ export class PayrollController {
     @Req() req: Request & { user: { id: string }; companyId: string }
   ) {
     return this.payroll.updateEmployee(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('employees/:id/activate')
+  @RequirePermissions('module:payroll-core.employee.manage')
+  activateEmployee(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.activateEmployee(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('employees/:id/deactivate')
+  @RequirePermissions('module:payroll-core.employee.manage')
+  deactivateEmployee(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.deactivateEmployee(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('employees/:id/employment-records')
+  @RequirePermissions('module:payroll-core.employment.read')
+  listEmployeeEmploymentRecords(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.payroll.listEmployeeEmploymentRecords(req.companyId, id);
+  }
+
+  @Get('employment-records')
+  @RequirePermissions('module:payroll-core.employment.read')
+  listEmploymentRecords(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.payroll.listEmploymentRecords(req.companyId, query);
+  }
+
+  @Post('employment-records')
+  @RequirePermissions('module:payroll-core.employment.manage')
+  createEmploymentRecord(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.createEmploymentRecord(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('employment-records/:id')
+  @RequirePermissions('module:payroll-core.employment.manage')
+  updateEmploymentRecord(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.updateEmploymentRecord(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('employment-records/:id/exit')
+  @RequirePermissions('module:payroll-core.employment.manage')
+  exitEmploymentRecord(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.exitEmploymentRecord(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('compensation-profiles')
+  @RequirePermissions('module:payroll-core.compensation.read')
+  listCompensationProfiles(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.payroll.listCompensationProfiles(req.companyId, query);
+  }
+
+  @Post('compensation-profiles')
+  @RequirePermissions('module:payroll-core.compensation.manage')
+  createCompensationProfile(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.createCompensationProfile(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('compensation-profiles/:id')
+  @RequirePermissions('module:payroll-core.compensation.manage')
+  updateCompensationProfile(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.updateCompensationProfile(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('employment-records/:id/compensation-profiles')
+  @RequirePermissions('module:payroll-core.compensation.read')
+  listEmploymentCompensationProfiles(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.payroll.listEmploymentCompensationProfiles(req.companyId, id);
+  }
+
+  @Get('worklog-employees')
+  @RequirePermissions('module:payroll-core.payroll.manage')
+  listWorkLogEmployees(@Req() req: Request & { companyId: string }) {
+    return this.payroll.listWorkLogEmployees(req.companyId);
   }
 
   @Get('worklogs')
