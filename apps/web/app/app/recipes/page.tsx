@@ -17,6 +17,14 @@ type InventoryItem = {
   unit: string;
 };
 
+type InventoryItemListResponse = {
+  rows: InventoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 type Recipe = {
   id: string;
   name: string | null;
@@ -54,12 +62,12 @@ export default function RecipesPage() {
       apiFetch('/app-api/recipes/capabilities') as Promise<Capabilities>,
       apiFetch('/app-api/recipes/products') as Promise<Product[]>,
       apiFetch('/app-api/recipes/recipes') as Promise<Recipe[]>,
-      apiFetch('/app-api/inventory/items') as Promise<InventoryItem[]>
+      apiFetch('/app-api/inventory/items') as Promise<InventoryItem[] | InventoryItemListResponse>
     ]);
     setCaps(capRows);
     setProducts(productRows);
     setRecipes(recipeRows);
-    setItems(itemRows);
+    setItems(Array.isArray(itemRows) ? itemRows : itemRows.rows);
   }
 
   useEffect(() => {
@@ -217,4 +225,3 @@ export default function RecipesPage() {
     </section>
   );
 }
-
