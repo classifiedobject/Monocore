@@ -106,6 +106,8 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     }
     if (installedModuleKeys.includes('payroll-core')) {
       list.push({ href: '/app/payroll', label: 'Payroll' });
+      list.push({ href: '/app/payroll/worklogs', label: 'Payroll Worklogs' });
+      list.push({ href: '/app/payroll/periods', label: 'Payroll Periods' });
     }
     if (installedModuleKeys.includes('tip-core')) {
       list.push({ href: '/app/tips', label: 'Tips' });

@@ -81,6 +81,14 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'module:finance-core.reports.cashflow.read',
       'module:finance-core.cashflow-forecast.manage',
       'module:payroll-core.employee.manage',
+      'module:payroll-core.employee.read',
+      'module:payroll-core.employment.manage',
+      'module:payroll-core.employment.read',
+      'module:payroll-core.compensation.manage',
+      'module:payroll-core.compensation.read',
+      'module:payroll-core.period.manage',
+      'module:payroll-core.period.read',
+      'module:payroll-core.period.post',
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
       'module:tip-core.manage',
@@ -1592,7 +1600,7 @@ export class AppApiService {
         });
       }
 
-      const employees: Array<{ id: string; firstName: string; lastName: string }> = [];
+      const employees: Array<{ id: string; firstName: string; lastName: string; employmentRecordId: string }> = [];
       for (let i = 1; i <= 5; i += 1) {
         const employee = await tx.employee.create({
           data: {
@@ -1605,7 +1613,21 @@ export class AppApiService {
             isActive: true
           }
         });
-        employees.push({ id: employee.id, firstName: employee.firstName, lastName: employee.lastName });
+        const employmentRecord = await tx.payrollEmploymentRecord.findFirst({
+          where: { companyId, employeeId: employee.id },
+          orderBy: { createdAt: 'asc' }
+        });
+
+        if (!employmentRecord) {
+          throw new Error(`Payroll employment record missing for demo employee ${employee.id}`);
+        }
+
+        employees.push({
+          id: employee.id,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          employmentRecordId: employmentRecord.id
+        });
       }
 
       const payrollPeriod = await tx.payrollPeriod.create({
@@ -1628,6 +1650,7 @@ export class AppApiService {
             companyId,
             payrollPeriodId: payrollPeriod.id,
             employeeId: employee.id,
+            employmentRecordId: employee.employmentRecordId,
             grossAmount: new Prisma.Decimal(gross),
             notes: `DEMO:${tag}`
           }
