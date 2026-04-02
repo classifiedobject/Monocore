@@ -73,7 +73,14 @@ const moduleNavigationRegistry: Record<
   },
   'payroll-core': {
     label: 'Payroll Core',
-    items: [{ href: '/app/payroll', label: 'Management' }]
+    items: [
+      { href: '/app/payroll', label: 'Management' },
+      { href: '/app/payroll/employees', label: 'Employees' },
+      { href: '/app/payroll/employment', label: 'Employment Records' },
+      { href: '/app/payroll/compensation', label: 'Compensation Profiles' },
+      { href: '/app/payroll/worklogs', label: 'Worklogs' },
+      { href: '/app/payroll/periods', label: 'Payroll Periods' }
+    ]
   },
   'tip-core': {
     label: 'Tip Core',
