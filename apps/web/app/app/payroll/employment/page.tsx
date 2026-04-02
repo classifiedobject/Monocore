@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { apiFetch, handleApiError } from '../../../../lib/api';
+import { ApiError, apiFetch, handleApiError } from '../../../../lib/api';
 import { PayrollDrawer, PayrollEmptyState, PayrollPageIntro, formatDate } from '../_components';
 import type {
   CompanyDepartmentOption,
@@ -67,6 +67,7 @@ export default function PayrollEmploymentPage() {
   const [entryFile, setEntryFile] = useState<File | null>(null);
   const [exitFile, setExitFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function loadMeta() {
     const [employeeRows, departmentRows, titleRows] = await Promise.all([
@@ -137,6 +138,7 @@ export default function PayrollEmploymentPage() {
     setForm(defaultForm);
     setEntryFile(null);
     setExitFile(null);
+    setFormError(null);
   }
 
   function openCreateDrawer() {
@@ -148,6 +150,7 @@ export default function PayrollEmploymentPage() {
     });
     setEntryFile(null);
     setExitFile(null);
+    setFormError(null);
     setDrawerOpen(true);
   }
 
@@ -156,12 +159,14 @@ export default function PayrollEmploymentPage() {
     setForm(mapRecordToForm(record));
     setEntryFile(null);
     setExitFile(null);
+    setFormError(null);
     setDrawerOpen(true);
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
+    setFormError(null);
     try {
       const formData = new FormData();
       formData.append('employeeId', form.employeeId);
@@ -191,7 +196,11 @@ export default function PayrollEmploymentPage() {
       resetAndClose();
       await loadRecords();
     } catch (error) {
-      handleApiError(error);
+      if (error instanceof ApiError) {
+        setFormError(error.message);
+      } else {
+        handleApiError(error);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -461,8 +470,9 @@ export default function PayrollEmploymentPage() {
                 <span className="font-medium text-slate-800">SGK Başlangıç Tarihi</span>
                 <input
                   type="date"
-                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none disabled:bg-slate-50 focus:border-slate-300"
                   value={form.sgkStartDate}
+                  disabled={editing?.sgkEntryDocumentVerified}
                   onChange={(event) => setForm((current) => ({ ...current, sgkStartDate: event.target.value }))}
                 />
               </label>
@@ -473,8 +483,9 @@ export default function PayrollEmploymentPage() {
                 <span className="font-medium text-slate-800">Çıkış Tarihi</span>
                 <input
                   type="date"
-                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none disabled:bg-slate-50 focus:border-slate-300"
                   value={form.exitDate}
+                  disabled={editing?.sgkExitDocumentVerified}
                   onChange={(event) => setForm((current) => ({ ...current, exitDate: event.target.value, status: 'exited' }))}
                 />
               </label>
@@ -485,14 +496,19 @@ export default function PayrollEmploymentPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2 text-sm text-slate-600">
                 <span className="font-medium text-slate-800">SGK Giriş Belgesi</span>
-                <input
+              <input
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept=".pdf"
                   className="block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5"
                   onChange={(event) => setEntryFile(event.target.files?.[0] ?? null)}
                 />
                 {editing?.sgkEntryDocumentName && !entryFile ? (
                   <p className="text-xs text-slate-500">Mevcut belge: {editing.sgkEntryDocumentName}</p>
+                ) : null}
+                {editing?.sgkEntryDocumentVerified ? (
+                  <p className="text-xs font-medium text-emerald-600">Belge doğrulandı ✅</p>
+                ) : formError?.includes('kimlik numarası') || formError?.includes('ad soyad') ? (
+                  <p className="text-xs font-medium text-rose-600">Belge eşleşmedi ❌</p>
                 ) : null}
               </label>
             </div>
@@ -504,12 +520,17 @@ export default function PayrollEmploymentPage() {
                 <span className="font-medium text-slate-800">SGK Çıkış Belgesi</span>
                 <input
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept=".pdf"
                   className="block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5"
                   onChange={(event) => setExitFile(event.target.files?.[0] ?? null)}
                 />
                 {editing?.sgkExitDocumentName && !exitFile ? (
                   <p className="text-xs text-slate-500">Mevcut belge: {editing.sgkExitDocumentName}</p>
+                ) : null}
+                {editing?.sgkExitDocumentVerified ? (
+                  <p className="text-xs font-medium text-emerald-600">Belge doğrulandı ✅</p>
+                ) : formError?.includes('kimlik numarası') || formError?.includes('ad soyad') ? (
+                  <p className="text-xs font-medium text-rose-600">Belge eşleşmedi ❌</p>
                 ) : null}
               </label>
             </div>
@@ -528,6 +549,10 @@ export default function PayrollEmploymentPage() {
                 {selectedEmployee?.identityNumber ? ` Kayıtlı kimlik no: ${selectedEmployee.identityNumber}` : ' Çalışan kaydında kimlik numarası bulunmuyor.'}
               </span>
             </label>
+          ) : null}
+
+          {formError ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{formError}</div>
           ) : null}
         </form>
       </PayrollDrawer>

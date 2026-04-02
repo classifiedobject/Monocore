@@ -36,6 +36,7 @@ import {
 } from '@monocore/shared';
 import { PrismaService } from '../common/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
+import { SgkParserService } from './sgk-parser.service.js';
 
 type JsonObject = Record<string, Prisma.InputJsonValue | null>;
 
@@ -68,6 +69,17 @@ type SnapshotOverrides = {
 };
 
 type UploadFile = { originalname?: string; buffer: Buffer };
+type StoredPayrollDocument = {
+  path: string;
+  name: string;
+};
+type ParsedPayrollDocument = {
+  identityNumber: string;
+  fullName: string;
+  parsedDate: Date;
+  path: string;
+  name: string;
+};
 type PayrollSnapshot = {
   accrualDays: number;
   officialDays: number;
@@ -90,7 +102,8 @@ type PayrollSnapshot = {
 export class PayrollService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuditService) private readonly audit: AuditService
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(SgkParserService) private readonly sgkParser: SgkParserService
   ) {}
 
   async listEmployees(companyId: string, query: unknown = {}) {
@@ -285,17 +298,19 @@ export class PayrollService {
     const body = payrollEmploymentRecordSchema.parse(this.normalizeEmploymentPayload(payload));
     const employee = await this.requirePayrollEmployee(companyId, body.employeeId);
     const arrivalDate = this.parseDate(body.arrivalDate, false);
-    const sgkStartDate = this.parseNullableDate(body.sgkStartDate ?? null);
-    const exitDate = this.parseNullableDate(body.exitDate ?? null);
-    const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
+    const requestedSgkStartDate = this.parseNullableDate(body.sgkStartDate ?? null);
+    const requestedExitDate = this.parseNullableDate(body.exitDate ?? null);
     const status = this.mapEmploymentStatus(body.status ?? 'active');
     const insuranceStatus = this.mapInsuranceStatus(body.insuranceStatus ?? (status === 'EXITED' ? 'exited' : 'pending'));
 
-    this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
     await this.ensureSingleActiveEmployment(companyId, body.employeeId, status, null);
     await this.ensureSgkDocumentConfirmation(employee, body.identityNumberConfirmed ?? false, files);
-    const entryDocument = await this.persistPayrollDocument(companyId, body.employeeId, 'sgk-entry', files?.sgkEntryDocument?.[0]);
-    const exitDocument = await this.persistPayrollDocument(companyId, body.employeeId, 'sgk-exit', files?.sgkExitDocument?.[0]);
+    const entryDocument = await this.parseAndPersistSgkDocument(companyId, employee, 'entry', files?.sgkEntryDocument?.[0]);
+    const exitDocument = await this.parseAndPersistSgkDocument(companyId, employee, 'exit', files?.sgkExitDocument?.[0]);
+    const sgkStartDate = entryDocument?.parsedDate ?? requestedSgkStartDate;
+    const exitDate = exitDocument?.parsedDate ?? requestedExitDate;
+    const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
+    this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
 
     const row = await this.prisma.payrollEmploymentRecord.create({
       data: {
@@ -305,12 +320,20 @@ export class PayrollService {
         titleName: body.titleName ?? null,
         arrivalDate,
         accrualStartDate,
-        sgkStartDate,
+        sgkStartDate: entryDocument?.parsedDate ?? sgkStartDate,
         sgkEntryDocumentPath: entryDocument?.path ?? null,
         sgkEntryDocumentName: entryDocument?.name ?? null,
-        exitDate,
+        sgkEntryParsedIdentityNumber: entryDocument?.identityNumber ?? null,
+        sgkEntryParsedFullName: entryDocument?.fullName ?? null,
+        sgkEntryParsedStartDate: entryDocument?.parsedDate ?? null,
+        sgkEntryDocumentVerified: Boolean(entryDocument),
+        exitDate: exitDocument?.parsedDate ?? exitDate,
         sgkExitDocumentPath: exitDocument?.path ?? null,
         sgkExitDocumentName: exitDocument?.name ?? null,
+        sgkExitParsedIdentityNumber: exitDocument?.identityNumber ?? null,
+        sgkExitParsedFullName: exitDocument?.fullName ?? null,
+        sgkExitParsedExitDate: exitDocument?.parsedDate ?? null,
+        sgkExitDocumentVerified: Boolean(exitDocument),
         status,
         insuranceStatus
       },
@@ -336,17 +359,25 @@ export class PayrollService {
     const employee = body.employeeId ? await this.requirePayrollEmployee(companyId, body.employeeId) : await this.requirePayrollEmployee(companyId, existing.employeeId);
 
     const arrivalDate = body.arrivalDate ? this.parseDate(body.arrivalDate, false) : existing.arrivalDate;
-    const sgkStartDate = body.sgkStartDate !== undefined ? this.parseNullableDate(body.sgkStartDate) : existing.sgkStartDate;
-    const exitDate = body.exitDate !== undefined ? this.parseNullableDate(body.exitDate) : existing.exitDate;
-    const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
+    const requestedSgkStartDate = body.sgkStartDate !== undefined ? this.parseNullableDate(body.sgkStartDate) : existing.sgkStartDate;
+    const requestedExitDate = body.exitDate !== undefined ? this.parseNullableDate(body.exitDate) : existing.exitDate;
     const status = body.status ? this.mapEmploymentStatus(body.status) : existing.status;
     const insuranceStatus = body.insuranceStatus ? this.mapInsuranceStatus(body.insuranceStatus) : existing.insuranceStatus;
 
-    this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
     await this.ensureSingleActiveEmployment(companyId, employeeId, status, existing.id);
     await this.ensureSgkDocumentConfirmation(employee, body.identityNumberConfirmed ?? false, files);
-    const entryDocument = await this.persistPayrollDocument(companyId, employeeId, 'sgk-entry', files?.sgkEntryDocument?.[0]);
-    const exitDocument = await this.persistPayrollDocument(companyId, employeeId, 'sgk-exit', files?.sgkExitDocument?.[0]);
+    const entryDocument = await this.parseAndPersistSgkDocument(companyId, employee, 'entry', files?.sgkEntryDocument?.[0]);
+    const exitDocument = await this.parseAndPersistSgkDocument(companyId, employee, 'exit', files?.sgkExitDocument?.[0]);
+    if (existing.sgkEntryDocumentVerified && body.sgkStartDate !== undefined && !entryDocument) {
+      throw new BadRequestException('Doğrulanmış SGK giriş tarihi manuel değiştirilemez');
+    }
+    if (existing.sgkExitDocumentVerified && body.exitDate !== undefined && !exitDocument) {
+      throw new BadRequestException('Doğrulanmış SGK çıkış tarihi manuel değiştirilemez');
+    }
+    const sgkStartDate = entryDocument?.parsedDate ?? requestedSgkStartDate;
+    const exitDate = exitDocument?.parsedDate ?? requestedExitDate;
+    const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
+    this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
 
     const row = await this.prisma.payrollEmploymentRecord.update({
       where: { id: existing.id },
@@ -356,10 +387,32 @@ export class PayrollService {
         ...(body.titleName !== undefined ? { titleName: body.titleName } : {}),
         ...(body.arrivalDate !== undefined ? { arrivalDate } : {}),
         accrualStartDate,
-        ...(body.sgkStartDate !== undefined ? { sgkStartDate } : {}),
-        ...(entryDocument ? { sgkEntryDocumentPath: entryDocument.path, sgkEntryDocumentName: entryDocument.name } : {}),
-        ...(body.exitDate !== undefined ? { exitDate } : {}),
-        ...(exitDocument ? { sgkExitDocumentPath: exitDocument.path, sgkExitDocumentName: exitDocument.name } : {}),
+        ...(entryDocument
+          ? {
+              sgkStartDate: entryDocument.parsedDate,
+              sgkEntryDocumentPath: entryDocument.path,
+              sgkEntryDocumentName: entryDocument.name,
+              sgkEntryParsedIdentityNumber: entryDocument.identityNumber,
+              sgkEntryParsedFullName: entryDocument.fullName,
+              sgkEntryParsedStartDate: entryDocument.parsedDate,
+              sgkEntryDocumentVerified: true
+            }
+          : body.sgkStartDate !== undefined
+            ? { sgkStartDate }
+            : {}),
+        ...(exitDocument
+          ? {
+              exitDate: exitDocument.parsedDate,
+              sgkExitDocumentPath: exitDocument.path,
+              sgkExitDocumentName: exitDocument.name,
+              sgkExitParsedIdentityNumber: exitDocument.identityNumber,
+              sgkExitParsedFullName: exitDocument.fullName,
+              sgkExitParsedExitDate: exitDocument.parsedDate,
+              sgkExitDocumentVerified: true
+            }
+          : body.exitDate !== undefined
+            ? { exitDate }
+            : {}),
         ...(body.status !== undefined ? { status } : {}),
         ...(body.insuranceStatus !== undefined ? { insuranceStatus } : {})
       },
@@ -1643,6 +1696,35 @@ export class PayrollService {
     return {
       path: path.join(relativeDir, fileName),
       name: file.originalname ?? fileName
+    };
+  }
+
+  private async parseAndPersistSgkDocument(
+    companyId: string,
+    employee: { id: string; firstName: string; lastName: string; identityNumber: string | null },
+    kind: 'entry' | 'exit',
+    file?: UploadFile
+  ): Promise<ParsedPayrollDocument | null> {
+    if (!file?.buffer?.length) return null;
+    if (!(file.originalname ?? '').toLowerCase().endsWith('.pdf')) {
+      throw new BadRequestException('SGK belge parse işlemi için PDF yükleyin');
+    }
+
+    const stored = await this.persistPayrollDocument(companyId, employee.id, kind === 'entry' ? 'sgk-entry' : 'sgk-exit', file) as StoredPayrollDocument | null;
+    if (!stored) return null;
+
+    const parsed = kind === 'entry'
+      ? await this.sgkParser.parseEntryPdf(file.buffer)
+      : await this.sgkParser.parseExitPdf(file.buffer);
+
+    this.sgkParser.validateEmployeeMatch(employee, parsed);
+
+    return {
+      identityNumber: parsed.identityNumber,
+      fullName: parsed.fullName,
+      parsedDate: kind === 'entry' ? parsed.startDate! : parsed.exitDate!,
+      path: stored.path,
+      name: stored.name
     };
   }
 

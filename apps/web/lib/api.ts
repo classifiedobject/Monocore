@@ -39,7 +39,10 @@ function hasMissingTenantContext(message: string) {
 
 export async function apiFetch(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
-  headers.set('Content-Type', 'application/json');
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
+  if (!isFormData) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   if (
     path.startsWith('/app-api') &&
