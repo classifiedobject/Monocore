@@ -86,6 +86,8 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'module:payroll-core.employment.read',
       'module:payroll-core.compensation.manage',
       'module:payroll-core.compensation.read',
+      'module:payroll-core.matrix.manage',
+      'module:payroll-core.matrix.read',
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
       'module:tip-core.manage',

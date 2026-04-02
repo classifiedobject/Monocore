@@ -20,6 +20,11 @@ const sections = [
     href: '/app/payroll/compensation'
   },
   {
+    title: 'Compensation Matrix',
+    description: 'Hakediş maaşı ile resmi net maaş arasındaki şirket politika eşleştirmelerini sakin bir listede yönetin.',
+    href: '/app/payroll/matrix'
+  },
+  {
     title: 'Worklogs',
     description: 'Saat bazlı kayıtları takip edin ve mevcut iş akışınızla uyumlu şekilde devam edin.',
     href: '/app/payroll/worklogs'

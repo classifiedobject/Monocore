@@ -785,6 +785,20 @@ export const payrollCompensationProfileQuerySchema = z.object({
   employmentRecordId: z.string().uuid().optional()
 });
 
+export const payrollCompensationMatrixRowSchema = z.object({
+  targetAccrualSalary: z.coerce.number().nonnegative(),
+  officialNetSalary: z.coerce.number().nonnegative(),
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const payrollCompensationMatrixQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  state: z.enum(['active', 'all']).optional(),
+  targetAccrualSalary: z.coerce.number().nonnegative().optional()
+});
 export const payrollWorkLogSchema = z.object({
   employeeId: z.string().uuid(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

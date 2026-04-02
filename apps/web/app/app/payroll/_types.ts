@@ -45,6 +45,17 @@ export type PayrollCompensationProfile = {
   employmentRecord: PayrollEmploymentRecord;
 };
 
+export type PayrollCompensationMatrixRow = {
+  id: string;
+  targetAccrualSalary: string;
+  officialNetSalary: string;
+  isActive: boolean;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 export type LegacyWorklogEmployee = {
   id: string;
   firstName: string;

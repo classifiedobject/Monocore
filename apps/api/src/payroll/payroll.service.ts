@@ -15,6 +15,8 @@ import {
   SalaryType
 } from '@prisma/client';
 import {
+  payrollCompensationMatrixQuerySchema,
+  payrollCompensationMatrixRowSchema,
   payrollCompensationProfileQuerySchema,
   payrollCompensationProfileSchema,
   payrollEmployeeQuerySchema,
@@ -36,6 +38,7 @@ type LegacyEmployeePayload = Prisma.EmployeeGetPayload<{
   include: { role: true; profitCenter: true };
 }>;
 
+type MatrixRowPayload = Prisma.PayrollCompensationMatrixRowGetPayload<object>;
 @Injectable()
 export class PayrollService {
   constructor(
@@ -354,6 +357,156 @@ export class PayrollService {
     });
   }
 
+  async listCompensationMatrix(companyId: string, query: unknown = {}) {
+    const parsed = payrollCompensationMatrixQuerySchema.parse(query);
+    const search = parsed.search?.trim();
+    const numericSearch = search && Number.isFinite(Number(search.replace(',', '.'))) ? Number(search.replace(',', '.')) : null;
+
+    return this.prisma.payrollCompensationMatrixRow.findMany({
+      where: {
+        companyId,
+        ...(parsed.state === 'active' ? { isActive: true } : {}),
+        ...(search
+          ? {
+              OR: [
+                ...(numericSearch !== null
+                  ? [
+                      { targetAccrualSalary: new Prisma.Decimal(numericSearch) },
+                      { officialNetSalary: new Prisma.Decimal(numericSearch) }
+                    ]
+                  : []),
+                { notes: { contains: search, mode: 'insensitive' } }
+              ]
+            }
+          : {})
+      },
+      orderBy: [{ isActive: 'desc' }, { targetAccrualSalary: 'desc' }, { effectiveFrom: 'desc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async resolveCompensationMatrix(companyId: string, query: unknown = {}) {
+    const parsed = payrollCompensationMatrixQuerySchema.parse(query);
+    if (parsed.targetAccrualSalary === undefined) {
+      throw new BadRequestException('targetAccrualSalary is required');
+    }
+
+    const now = new Date();
+    return this.prisma.payrollCompensationMatrixRow.findFirst({
+      where: {
+        companyId,
+        isActive: true,
+        targetAccrualSalary: new Prisma.Decimal(parsed.targetAccrualSalary),
+        AND: [
+          { OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: now } }] },
+          { OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }
+        ]
+      },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }]
+    });
+  }
+
+  async createCompensationMatrixRow(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = payrollCompensationMatrixRowSchema.parse(payload);
+    const effectiveFrom = this.parseNullableDate(body.effectiveFrom ?? null);
+    const effectiveTo = this.parseNullableDate(body.effectiveTo ?? null);
+    const isActive = body.isActive ?? true;
+
+    this.validateEffectiveRange(effectiveFrom ?? new Date('1900-01-01T00:00:00.000Z'), effectiveTo);
+    await this.ensureNoMatrixOverlap(
+      companyId,
+      body.targetAccrualSalary,
+      effectiveFrom,
+      effectiveTo,
+      isActive,
+      null
+    );
+
+    const row = await this.prisma.payrollCompensationMatrixRow.create({
+      data: {
+        companyId,
+        targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary),
+        officialNetSalary: new Prisma.Decimal(body.officialNetSalary),
+        isActive,
+        effectiveFrom,
+        effectiveTo,
+        notes: body.notes ?? null
+      }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.matrix.create',
+      'payroll_compensation_matrix_row',
+      row.id,
+      body as JsonObject,
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async updateCompensationMatrixRow(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = payrollCompensationMatrixRowSchema.partial().parse(payload);
+    const existing = await this.requireCompensationMatrixRow(companyId, id);
+    const targetAccrualSalary = body.targetAccrualSalary ?? Number(existing.targetAccrualSalary);
+    const effectiveFrom = body.effectiveFrom !== undefined ? this.parseNullableDate(body.effectiveFrom) : existing.effectiveFrom;
+    const effectiveTo = body.effectiveTo !== undefined ? this.parseNullableDate(body.effectiveTo) : existing.effectiveTo;
+    const isActive = body.isActive ?? existing.isActive;
+
+    this.validateEffectiveRange(effectiveFrom ?? new Date('1900-01-01T00:00:00.000Z'), effectiveTo);
+    await this.ensureNoMatrixOverlap(companyId, targetAccrualSalary, effectiveFrom, effectiveTo, isActive, existing.id);
+
+    const row = await this.prisma.payrollCompensationMatrixRow.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.targetAccrualSalary !== undefined
+          ? { targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary) }
+          : {}),
+        ...(body.officialNetSalary !== undefined ? { officialNetSalary: new Prisma.Decimal(body.officialNetSalary) } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        ...(body.effectiveFrom !== undefined ? { effectiveFrom } : {}),
+        ...(body.effectiveTo !== undefined ? { effectiveTo } : {}),
+        ...(body.notes !== undefined ? { notes: body.notes } : {})
+      }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.matrix.update',
+      'payroll_compensation_matrix_row',
+      row.id,
+      body as JsonObject,
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async activateCompensationMatrixRow(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setCompensationMatrixActiveState(actorUserId, companyId, id, true, ip, userAgent);
+  }
+
+  async deactivateCompensationMatrixRow(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    return this.setCompensationMatrixActiveState(actorUserId, companyId, id, false, ip, userAgent);
+  }
+
+  async deleteCompensationMatrixRow(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const existing = await this.requireCompensationMatrixRow(companyId, id);
+    await this.prisma.payrollCompensationMatrixRow.delete({ where: { id: existing.id } });
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.matrix.delete',
+      'payroll_compensation_matrix_row',
+      existing.id,
+      { deleted: true },
+      ip,
+      userAgent
+    );
+    return { ok: true };
+  }
   async listWorkLogEmployees(companyId: string) {
     return this.prisma.employee.findMany({
       where: { companyId, isActive: true },
@@ -634,6 +787,42 @@ export class PayrollService {
     return row;
   }
 
+  private async setCompensationMatrixActiveState(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    isActive: boolean,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const existing = await this.requireCompensationMatrixRow(companyId, id);
+    await this.ensureNoMatrixOverlap(
+      companyId,
+      Number(existing.targetAccrualSalary),
+      existing.effectiveFrom,
+      existing.effectiveTo,
+      isActive,
+      existing.id
+    );
+
+    const row = await this.prisma.payrollCompensationMatrixRow.update({
+      where: { id: existing.id },
+      data: { isActive }
+    });
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      isActive ? 'company.payroll.matrix.activate' : 'company.payroll.matrix.deactivate',
+      'payroll_compensation_matrix_row',
+      row.id,
+      { isActive },
+      ip,
+      userAgent
+    );
+
+    return row;
+  }
   private validateEmploymentDates(
     arrivalDate: Date,
     accrualStartDate: Date,
@@ -706,6 +895,35 @@ export class PayrollService {
 
     if (conflict) {
       throw new ConflictException('Aynı istihdam kaydı için çakışan aktif ücret profili oluşturulamaz');
+    }
+  }
+
+  private async ensureNoMatrixOverlap(
+    companyId: string,
+    targetAccrualSalary: number,
+    effectiveFrom: Date | null,
+    effectiveTo: Date | null,
+    isActive: boolean,
+    currentId: string | null
+  ) {
+    if (!isActive) return;
+
+    const conflict = await this.prisma.payrollCompensationMatrixRow.findFirst({
+      where: {
+        companyId,
+        isActive: true,
+        targetAccrualSalary: new Prisma.Decimal(targetAccrualSalary),
+        ...(currentId ? { NOT: { id: currentId } } : {}),
+        AND: [
+          { OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom ?? new Date('1900-01-01T00:00:00.000Z') } }] },
+          ...(effectiveTo ? [{ OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: effectiveTo } }] }] : [])
+        ]
+      },
+      select: { id: true }
+    });
+
+    if (conflict) {
+      throw new ConflictException('Aynı hakediş maaşı için çakışan aktif eşleştirme oluşturulamaz');
     }
   }
 
@@ -820,6 +1038,11 @@ export class PayrollService {
     return row;
   }
 
+  private async requireCompensationMatrixRow(companyId: string, id: string): Promise<MatrixRowPayload> {
+    const row = await this.prisma.payrollCompensationMatrixRow.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) throw new NotFoundException('Ücret eşleştirme kaydı bulunamadı');
+    return row;
+  }
   private async requireLegacyEmployee(companyId: string, id: string): Promise<LegacyEmployeePayload> {
     const row = await this.prisma.employee.findUnique({ where: { id }, include: { role: true, profitCenter: true } });
     if (!row || row.companyId !== companyId) throw new NotFoundException('Employee not found');

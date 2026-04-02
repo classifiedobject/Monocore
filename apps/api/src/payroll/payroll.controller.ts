@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
@@ -113,6 +113,54 @@ export class PayrollController {
     return this.payroll.listEmploymentCompensationProfiles(req.companyId, id);
   }
 
+  @Get('compensation-matrix')
+  @RequirePermissions('module:payroll-core.matrix.read')
+  listCompensationMatrix(@Req() req: Request & { companyId: string }, @Query() query: Record<string, string | undefined>) {
+    return this.payroll.listCompensationMatrix(req.companyId, query);
+  }
+
+  @Get('compensation-matrix/resolve')
+  @RequirePermissions('module:payroll-core.matrix.read')
+  resolveCompensationMatrix(
+    @Req() req: Request & { companyId: string },
+    @Query() query: Record<string, string | undefined>
+  ) {
+    return this.payroll.resolveCompensationMatrix(req.companyId, query);
+  }
+
+  @Post('compensation-matrix')
+  @RequirePermissions('module:payroll-core.matrix.manage')
+  createCompensationMatrixRow(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.createCompensationMatrixRow(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('compensation-matrix/:id')
+  @RequirePermissions('module:payroll-core.matrix.manage')
+  updateCompensationMatrixRow(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.updateCompensationMatrixRow(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('compensation-matrix/:id/activate')
+  @RequirePermissions('module:payroll-core.matrix.manage')
+  activateCompensationMatrixRow(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.activateCompensationMatrixRow(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('compensation-matrix/:id/deactivate')
+  @RequirePermissions('module:payroll-core.matrix.manage')
+  deactivateCompensationMatrixRow(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.deactivateCompensationMatrixRow(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('compensation-matrix/:id')
+  @RequirePermissions('module:payroll-core.matrix.manage')
+  deleteCompensationMatrixRow(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.deleteCompensationMatrixRow(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
   @Get('worklog-employees')
   @RequirePermissions('module:payroll-core.payroll.manage')
   listWorkLogEmployees(@Req() req: Request & { companyId: string }) {
