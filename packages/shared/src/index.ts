@@ -837,6 +837,7 @@ export const payrollPeriodSchema = z.object({
 
 export const payrollPeriodLineUpdateSchema = z.object({
   reportDays: z.coerce.number().int().min(0).max(31).optional(),
+  calculatedOvertime: z.coerce.number().nonnegative().optional(),
   handCashFinal: z.coerce.number().nonnegative().optional(),
   notes: z.string().max(2000).nullable().optional()
 });
