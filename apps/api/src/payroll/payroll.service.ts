@@ -403,26 +403,33 @@ export class PayrollService {
     const search = parsed.search?.trim();
     const numericSearch = search && Number.isFinite(Number(search.replace(',', '.'))) ? Number(search.replace(',', '.')) : null;
 
-    return this.prisma.payrollCompensationMatrixRow.findMany({
-      where: {
-        companyId,
-        ...(parsed.state === 'active' ? { isActive: true } : {}),
-        ...(search
-          ? {
-              OR: [
-                ...(numericSearch !== null
-                  ? [
-                      { targetAccrualSalary: new Prisma.Decimal(numericSearch) },
-                      { officialNetSalary: new Prisma.Decimal(numericSearch) }
-                    ]
-                  : []),
-                { notes: { contains: search, mode: 'insensitive' } }
-              ]
-            }
-          : {})
-      },
-      orderBy: [{ isActive: 'desc' }, { targetAccrualSalary: 'desc' }, { effectiveFrom: 'desc' }, { createdAt: 'desc' }]
-    });
+    return this.prisma.payrollCompensationMatrixRow
+      .findMany({
+        where: {
+          companyId,
+          ...(parsed.state === 'active' ? { isActive: true } : {}),
+          ...(search
+            ? {
+                OR: [
+                  ...(numericSearch !== null
+                    ? [
+                        { targetAccrualSalary: new Prisma.Decimal(numericSearch) },
+                        { officialNetSalary: new Prisma.Decimal(numericSearch) }
+                      ]
+                    : []),
+                  { notes: { contains: search, mode: 'insensitive' } }
+                ]
+              }
+            : {})
+        },
+        orderBy: [{ isActive: 'desc' }, { targetAccrualSalary: 'desc' }, { effectiveFrom: 'desc' }, { createdAt: 'desc' }]
+      })
+      .catch((error) => {
+        if (this.isMissingPayrollCompensationMatrixTable(error)) {
+          return [];
+        }
+        throw error;
+      });
   }
 
   async resolveCompensationMatrix(companyId: string, query: unknown = {}) {
@@ -432,18 +439,23 @@ export class PayrollService {
     }
 
     const now = new Date();
-    return this.prisma.payrollCompensationMatrixRow.findFirst({
-      where: {
-        companyId,
-        isActive: true,
-        targetAccrualSalary: new Prisma.Decimal(parsed.targetAccrualSalary),
-        AND: [
-          { OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: now } }] },
-          { OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }
-        ]
-      },
-      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }]
-    });
+    try {
+      return await this.prisma.payrollCompensationMatrixRow.findFirst({
+        where: {
+          companyId,
+          isActive: true,
+          targetAccrualSalary: new Prisma.Decimal(parsed.targetAccrualSalary),
+          AND: [
+            { OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: now } }] },
+            { OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }
+          ]
+        },
+        orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }]
+      });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
   }
 
   async createCompensationMatrixRow(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
@@ -462,17 +474,23 @@ export class PayrollService {
       null
     );
 
-    const row = await this.prisma.payrollCompensationMatrixRow.create({
-      data: {
-        companyId,
-        targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary),
-        officialNetSalary: new Prisma.Decimal(body.officialNetSalary),
-        isActive,
-        effectiveFrom,
-        effectiveTo,
-        notes: body.notes ?? null
-      }
-    });
+    let row;
+    try {
+      row = await this.prisma.payrollCompensationMatrixRow.create({
+        data: {
+          companyId,
+          targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary),
+          officialNetSalary: new Prisma.Decimal(body.officialNetSalary),
+          isActive,
+          effectiveFrom,
+          effectiveTo,
+          notes: body.notes ?? null
+        }
+      });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
 
     await this.logCompany(
       actorUserId,
@@ -498,19 +516,25 @@ export class PayrollService {
     this.validateEffectiveRange(effectiveFrom ?? new Date('1900-01-01T00:00:00.000Z'), effectiveTo);
     await this.ensureNoMatrixOverlap(companyId, targetAccrualSalary, effectiveFrom, effectiveTo, isActive, existing.id);
 
-    const row = await this.prisma.payrollCompensationMatrixRow.update({
-      where: { id: existing.id },
-      data: {
-        ...(body.targetAccrualSalary !== undefined
-          ? { targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary) }
-          : {}),
-        ...(body.officialNetSalary !== undefined ? { officialNetSalary: new Prisma.Decimal(body.officialNetSalary) } : {}),
-        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
-        ...(body.effectiveFrom !== undefined ? { effectiveFrom } : {}),
-        ...(body.effectiveTo !== undefined ? { effectiveTo } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes } : {})
-      }
-    });
+    let row;
+    try {
+      row = await this.prisma.payrollCompensationMatrixRow.update({
+        where: { id: existing.id },
+        data: {
+          ...(body.targetAccrualSalary !== undefined
+            ? { targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary) }
+            : {}),
+          ...(body.officialNetSalary !== undefined ? { officialNetSalary: new Prisma.Decimal(body.officialNetSalary) } : {}),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+          ...(body.effectiveFrom !== undefined ? { effectiveFrom } : {}),
+          ...(body.effectiveTo !== undefined ? { effectiveTo } : {}),
+          ...(body.notes !== undefined ? { notes: body.notes } : {})
+        }
+      });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
 
     await this.logCompany(
       actorUserId,
@@ -535,7 +559,12 @@ export class PayrollService {
 
   async deleteCompensationMatrixRow(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const existing = await this.requireCompensationMatrixRow(companyId, id);
-    await this.prisma.payrollCompensationMatrixRow.delete({ where: { id: existing.id } });
+    try {
+      await this.prisma.payrollCompensationMatrixRow.delete({ where: { id: existing.id } });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
     await this.logCompany(
       actorUserId,
       companyId,
@@ -1193,10 +1222,16 @@ export class PayrollService {
       existing.id
     );
 
-    const row = await this.prisma.payrollCompensationMatrixRow.update({
-      where: { id: existing.id },
-      data: { isActive }
-    });
+    let row;
+    try {
+      row = await this.prisma.payrollCompensationMatrixRow.update({
+        where: { id: existing.id },
+        data: { isActive }
+      });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
 
     await this.logCompany(
       actorUserId,
@@ -1296,19 +1331,25 @@ export class PayrollService {
   ) {
     if (!isActive) return;
 
-    const conflict = await this.prisma.payrollCompensationMatrixRow.findFirst({
-      where: {
-        companyId,
-        isActive: true,
-        targetAccrualSalary: new Prisma.Decimal(targetAccrualSalary),
-        ...(currentId ? { NOT: { id: currentId } } : {}),
-        AND: [
-          { OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom ?? new Date('1900-01-01T00:00:00.000Z') } }] },
-          ...(effectiveTo ? [{ OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: effectiveTo } }] }] : [])
-        ]
-      },
-      select: { id: true }
-    });
+    let conflict;
+    try {
+      conflict = await this.prisma.payrollCompensationMatrixRow.findFirst({
+        where: {
+          companyId,
+          isActive: true,
+          targetAccrualSalary: new Prisma.Decimal(targetAccrualSalary),
+          ...(currentId ? { NOT: { id: currentId } } : {}),
+          AND: [
+            { OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom ?? new Date('1900-01-01T00:00:00.000Z') } }] },
+            ...(effectiveTo ? [{ OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: effectiveTo } }] }] : [])
+          ]
+        },
+        select: { id: true }
+      });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
 
     if (conflict) {
       throw new ConflictException('Aynı hakediş maaşı için çakışan aktif eşleştirme oluşturulamaz');
@@ -1427,9 +1468,30 @@ export class PayrollService {
   }
 
   private async requireCompensationMatrixRow(companyId: string, id: string): Promise<MatrixRowPayload> {
-    const row = await this.prisma.payrollCompensationMatrixRow.findUnique({ where: { id } });
+    let row;
+    try {
+      row = await this.prisma.payrollCompensationMatrixRow.findUnique({ where: { id } });
+    } catch (error) {
+      this.throwIfMissingPayrollCompensationMatrixTable(error);
+      throw error;
+    }
     if (!row || row.companyId !== companyId) throw new NotFoundException('Ücret eşleştirme kaydı bulunamadı');
     return row;
+  }
+
+  private isMissingPayrollCompensationMatrixTable(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2021' &&
+      typeof error.meta?.table === 'string' &&
+      error.meta.table.includes('PayrollCompensationMatrixRow')
+    );
+  }
+
+  private throwIfMissingPayrollCompensationMatrixTable(error: unknown): asserts error is never {
+    if (this.isMissingPayrollCompensationMatrixTable(error)) {
+      throw new BadRequestException('Ücret matrisi için veritabanı migrationı eksik. Lütfen `pnpm db:migrate` çalıştırın.');
+    }
   }
   private async requireLegacyEmployee(companyId: string, id: string): Promise<LegacyEmployeePayload> {
     const row = await this.prisma.employee.findUnique({ where: { id }, include: { role: true, profitCenter: true } });

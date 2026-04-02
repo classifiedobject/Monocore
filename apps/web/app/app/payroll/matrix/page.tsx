@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { apiFetch, handleApiError } from '../../../../lib/api';
+import { ApiError, apiFetch, handleApiError } from '../../../../lib/api';
 import { PayrollDrawer, PayrollEmptyState, PayrollPageIntro, formatDate, formatMoney } from '../_components';
 import type { PayrollCompensationMatrixRow } from '../_types';
 
@@ -42,14 +42,40 @@ export default function PayrollMatrixPage() {
   const [editing, setEditing] = useState<PayrollCompensationMatrixRow | null>(null);
   const [form, setForm] = useState<MatrixFormState>(defaultForm);
   const [submitting, setSubmitting] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function extractApiMessage(error: unknown) {
+    if (!(error instanceof ApiError)) return null;
+    try {
+      const parsed = JSON.parse(error.message) as {
+        error?: { message?: string };
+        detail?: { message?: string };
+      };
+      return parsed?.error?.message ?? parsed?.detail?.message ?? error.message;
+    } catch {
+      return error.message;
+    }
+  }
 
   async function loadRows(nextSearch = search, nextState = stateFilter) {
+    setPageError(null);
     const params = new URLSearchParams();
     if (nextSearch.trim()) params.set('search', nextSearch.trim());
     if (nextState !== 'all') params.set('state', nextState);
     const suffix = params.toString() ? `?${params.toString()}` : '';
-    const result = (await apiFetch(`/app-api/payroll/compensation-matrix${suffix}`)) as PayrollCompensationMatrixRow[];
-    setRows(Array.isArray(result) ? result : []);
+    try {
+      const result = (await apiFetch(`/app-api/payroll/compensation-matrix${suffix}`)) as PayrollCompensationMatrixRow[];
+      setRows(Array.isArray(result) ? result : []);
+    } catch (error) {
+      const message = extractApiMessage(error);
+      if (message) {
+        setRows([]);
+        setPageError(message);
+        return;
+      }
+      throw error;
+    }
   }
 
   useEffect(() => {
@@ -61,23 +87,27 @@ export default function PayrollMatrixPage() {
     setDrawerOpen(false);
     setEditing(null);
     setForm(defaultForm);
+    setFormError(null);
   }
 
   function openCreateDrawer() {
     setEditing(null);
     setForm(defaultForm);
+    setFormError(null);
     setDrawerOpen(true);
   }
 
   function openEditDrawer(row: PayrollCompensationMatrixRow) {
     setEditing(row);
     setForm(mapRowToForm(row));
+    setFormError(null);
     setDrawerOpen(true);
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
+    setFormError(null);
     try {
       const payload = {
         targetAccrualSalary: Number(form.targetAccrualSalary),
@@ -103,7 +133,12 @@ export default function PayrollMatrixPage() {
       resetAndClose();
       await loadRows();
     } catch (error) {
-      handleApiError(error);
+      const message = extractApiMessage(error);
+      if (message) {
+        setFormError(message);
+      } else {
+        handleApiError(error);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -116,7 +151,12 @@ export default function PayrollMatrixPage() {
       });
       await loadRows();
     } catch (error) {
-      handleApiError(error);
+      const message = extractApiMessage(error);
+      if (message) {
+        setPageError(message);
+      } else {
+        handleApiError(error);
+      }
     }
   }
 
@@ -126,7 +166,12 @@ export default function PayrollMatrixPage() {
       await apiFetch(`/app-api/payroll/compensation-matrix/${row.id}`, { method: 'DELETE' });
       await loadRows();
     } catch (error) {
-      handleApiError(error);
+      const message = extractApiMessage(error);
+      if (message) {
+        setPageError(message);
+      } else {
+        handleApiError(error);
+      }
     }
   }
 
@@ -178,6 +223,12 @@ export default function PayrollMatrixPage() {
           </button>
         </div>
       </div>
+
+      {pageError ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {pageError}
+        </div>
+      ) : null}
 
       {rows.length === 0 ? (
         <PayrollEmptyState
@@ -276,6 +327,11 @@ export default function PayrollMatrixPage() {
         }
       >
         <form id="payroll-matrix-form" className="space-y-6" onSubmit={submitForm}>
+          {formError ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {formError}
+            </div>
+          ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm text-slate-700">
               <span className="font-medium">Hakediş Maaşı</span>
