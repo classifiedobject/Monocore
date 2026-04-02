@@ -196,6 +196,7 @@ enum PayrollInsuranceStatus {
 enum PayrollPeriodStatus {
   DRAFT
   CALCULATED
+  LOCKED
   POSTED
 }
 
@@ -1524,7 +1525,6 @@ model Employee {
   role           CompanyRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
   profitCenter   FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
   workLogs       WorkLog[]
-  payrollLines   PayrollLine[]
   tipDistributions TipDistribution[]
   tipAdvances    TipAdvance[]
   tipWeekDistributions TipWeekDistribution[]
@@ -1549,6 +1549,7 @@ model PayrollEmployee {
   updatedAt         DateTime @updatedAt
   company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employmentRecords PayrollEmploymentRecord[]
+  payrollLines      PayrollLine[]
 
   @@index([companyId, lastName, firstName])
   @@index([companyId, identityNumber])
@@ -1571,6 +1572,7 @@ model PayrollEmploymentRecord {
   company            Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employee           PayrollEmployee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   compensationProfiles PayrollCompensationProfile[]
+  payrollLines       PayrollLine[]
 
   @@index([companyId, employeeId])
   @@index([companyId, status])
@@ -1593,6 +1595,7 @@ model PayrollCompensationProfile {
   updatedAt           DateTime @updatedAt
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employmentRecord    PayrollEmploymentRecord @relation(fields: [employmentRecordId], references: [id], onDelete: Cascade)
+  payrollLines        PayrollLine[]
 
   @@index([companyId, employmentRecordId])
   @@index([companyId, isActive])
@@ -1638,6 +1641,7 @@ model PayrollPeriod {
   totalGross Decimal  @default(0) @db.Decimal(14, 2)
   totalNet   Decimal  @default(0) @db.Decimal(14, 2)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
   company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   lines      PayrollLine[]
 
@@ -1650,15 +1654,38 @@ model PayrollLine {
   companyId       String
   payrollPeriodId String
   employeeId      String
-  grossAmount     Decimal  @db.Decimal(14, 2)
+  employmentRecordId String
+  departmentName  String?
+  titleName       String?
+  accrualDays     Int      @default(0)
+  officialDays    Int      @default(0)
+  reportDays      Int      @default(0)
+  targetAccrualSalary Decimal @default(0) @db.Decimal(14, 2)
+  officialNetSalary Decimal @default(0) @db.Decimal(14, 2)
+  accrualPay      Decimal  @default(0) @db.Decimal(14, 2)
+  officialPay     Decimal  @default(0) @db.Decimal(14, 2)
+  calculatedBonus Decimal  @default(0) @db.Decimal(14, 2)
+  calculatedOvertime Decimal @default(0) @db.Decimal(14, 2)
+  handCashRecommended Decimal @default(0) @db.Decimal(14, 2)
+  handCashFinal   Decimal  @default(0) @db.Decimal(14, 2)
+  bonusAdjustment Decimal  @default(0) @db.Decimal(14, 2)
+  totalPayable    Decimal  @default(0) @db.Decimal(14, 2)
+  difference      Decimal  @default(0) @db.Decimal(14, 2)
+  controlOk       Boolean  @default(false)
+  sourceCompensationProfileId String?
+  grossAmount     Decimal  @default(0) @db.Decimal(14, 2)
   notes           String?
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee        PayrollEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employmentRecord PayrollEmploymentRecord @relation(fields: [employmentRecordId], references: [id], onDelete: Restrict)
+  sourceCompensationProfile PayrollCompensationProfile? @relation(fields: [sourceCompensationProfileId], references: [id], onDelete: SetNull)
 
-  @@unique([payrollPeriodId, employeeId])
+  @@unique([payrollPeriodId, employmentRecordId])
   @@index([companyId, payrollPeriodId])
+  @@index([companyId, employeeId])
 }
 
 model TipPool {

@@ -180,25 +180,54 @@ export class PayrollController {
   }
 
   @Get('periods')
-  @RequirePermissions('module:payroll-core.payroll.manage')
+  @RequirePermissions('module:payroll-core.period.read')
   listPeriods(@Req() req: Request & { companyId: string }) {
     return this.payroll.listPeriods(req.companyId);
   }
 
+  @Get('periods/:id')
+  @RequirePermissions('module:payroll-core.period.read')
+  getPeriod(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.payroll.getPeriod(req.companyId, id);
+  }
+
   @Post('periods')
-  @RequirePermissions('module:payroll-core.payroll.manage')
+  @RequirePermissions('module:payroll-core.period.manage')
   createPeriod(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.payroll.createPeriod(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Post('periods/:id/calculate')
-  @RequirePermissions('module:payroll-core.payroll.manage')
+  @RequirePermissions('module:payroll-core.period.manage')
   calculatePeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.payroll.calculatePeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
+  @Post('periods/:id/lock')
+  @RequirePermissions('module:payroll-core.period.manage')
+  lockPeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.lockPeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('periods/:id/lines')
+  @RequirePermissions('module:payroll-core.period.read')
+  listPeriodLines(@Param('id') id: string, @Req() req: Request & { companyId: string }) {
+    return this.payroll.listPeriodLines(req.companyId, id);
+  }
+
+  @Patch('periods/:id/lines/:lineId')
+  @RequirePermissions('module:payroll-core.period.manage')
+  updatePeriodLine(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.updatePeriodLine(req.user.id, req.companyId, id, lineId, body, req.ip, req.get('user-agent'));
+  }
+
   @Post('periods/:id/post')
-  @RequirePermissions('module:payroll-core.payroll.post', 'module:finance-core.entry.create')
+  @RequirePermissions('module:payroll-core.period.post', 'module:finance-core.entry.create')
   postPeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.payroll.postPeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }

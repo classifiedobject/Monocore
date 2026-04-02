@@ -816,6 +816,12 @@ export const payrollPeriodSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 });
 
+export const payrollPeriodLineUpdateSchema = z.object({
+  reportDays: z.coerce.number().int().min(0).max(31).optional(),
+  handCashFinal: z.coerce.number().nonnegative().optional(),
+  notes: z.string().max(2000).nullable().optional()
+});
+
 export const tipPoolSchema = z.object({
   periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

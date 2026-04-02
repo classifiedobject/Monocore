@@ -25,6 +25,7 @@ import {
   payrollEmploymentRecordQuerySchema,
   payrollEmploymentRecordSchema,
   payrollLegacyEmployeeSchema,
+  payrollPeriodLineUpdateSchema,
   payrollPeriodSchema,
   payrollWorkLogQuerySchema,
   payrollWorkLogSchema
@@ -39,6 +40,46 @@ type LegacyEmployeePayload = Prisma.EmployeeGetPayload<{
 }>;
 
 type MatrixRowPayload = Prisma.PayrollCompensationMatrixRowGetPayload<object>;
+type EmploymentWithRelations = Prisma.PayrollEmploymentRecordGetPayload<{
+  include: {
+    employee: true;
+    compensationProfiles: true;
+  };
+}>;
+
+type CompensationProfileRow = EmploymentWithRelations['compensationProfiles'][number];
+
+type PayrollLineWithRelations = Prisma.PayrollLineGetPayload<{
+  include: {
+    employee: true;
+    employmentRecord: true;
+    sourceCompensationProfile: true;
+  };
+}>;
+
+type SnapshotOverrides = {
+  reportDays?: number;
+  handCashFinal?: number;
+};
+
+type PayrollSnapshot = {
+  accrualDays: number;
+  officialDays: number;
+  reportDays: number;
+  targetAccrualSalary: number;
+  officialNetSalary: number;
+  accrualPay: number;
+  officialPay: number;
+  calculatedBonus: number;
+  calculatedOvertime: number;
+  handCashRecommended: number;
+  handCashFinal: number;
+  bonusAdjustment: number;
+  totalPayable: number;
+  difference: number;
+  controlOk: boolean;
+};
+
 @Injectable()
 export class PayrollService {
   constructor(
@@ -556,9 +597,47 @@ export class PayrollService {
     return this.prisma.payrollPeriod.findMany({
       where: { companyId },
       include: {
-        lines: { include: { employee: true }, orderBy: { createdAt: 'asc' } }
+        lines: {
+          include: {
+            employee: true,
+            employmentRecord: true,
+            sourceCompensationProfile: true
+          },
+          orderBy: [{ departmentName: 'asc' }, { titleName: 'asc' }, { employee: { firstName: 'asc' } }]
+        }
       },
       orderBy: [{ startDate: 'desc' }]
+    });
+  }
+
+  async getPeriod(companyId: string, id: string) {
+    const period = await this.prisma.payrollPeriod.findUnique({
+      where: { id },
+      include: {
+        lines: {
+          include: {
+            employee: true,
+            employmentRecord: true,
+            sourceCompensationProfile: true
+          },
+          orderBy: [{ departmentName: 'asc' }, { titleName: 'asc' }, { employee: { firstName: 'asc' } }]
+        }
+      }
+    });
+    if (!period || period.companyId !== companyId) throw new NotFoundException('Payroll period not found');
+    return period;
+  }
+
+  async listPeriodLines(companyId: string, id: string) {
+    await this.requirePeriod(companyId, id);
+    return this.prisma.payrollLine.findMany({
+      where: { companyId, payrollPeriodId: id },
+      include: {
+        employee: true,
+        employmentRecord: true,
+        sourceCompensationProfile: true
+      },
+      orderBy: [{ departmentName: 'asc' }, { titleName: 'asc' }, { employee: { firstName: 'asc' } }]
     });
   }
 
@@ -586,60 +665,86 @@ export class PayrollService {
 
   async calculatePeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const period = await this.requirePeriod(companyId, id);
-    if (period.status === 'POSTED') throw new BadRequestException('Posted payroll period cannot be recalculated');
-
-    const employees = await this.prisma.employee.findMany({ where: { companyId, isActive: true } });
+    if (period.status === 'LOCKED' || period.status === 'POSTED') {
+      throw new BadRequestException('Locked or posted payroll period cannot be recalculated');
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.payrollLine.deleteMany({ where: { payrollPeriodId: period.id } });
 
-      const worklogs = await tx.workLog.findMany({
+      const employments = await tx.payrollEmploymentRecord.findMany({
         where: {
           companyId,
-          date: { gte: period.startDate, lte: period.endDate }
-        }
+          status: { in: ['ACTIVE', 'EXITED'] },
+          arrivalDate: { lte: period.endDate },
+          OR: [{ exitDate: null }, { exitDate: { gte: period.startDate } }]
+        },
+        include: {
+          employee: true,
+          compensationProfiles: {
+            orderBy: [{ effectiveFrom: 'desc' }]
+          }
+        },
+        orderBy: [{ departmentName: 'asc' }, { titleName: 'asc' }, { employee: { firstName: 'asc' } }]
       });
 
-      const hoursByEmployee = new Map<string, number>();
-      for (const row of worklogs) {
-        hoursByEmployee.set(row.employeeId, (hoursByEmployee.get(row.employeeId) ?? 0) + Number(row.hoursWorked.toString()));
-      }
-
-      let total = 0;
-      for (const employee of employees) {
-        let gross = 0;
-        if (employee.salaryType === 'FIXED') {
-          gross = Number((employee.baseSalary ?? new Prisma.Decimal(0)).toString());
-        } else {
-          const rate = Number((employee.hourlyRate ?? new Prisma.Decimal(0)).toString());
-          gross = (hoursByEmployee.get(employee.id) ?? 0) * rate;
-        }
+      let totalGross = 0;
+      let totalNet = 0;
+      for (const employment of employments) {
+        const compensation = this.resolveCompensationProfile(employment, period.startDate, period.endDate);
+        const snapshot = this.buildPayrollSnapshot(period.startDate, period.endDate, employment, compensation, {});
 
         await tx.payrollLine.create({
           data: {
             companyId,
             payrollPeriodId: period.id,
-            employeeId: employee.id,
-            grossAmount: new Prisma.Decimal(gross),
-            notes: employee.salaryType === 'HOURLY' ? 'Calculated by worklogs' : 'Fixed salary'
+            employeeId: employment.employeeId,
+            employmentRecordId: employment.id,
+            departmentName: employment.departmentName,
+            titleName: employment.titleName,
+            accrualDays: snapshot.accrualDays,
+            officialDays: snapshot.officialDays,
+            reportDays: snapshot.reportDays,
+            targetAccrualSalary: this.decimal(snapshot.targetAccrualSalary),
+            officialNetSalary: this.decimal(snapshot.officialNetSalary),
+            accrualPay: this.decimal(snapshot.accrualPay),
+            officialPay: this.decimal(snapshot.officialPay),
+            calculatedBonus: this.decimal(snapshot.calculatedBonus),
+            calculatedOvertime: this.decimal(snapshot.calculatedOvertime),
+            handCashRecommended: this.decimal(snapshot.handCashRecommended),
+            handCashFinal: this.decimal(snapshot.handCashFinal),
+            bonusAdjustment: this.decimal(snapshot.bonusAdjustment),
+            totalPayable: this.decimal(snapshot.totalPayable),
+            difference: this.decimal(snapshot.difference),
+            controlOk: snapshot.controlOk,
+            sourceCompensationProfileId: compensation?.id ?? null,
+            grossAmount: this.decimal(snapshot.totalPayable),
+            notes: null
           }
         });
-        total += gross;
+
+        totalGross += snapshot.accrualPay;
+        totalNet += snapshot.totalPayable;
       }
 
-      const updated = await tx.payrollPeriod.update({
+      return tx.payrollPeriod.update({
         where: { id: period.id },
         data: {
           status: 'CALCULATED',
-          totalGross: new Prisma.Decimal(total),
-          totalNet: new Prisma.Decimal(total)
+          totalGross: this.decimal(totalGross),
+          totalNet: this.decimal(totalNet)
         },
         include: {
-          lines: { include: { employee: true }, orderBy: { createdAt: 'asc' } }
+          lines: {
+            include: {
+              employee: true,
+              employmentRecord: true,
+              sourceCompensationProfile: true
+            },
+            orderBy: [{ departmentName: 'asc' }, { titleName: 'asc' }, { employee: { firstName: 'asc' } }]
+          }
         }
       });
-
-      return updated;
     });
 
     await this.logCompany(
@@ -648,16 +753,101 @@ export class PayrollService {
       'company.payroll.period.calculate',
       'payroll_period',
       period.id,
-      { totalGross: String(result.totalGross) },
+      {
+        periodStart: this.toYmd(period.startDate),
+        periodEnd: this.toYmd(period.endDate),
+        lineCount: result.lines.length,
+        totalGross: Number(result.totalGross.toString()),
+        totalNet: Number(result.totalNet.toString())
+      },
       ip,
       userAgent
     );
     return result;
   }
 
+  async updatePeriodLine(actorUserId: string, companyId: string, periodId: string, lineId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const period = await this.requirePeriod(companyId, periodId);
+    if (period.status === 'LOCKED' || period.status === 'POSTED') {
+      throw new BadRequestException('Locked or posted payroll lines cannot be edited');
+    }
+
+    const body = payrollPeriodLineUpdateSchema.parse(payload);
+    const line = await this.requirePeriodLine(companyId, periodId, lineId);
+
+    const snapshot = this.recalculateStoredPayrollLine(period.startDate, period.endDate, line, {
+      reportDays: body.reportDays,
+      handCashFinal: body.handCashFinal
+    });
+
+    const updated = await this.prisma.payrollLine.update({
+      where: { id: line.id },
+      data: {
+        reportDays: snapshot.reportDays,
+        accrualPay: this.decimal(snapshot.accrualPay),
+        officialPay: this.decimal(snapshot.officialPay),
+        calculatedBonus: this.decimal(snapshot.calculatedBonus),
+        calculatedOvertime: this.decimal(snapshot.calculatedOvertime),
+        handCashRecommended: this.decimal(snapshot.handCashRecommended),
+        handCashFinal: this.decimal(snapshot.handCashFinal),
+        bonusAdjustment: this.decimal(snapshot.bonusAdjustment),
+        totalPayable: this.decimal(snapshot.totalPayable),
+        difference: this.decimal(snapshot.difference),
+        controlOk: snapshot.controlOk,
+        grossAmount: this.decimal(snapshot.totalPayable),
+        ...(body.notes !== undefined ? { notes: body.notes } : {})
+      },
+      include: {
+        employee: true,
+        employmentRecord: true,
+        sourceCompensationProfile: true
+      }
+    });
+
+    await this.refreshPeriodTotals(companyId, periodId);
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.period.line.update',
+      'payroll_line',
+      line.id,
+      {
+        payrollPeriodId: periodId,
+        reportDays: updated.reportDays,
+        handCashFinal: Number(updated.handCashFinal.toString()),
+        totalPayable: Number(updated.totalPayable.toString())
+      },
+      ip,
+      userAgent
+    );
+
+    return updated;
+  }
+
+  async lockPeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const period = await this.requirePeriod(companyId, id);
+    if (period.status !== 'CALCULATED') throw new BadRequestException('Payroll period must be calculated before lock');
+
+    const updated = await this.prisma.payrollPeriod.update({
+      where: { id: period.id },
+      data: { status: 'LOCKED' },
+      include: { lines: { include: { employee: true } } }
+    });
+
+    await this.logCompany(actorUserId, companyId, 'company.payroll.period.lock', 'payroll_period', period.id, {
+      periodStart: this.toYmd(period.startDate),
+      periodEnd: this.toYmd(period.endDate),
+      lineCount: updated.lines.length
+    }, ip, userAgent);
+
+    return updated;
+  }
+
   async postPeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const period = await this.requirePeriod(companyId, id);
-    if (period.status !== 'CALCULATED') throw new BadRequestException('Payroll period must be calculated before posting');
+    if (!['CALCULATED', 'LOCKED'].includes(period.status)) {
+      throw new BadRequestException('Payroll period must be calculated or locked before posting');
+    }
 
     const [payrollCategory, tipsCategory] = await Promise.all([
       this.ensureExpenseCategory(companyId, 'Payroll Expense'),
@@ -665,6 +855,13 @@ export class PayrollService {
     ]);
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const freshPeriod = await tx.payrollPeriod.findUnique({ where: { id: period.id } });
+      if (!freshPeriod || freshPeriod.companyId !== companyId) throw new NotFoundException('Payroll period not found');
+      if (freshPeriod.status === 'POSTED') throw new BadRequestException('Payroll period is already posted');
+      if (!['CALCULATED', 'LOCKED'].includes(freshPeriod.status)) {
+        throw new BadRequestException('Payroll period must be calculated or locked before posting');
+      }
+
       const lines = await tx.payrollLine.findMany({
         where: { companyId, payrollPeriodId: period.id },
         include: { employee: true }
@@ -676,18 +873,26 @@ export class PayrollService {
 
       let financeEntryCount = 0;
       for (const line of lines) {
+        const existingEntry = await tx.financeEntry.findFirst({
+          where: {
+            companyId,
+            relatedDocumentType: 'payroll_line',
+            relatedDocumentId: line.id
+          }
+        });
+        if (existingEntry) continue;
+
         await tx.financeEntry.create({
           data: {
             companyId,
             categoryId: payrollCategory.id,
-            amount: line.grossAmount,
+            amount: line.totalPayable,
             date: period.endDate,
             description: `Payroll ${line.employee.firstName} ${line.employee.lastName}`,
             createdByUserId: actorUserId,
-            profitCenterId: line.employee.profitCenterId,
             reference: `payroll:${period.id}`,
-            relatedDocumentType: 'payroll',
-            relatedDocumentId: period.id
+            relatedDocumentType: 'payroll_line',
+            relatedDocumentId: line.id
           }
         });
         financeEntryCount += 1;
@@ -704,6 +909,15 @@ export class PayrollService {
 
       for (const pool of tipPools) {
         for (const distribution of pool.distributions) {
+          const existingTipEntry = await tx.financeEntry.findFirst({
+            where: {
+              companyId,
+              relatedDocumentType: 'tip_pool_distribution',
+              relatedDocumentId: distribution.id
+            }
+          });
+          if (existingTipEntry) continue;
+
           await tx.financeEntry.create({
             data: {
               companyId,
@@ -712,10 +926,9 @@ export class PayrollService {
               date: period.endDate,
               description: `Tip distribution ${distribution.employee.firstName} ${distribution.employee.lastName}`,
               createdByUserId: actorUserId,
-              profitCenterId: distribution.employee.profitCenterId,
               reference: `tip:${pool.id}`,
-              relatedDocumentType: 'tip_pool',
-              relatedDocumentId: pool.id
+              relatedDocumentType: 'tip_pool_distribution',
+              relatedDocumentId: distribution.id
             }
           });
           financeEntryCount += 1;
@@ -757,6 +970,181 @@ export class PayrollService {
     );
 
     return result.updated;
+  }
+
+  private async refreshPeriodTotals(companyId: string, periodId: string) {
+    const lines = await this.prisma.payrollLine.findMany({ where: { companyId, payrollPeriodId: periodId } });
+    const totalGross = lines.reduce((sum, row) => sum + Number(row.accrualPay.toString()), 0);
+    const totalNet = lines.reduce((sum, row) => sum + Number(row.totalPayable.toString()), 0);
+    await this.prisma.payrollPeriod.update({
+      where: { id: periodId },
+      data: {
+        totalGross: this.decimal(totalGross),
+        totalNet: this.decimal(totalNet)
+      }
+    });
+  }
+
+  private resolveCompensationProfile(employment: EmploymentWithRelations, periodStart: Date, periodEnd: Date) {
+    return employment.compensationProfiles.find((profile) => {
+      if (!profile.isActive) return false;
+      if (profile.effectiveFrom > periodEnd) return false;
+      if (profile.effectiveTo && profile.effectiveTo < periodStart) return false;
+      return true;
+    }) ?? null;
+  }
+
+  private buildPayrollSnapshot(periodStart: Date, periodEnd: Date, employment: EmploymentWithRelations, profile: CompensationProfileRow | null, overrides: SnapshotOverrides): PayrollSnapshot {
+    const monthDays = this.inclusiveDays(periodStart, periodEnd);
+    const accrualDays = this.overlapDays(periodStart, periodEnd, employment.accrualStartDate, employment.exitDate);
+    const officialDays = employment.sgkStartDate
+      ? this.overlapDays(periodStart, periodEnd, employment.sgkStartDate, employment.exitDate)
+      : 0;
+    const reportDays = Math.max(0, Math.min(overrides.reportDays ?? 0, Math.max(accrualDays, officialDays)));
+
+    const targetAccrualSalary = Number((profile?.targetAccrualSalary ?? new Prisma.Decimal(0)).toString());
+    const officialNetSalary = Number((profile?.officialNetSalary ?? new Prisma.Decimal(0)).toString());
+    const effectiveAccrualDays = Math.max(0, accrualDays - reportDays);
+    const effectiveOfficialDays = Math.max(0, officialDays - reportDays);
+
+    const accrualPay = this.round2((targetAccrualSalary * effectiveAccrualDays) / Math.max(monthDays, 1));
+    const officialPay = this.round2((officialNetSalary * effectiveOfficialDays) / Math.max(monthDays, 1));
+
+    const overtimeCap = this.computeOvertimeCap(accrualPay, employment.departmentName, profile?.overtimeEligible ?? true, targetAccrualSalary);
+    const preliminaryGap = Math.max(0, this.round2(accrualPay - officialPay));
+    const calculatedOvertime = Math.min(preliminaryGap, overtimeCap);
+    const bonusCap = this.computeBonusCap(accrualPay, profile?.bonusEligible ?? true, targetAccrualSalary);
+    const calculatedBonus = Math.min(this.round2(preliminaryGap - calculatedOvertime), bonusCap);
+    const residualBeforeCash = this.round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime));
+    const handCashRecommended = profile?.handCashAllowed === false ? 0 : Math.max(0, residualBeforeCash);
+    const recommendedRounded = this.roundDownToTwoHundreds(handCashRecommended);
+    const requestedHandCash = overrides.handCashFinal;
+    const handCashFinal = this.round2(
+      requestedHandCash === undefined
+        ? recommendedRounded
+        : Math.max(0, Math.min(requestedHandCash, Math.max(0, residualBeforeCash)))
+    );
+    const bonusAdjustment = this.round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime + handCashFinal));
+    const totalPayable = this.round2(officialPay + calculatedBonus + calculatedOvertime + handCashFinal + bonusAdjustment);
+    const difference = this.round2(accrualPay - totalPayable);
+
+    return {
+      accrualDays,
+      officialDays,
+      reportDays,
+      targetAccrualSalary,
+      officialNetSalary,
+      accrualPay,
+      officialPay,
+      calculatedBonus,
+      calculatedOvertime,
+      handCashRecommended,
+      handCashFinal,
+      bonusAdjustment,
+      totalPayable,
+      difference,
+      controlOk: Math.abs(difference) <= 0.01
+    };
+  }
+
+  private recalculateStoredPayrollLine(periodStart: Date, periodEnd: Date, line: PayrollLineWithRelations, overrides: SnapshotOverrides): PayrollSnapshot {
+    const monthDays = this.inclusiveDays(periodStart, periodEnd);
+    const accrualDays = line.accrualDays;
+    const officialDays = line.officialDays;
+    const reportDays = Math.max(0, Math.min(overrides.reportDays ?? line.reportDays, Math.max(accrualDays, officialDays)));
+
+    const targetAccrualSalary = Number(line.targetAccrualSalary.toString());
+    const officialNetSalary = Number(line.officialNetSalary.toString());
+    const effectiveAccrualDays = Math.max(0, accrualDays - reportDays);
+    const effectiveOfficialDays = Math.max(0, officialDays - reportDays);
+
+    const accrualPay = this.round2((targetAccrualSalary * effectiveAccrualDays) / Math.max(monthDays, 1));
+    const officialPay = this.round2((officialNetSalary * effectiveOfficialDays) / Math.max(monthDays, 1));
+    const overtimeCap = this.computeOvertimeCap(
+      accrualPay,
+      line.departmentName,
+      line.sourceCompensationProfile?.overtimeEligible ?? true,
+      targetAccrualSalary
+    );
+    const preliminaryGap = Math.max(0, this.round2(accrualPay - officialPay));
+    const calculatedOvertime = Math.min(preliminaryGap, overtimeCap);
+    const bonusCap = this.computeBonusCap(
+      accrualPay,
+      line.sourceCompensationProfile?.bonusEligible ?? true,
+      targetAccrualSalary
+    );
+    const calculatedBonus = Math.min(this.round2(preliminaryGap - calculatedOvertime), bonusCap);
+    const residualBeforeCash = this.round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime));
+    const handCashAllowed = line.sourceCompensationProfile?.handCashAllowed ?? true;
+    const handCashRecommended = handCashAllowed ? Math.max(0, residualBeforeCash) : 0;
+    const recommendedRounded = this.roundDownToTwoHundreds(handCashRecommended);
+    const requestedHandCash = overrides.handCashFinal;
+    const handCashFinal = this.round2(
+      requestedHandCash === undefined
+        ? recommendedRounded
+        : Math.max(0, Math.min(requestedHandCash, Math.max(0, residualBeforeCash)))
+    );
+    const bonusAdjustment = this.round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime + handCashFinal));
+    const totalPayable = this.round2(officialPay + calculatedBonus + calculatedOvertime + handCashFinal + bonusAdjustment);
+    const difference = this.round2(accrualPay - totalPayable);
+
+    return {
+      accrualDays,
+      officialDays,
+      reportDays,
+      targetAccrualSalary,
+      officialNetSalary,
+      accrualPay,
+      officialPay,
+      calculatedBonus,
+      calculatedOvertime,
+      handCashRecommended,
+      handCashFinal,
+      bonusAdjustment,
+      totalPayable,
+      difference,
+      controlOk: Math.abs(difference) <= 0.01
+    };
+  }
+
+  private computeBonusCap(accrualPay: number, bonusEligible: boolean, targetAccrualSalary: number) {
+    if (!bonusEligible) return 0;
+    if (targetAccrualSalary < 40000) return 0;
+    if (targetAccrualSalary < 60000) return this.round2(accrualPay * 0.04);
+    if (targetAccrualSalary < 100000) return this.round2(accrualPay * 0.06);
+    return this.round2(accrualPay * 0.08);
+  }
+
+  private computeOvertimeCap(accrualPay: number, departmentName: string | null, overtimeEligible: boolean, targetAccrualSalary: number) {
+    if (!overtimeEligible) return 0;
+    if (targetAccrualSalary < 45000) return 0;
+    const normalized = (departmentName ?? '').trim().toLowerCase();
+    const ratio = normalized.includes('kitchen') || normalized.includes('mutfak')
+      ? 0.05
+      : normalized.includes('bar')
+        ? 0.04
+        : normalized.includes('support')
+          ? 0.02
+          : 0.03;
+    return this.round2(accrualPay * ratio);
+  }
+
+  private roundDownToTwoHundreds(value: number) {
+    if (value <= 0) return 0;
+    return Math.floor(value / 200) * 200;
+  }
+
+  private inclusiveDays(start: Date, end: Date) {
+    const startUtc = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+    const endUtc = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+    return Math.max(0, Math.floor((endUtc - startUtc) / 86400000) + 1);
+  }
+
+  private overlapDays(periodStart: Date, periodEnd: Date, activeFrom: Date, activeTo: Date | null) {
+    const start = activeFrom > periodStart ? activeFrom : periodStart;
+    const end = activeTo && activeTo < periodEnd ? activeTo : periodEnd;
+    if (start > end) return 0;
+    return this.inclusiveDays(start, end);
   }
 
   private async setEmployeeActiveState(
@@ -1055,6 +1443,21 @@ export class PayrollService {
     return row;
   }
 
+  private async requirePeriodLine(companyId: string, periodId: string, lineId: string): Promise<PayrollLineWithRelations> {
+    const row = await this.prisma.payrollLine.findUnique({
+      where: { id: lineId },
+      include: {
+        employee: true,
+        employmentRecord: true,
+        sourceCompensationProfile: true
+      }
+    });
+    if (!row || row.companyId !== companyId || row.payrollPeriodId !== periodId) {
+      throw new NotFoundException('Payroll line not found');
+    }
+    return row;
+  }
+
   private parseDate(value: string, endOfDay: boolean) {
     const date = new Date(`${value}T00:00:00.000Z`);
     if (Number.isNaN(date.getTime())) throw new BadRequestException(`Invalid date: ${value}`);
@@ -1071,6 +1474,14 @@ export class PayrollService {
 
   private toYmd(value: Date) {
     return value.toISOString().slice(0, 10);
+  }
+
+  private round2(value: number) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private decimal(value: number | string | Prisma.Decimal) {
+    return new Prisma.Decimal(value);
   }
 
   private async logCompany(
