@@ -67,7 +67,6 @@ type SnapshotOverrides = {
 };
 
 type UploadFile = { originalname?: string; buffer: Buffer };
-
 type PayrollSnapshot = {
   accrualDays: number;
   officialDays: number;
