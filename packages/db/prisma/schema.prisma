@@ -1615,7 +1615,6 @@ model PayrollCompensationMatrixRow {
   @@index([companyId, targetAccrualSalary])
   @@index([companyId, isActive])
 }
-
 model WorkLog {
   id          String   @id @default(uuid())
   companyId   String

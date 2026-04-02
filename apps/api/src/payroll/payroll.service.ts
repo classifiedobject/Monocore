@@ -39,7 +39,6 @@ type LegacyEmployeePayload = Prisma.EmployeeGetPayload<{
 }>;
 
 type MatrixRowPayload = Prisma.PayrollCompensationMatrixRowGetPayload<object>;
-
 @Injectable()
 export class PayrollService {
   constructor(
@@ -508,7 +507,6 @@ export class PayrollService {
     );
     return { ok: true };
   }
-
   async listWorkLogEmployees(companyId: string) {
     return this.prisma.employee.findMany({
       where: { companyId, isActive: true },
@@ -825,7 +823,6 @@ export class PayrollService {
 
     return row;
   }
-
   private validateEmploymentDates(
     arrivalDate: Date,
     accrualStartDate: Date,
@@ -1046,7 +1043,6 @@ export class PayrollService {
     if (!row || row.companyId !== companyId) throw new NotFoundException('Ücret eşleştirme kaydı bulunamadı');
     return row;
   }
-
   private async requireLegacyEmployee(companyId: string, id: string): Promise<LegacyEmployeePayload> {
     const row = await this.prisma.employee.findUnique({ where: { id }, include: { role: true, profitCenter: true } });
     if (!row || row.companyId !== companyId) throw new NotFoundException('Employee not found');

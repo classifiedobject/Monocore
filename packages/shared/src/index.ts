@@ -799,7 +799,6 @@ export const payrollCompensationMatrixQuerySchema = z.object({
   state: z.enum(['active', 'all']).optional(),
   targetAccrualSalary: z.coerce.number().nonnegative().optional()
 });
-
 export const payrollWorkLogSchema = z.object({
   employeeId: z.string().uuid(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

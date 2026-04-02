@@ -161,7 +161,6 @@ export class PayrollController {
   deleteCompensationMatrixRow(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.payroll.deleteCompensationMatrixRow(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
-
   @Get('worklog-employees')
   @RequirePermissions('module:payroll-core.payroll.manage')
   listWorkLogEmployees(@Req() req: Request & { companyId: string }) {

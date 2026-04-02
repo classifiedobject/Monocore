@@ -56,7 +56,6 @@ export type PayrollCompensationMatrixRow = {
   createdAt: string;
   updatedAt: string;
 };
-
 export type LegacyWorklogEmployee = {
   id: string;
   firstName: string;
