@@ -63,6 +63,7 @@ type PayrollLineWithRelations = Prisma.PayrollLineGetPayload<{
 
 type SnapshotOverrides = {
   reportDays?: number;
+  calculatedOvertime?: number;
   handCashFinal?: number;
 };
 
@@ -742,6 +743,7 @@ export class PayrollService {
   }
 
   async listPeriods(companyId: string) {
+    await this.normalizeLegacyPeriodStatuses(companyId);
     return this.prisma.payrollPeriod.findMany({
       where: { companyId },
       include: {
@@ -759,6 +761,7 @@ export class PayrollService {
   }
 
   async getPeriod(companyId: string, id: string) {
+    await this.normalizeLegacyPeriodStatuses(companyId);
     const period = await this.prisma.payrollPeriod.findUnique({
       where: { id },
       include: {
@@ -813,8 +816,11 @@ export class PayrollService {
 
   async calculatePeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const period = await this.requirePeriod(companyId, id);
-    if (period.status === 'LOCKED' || period.status === 'POSTED') {
-      throw new BadRequestException('Locked or posted payroll period cannot be recalculated');
+    if (period.status === 'POSTED') {
+      throw new ConflictException('Muhasebeleştirilmiş dönem yeniden hesaplanamaz');
+    }
+    if (period.status === 'CALCULATED') {
+      throw new ConflictException('Dönem zaten hesaplanmış. Yeniden hesaplamak için önce sıfırlayın');
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -916,8 +922,8 @@ export class PayrollService {
 
   async updatePeriodLine(actorUserId: string, companyId: string, periodId: string, lineId: string, payload: unknown, ip?: string, userAgent?: string) {
     const period = await this.requirePeriod(companyId, periodId);
-    if (period.status === 'LOCKED' || period.status === 'POSTED') {
-      throw new BadRequestException('Locked or posted payroll lines cannot be edited');
+    if (period.status === 'POSTED') {
+      throw new BadRequestException('Muhasebeleştirilmiş dönem satırları düzenlenemez');
     }
 
     const body = payrollPeriodLineUpdateSchema.parse(payload);
@@ -925,6 +931,7 @@ export class PayrollService {
 
     const snapshot = this.recalculateStoredPayrollLine(period.startDate, period.endDate, line, {
       reportDays: body.reportDays,
+      calculatedOvertime: body.calculatedOvertime,
       handCashFinal: body.handCashFinal
     });
 
@@ -962,6 +969,7 @@ export class PayrollService {
       {
         payrollPeriodId: periodId,
         reportDays: updated.reportDays,
+        calculatedOvertime: Number(updated.calculatedOvertime.toString()),
         handCashFinal: Number(updated.handCashFinal.toString()),
         totalPayable: Number(updated.totalPayable.toString())
       },
@@ -972,29 +980,118 @@ export class PayrollService {
     return updated;
   }
 
-  async lockPeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+  async resetPeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const period = await this.requirePeriod(companyId, id);
-    if (period.status !== 'CALCULATED') throw new BadRequestException('Payroll period must be calculated before lock');
+    if (period.status !== 'CALCULATED') {
+      throw new BadRequestException('Sadece hesaplanmış dönem sıfırlanabilir');
+    }
 
-    const updated = await this.prisma.payrollPeriod.update({
-      where: { id: period.id },
-      data: { status: 'LOCKED' },
-      include: { lines: { include: { employee: true } } }
+    const reset = await this.prisma.$transaction(async (tx) => {
+      await tx.payrollLine.deleteMany({ where: { companyId, payrollPeriodId: period.id } });
+      return tx.payrollPeriod.update({
+        where: { id: period.id },
+        data: {
+          status: 'DRAFT',
+          totalGross: this.decimal(0),
+          totalNet: this.decimal(0)
+        }
+      });
     });
 
-    await this.logCompany(actorUserId, companyId, 'company.payroll.period.lock', 'payroll_period', period.id, {
-      periodStart: this.toYmd(period.startDate),
-      periodEnd: this.toYmd(period.endDate),
-      lineCount: updated.lines.length
-    }, ip, userAgent);
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.period.reset',
+      'payroll_period',
+      period.id,
+      { deletedLineSnapshots: true },
+      ip,
+      userAgent
+    );
 
-    return updated;
+    return reset;
+  }
+
+  async deletePeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const period = await this.requirePeriod(companyId, id);
+    if (period.status !== 'DRAFT') {
+      throw new BadRequestException('Sadece taslak dönem silinebilir');
+    }
+
+    await this.prisma.payrollPeriod.delete({ where: { id: period.id } });
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.period.delete',
+      'payroll_period',
+      period.id,
+      { deleted: true },
+      ip,
+      userAgent
+    );
+    return { ok: true };
+  }
+
+  async distributeRemainingToBonus(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const period = await this.requirePeriod(companyId, id);
+    if (!['DRAFT', 'CALCULATED'].includes(period.status)) {
+      throw new BadRequestException('Sadece taslak veya hesaplanmış dönemlerde prim dağıtımı yapılabilir');
+    }
+
+    const lines = await this.prisma.payrollLine.findMany({
+      where: { companyId, payrollPeriodId: period.id },
+      include: { employee: true, employmentRecord: true, sourceCompensationProfile: true }
+    });
+
+    await this.prisma.$transaction((tx) =>
+      Promise.all(lines.map((line) => {
+        const snapshot = this.recalculateStoredPayrollLine(period.startDate, period.endDate, line, {
+          reportDays: line.reportDays,
+          calculatedOvertime: Number(line.calculatedOvertime.toString()),
+          handCashFinal: Number(line.handCashFinal.toString())
+        });
+        return tx.payrollLine.update({
+          where: { id: line.id },
+          data: {
+            calculatedBonus: this.decimal(snapshot.calculatedBonus),
+            bonusAdjustment: this.decimal(snapshot.bonusAdjustment),
+            totalPayable: this.decimal(snapshot.totalPayable),
+            difference: this.decimal(snapshot.difference),
+            controlOk: snapshot.controlOk,
+            grossAmount: this.decimal(snapshot.totalPayable)
+          }
+        });
+      }))
+    );
+
+    await this.refreshPeriodTotals(companyId, period.id);
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.period.distribute_remaining_bonus',
+      'payroll_period',
+      period.id,
+      { lineCount: lines.length },
+      ip,
+      userAgent
+    );
+
+    return this.getPeriod(companyId, period.id);
+  }
+
+  async lockPeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
+    const period = await this.requirePeriod(companyId, id);
+    if (period.status !== 'CALCULATED') throw new BadRequestException('Dönem hesaplanmış olmalıdır');
+    return this.getPeriod(companyId, period.id);
   }
 
   async postPeriod(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const period = await this.requirePeriod(companyId, id);
-    if (!['CALCULATED', 'LOCKED'].includes(period.status)) {
-      throw new BadRequestException('Payroll period must be calculated or locked before posting');
+    if (period.status === 'POSTED') {
+      throw new ConflictException('Dönem zaten muhasebeleştirilmiş');
+    }
+    if (period.status !== 'CALCULATED') {
+      throw new BadRequestException('Dönem muhasebeleştirmeden önce hesaplanmış olmalıdır');
     }
 
     const [payrollCategory, tipsCategory] = await Promise.all([
@@ -1005,9 +1102,9 @@ export class PayrollService {
     const result = await this.prisma.$transaction(async (tx) => {
       const freshPeriod = await tx.payrollPeriod.findUnique({ where: { id: period.id } });
       if (!freshPeriod || freshPeriod.companyId !== companyId) throw new NotFoundException('Payroll period not found');
-      if (freshPeriod.status === 'POSTED') throw new BadRequestException('Payroll period is already posted');
-      if (!['CALCULATED', 'LOCKED'].includes(freshPeriod.status)) {
-        throw new BadRequestException('Payroll period must be calculated or locked before posting');
+      if (freshPeriod.status === 'POSTED') throw new ConflictException('Dönem zaten muhasebeleştirilmiş');
+      if (freshPeriod.status !== 'CALCULATED') {
+        throw new BadRequestException('Dönem muhasebeleştirmeden önce hesaplanmış olmalıdır');
       }
 
       const lines = await tx.payrollLine.findMany({
@@ -1160,7 +1257,7 @@ export class PayrollService {
 
     const overtimeCap = this.computeOvertimeCap(accrualPay, employment.departmentName, profile?.overtimeEligible ?? true, targetAccrualSalary);
     const preliminaryGap = Math.max(0, this.round2(accrualPay - officialPay));
-    const calculatedOvertime = Math.min(preliminaryGap, overtimeCap);
+    const calculatedOvertime = Math.min(preliminaryGap, Math.max(0, overrides.calculatedOvertime ?? overtimeCap));
     const bonusCap = this.computeBonusCap(accrualPay, profile?.bonusEligible ?? true, targetAccrualSalary);
     const calculatedBonus = Math.min(this.round2(preliminaryGap - calculatedOvertime), bonusCap);
     const residualBeforeCash = this.round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime));
@@ -1215,7 +1312,10 @@ export class PayrollService {
       targetAccrualSalary
     );
     const preliminaryGap = Math.max(0, this.round2(accrualPay - officialPay));
-    const calculatedOvertime = Math.min(preliminaryGap, overtimeCap);
+    const calculatedOvertime = Math.min(
+      preliminaryGap,
+      Math.max(0, overrides.calculatedOvertime ?? Number(line.calculatedOvertime.toString()) ?? overtimeCap)
+    );
     const bonusCap = this.computeBonusCap(
       accrualPay,
       line.sourceCompensationProfile?.bonusEligible ?? true,
@@ -1789,7 +1889,20 @@ export class PayrollService {
   private async requirePeriod(companyId: string, id: string) {
     const row = await this.prisma.payrollPeriod.findUnique({ where: { id } });
     if (!row || row.companyId !== companyId) throw new NotFoundException('Payroll period not found');
+    if (row.status === 'LOCKED') {
+      return this.prisma.payrollPeriod.update({
+        where: { id: row.id },
+        data: { status: 'CALCULATED' }
+      });
+    }
     return row;
+  }
+
+  private async normalizeLegacyPeriodStatuses(companyId: string) {
+    await this.prisma.payrollPeriod.updateMany({
+      where: { companyId, status: 'LOCKED' },
+      data: { status: 'CALCULATED' }
+    });
   }
 
   private async requirePeriodLine(companyId: string, periodId: string, lineId: string): Promise<PayrollLineWithRelations> {

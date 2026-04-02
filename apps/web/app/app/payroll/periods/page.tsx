@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../../lib/api';
 
-type PayrollPeriodStatus = 'DRAFT' | 'CALCULATED' | 'LOCKED' | 'POSTED';
+type PayrollPeriodStatus = 'DRAFT' | 'CALCULATED' | 'POSTED';
 
 type PayrollPeriod = {
   id: string;
@@ -28,6 +28,7 @@ type PayrollLine = {
   calculatedBonus: string;
   calculatedOvertime: string;
   handCashFinal: string;
+  handCashRecommended?: string;
   totalPayable: string;
   difference: string;
   bonusAdjustment: string;
@@ -46,14 +47,42 @@ type PayrollLine = {
 
 type LineDraft = {
   reportDays: number;
+  calculatedOvertime: string;
   handCashFinal: string;
   notes: string;
 };
 
+type LinePreview = {
+  reportDays: number;
+  accrualPay: number;
+  officialPay: number;
+  calculatedBonus: number;
+  calculatedOvertime: number;
+  handCashFinal: number;
+  totalPayable: number;
+  difference: number;
+  bonusAdjustment: number;
+  controlOk: boolean;
+};
+
+function asNumber(value: string | number | null | undefined) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function round2(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function roundDownToTwoHundreds(value: number) {
+  if (value <= 0) return 0;
+  return Math.floor(value / 200) * 200;
+}
+
 function formatCurrency(value: string | number) {
-  const amount = typeof value === 'string' ? Number(value) : value;
   return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 2 }).format(
-    Number.isFinite(amount) ? amount : 0
+    asNumber(value)
   );
 }
 
@@ -69,6 +98,68 @@ function monthRange(value: string) {
   return {
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10)
+  };
+}
+
+function inclusiveDays(startDate: string, endDate: string) {
+  const start = Date.parse(`${startDate.slice(0, 10)}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate.slice(0, 10)}T00:00:00.000Z`);
+  return Math.max(1, Math.floor((end - start) / 86400000) + 1);
+}
+
+function computeBonusCap(accrualPay: number, targetAccrualSalary: number) {
+  if (targetAccrualSalary < 40000) return 0;
+  if (targetAccrualSalary < 60000) return round2(accrualPay * 0.04);
+  if (targetAccrualSalary < 100000) return round2(accrualPay * 0.06);
+  return round2(accrualPay * 0.08);
+}
+
+function computeOvertimeCap(accrualPay: number, departmentName: string | null, targetAccrualSalary: number) {
+  if (targetAccrualSalary < 45000) return 0;
+  const normalized = (departmentName ?? '').trim().toLowerCase();
+  const ratio = normalized.includes('kitchen') || normalized.includes('mutfak')
+    ? 0.05
+    : normalized.includes('bar')
+      ? 0.04
+      : normalized.includes('support')
+        ? 0.02
+        : 0.03;
+  return round2(accrualPay * ratio);
+}
+
+function buildLinePreview(row: PayrollLine, draft: LineDraft, monthDays: number): LinePreview {
+  const accrualDays = row.accrualDays;
+  const officialDays = row.officialDays;
+  const reportDays = Math.max(0, Math.min(draft.reportDays, Math.max(accrualDays, officialDays)));
+  const targetAccrualSalary = asNumber(row.targetAccrualSalary);
+  const officialNetSalary = asNumber(row.officialNetSalary);
+  const effectiveAccrualDays = Math.max(0, accrualDays - reportDays);
+  const effectiveOfficialDays = Math.max(0, officialDays - reportDays);
+  const accrualPay = round2((targetAccrualSalary * effectiveAccrualDays) / Math.max(monthDays, 1));
+  const officialPay = round2((officialNetSalary * effectiveOfficialDays) / Math.max(monthDays, 1));
+  const preliminaryGap = Math.max(0, round2(accrualPay - officialPay));
+  const overtimeRequested = Math.max(0, asNumber(draft.calculatedOvertime));
+  const calculatedOvertime = Math.min(preliminaryGap, Math.max(0, overtimeRequested || computeOvertimeCap(accrualPay, row.departmentName, targetAccrualSalary)));
+  const calculatedBonus = Math.min(round2(preliminaryGap - calculatedOvertime), computeBonusCap(accrualPay, targetAccrualSalary));
+  const residualBeforeCash = round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime));
+  const recommendedHandCash = Math.max(0, residualBeforeCash);
+  const requestedHandCash = Math.max(0, asNumber(draft.handCashFinal));
+  const handCashFinal = Math.min(Math.max(0, requestedHandCash || roundDownToTwoHundreds(recommendedHandCash)), Math.max(0, residualBeforeCash));
+  const bonusAdjustment = round2(accrualPay - (officialPay + calculatedBonus + calculatedOvertime + handCashFinal));
+  const totalPayable = round2(officialPay + calculatedBonus + calculatedOvertime + handCashFinal + bonusAdjustment);
+  const difference = round2(accrualPay - totalPayable);
+
+  return {
+    reportDays,
+    accrualPay,
+    officialPay,
+    calculatedBonus,
+    calculatedOvertime,
+    handCashFinal: round2(handCashFinal),
+    totalPayable,
+    difference,
+    bonusAdjustment,
+    controlOk: Math.abs(difference) <= 0.01
   };
 }
 
@@ -89,10 +180,12 @@ export default function PayrollPeriodsPage() {
   const loadPeriods = useCallback(async () => {
     const periodRows = (await apiFetch('/app-api/payroll/periods')) as PayrollPeriod[];
     setPeriods(periodRows);
-    if (!selectedPeriodId && periodRows.length > 0) {
-      setSelectedPeriodId(periodRows[0].id);
+    if (periodRows.length === 0) {
+      setSelectedPeriodId('');
+      return;
     }
-  }, [selectedPeriodId]);
+    setSelectedPeriodId((current) => (current && periodRows.some((row) => row.id === current) ? current : periodRows[0].id));
+  }, []);
 
   const loadLines = useCallback(async (periodId: string) => {
     const lineRows = (await apiFetch(`/app-api/payroll/periods/${periodId}/lines`)) as PayrollLine[];
@@ -103,7 +196,8 @@ export default function PayrollPeriodsPage() {
           row.id,
           {
             reportDays: row.reportDays,
-            handCashFinal: row.handCashFinal,
+            calculatedOvertime: String(asNumber(row.calculatedOvertime)),
+            handCashFinal: String(asNumber(row.handCashFinal)),
             notes: row.notes ?? ''
           }
         ])
@@ -143,7 +237,7 @@ export default function PayrollPeriodsPage() {
     await Promise.all([loadPeriods(), loadLines(periodId)]);
   }
 
-  async function runPeriodAction(periodId: string, action: 'calculate' | 'lock' | 'post') {
+  async function runPeriodAction(periodId: string, action: 'calculate' | 'reset' | 'post' | 'distribute-remaining-to-prim') {
     setSubmitting(true);
     try {
       await apiFetch(`/app-api/payroll/periods/${periodId}/${action}`, {
@@ -151,6 +245,18 @@ export default function PayrollPeriodsPage() {
         body: JSON.stringify({})
       });
       await refreshSelectedPeriod(periodId);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function deleteSelectedPeriod(periodId: string) {
+    setSubmitting(true);
+    try {
+      await apiFetch(`/app-api/payroll/periods/${periodId}`, { method: 'DELETE' });
+      await loadPeriods();
+      setLines([]);
+      setDrafts({});
     } finally {
       setSubmitting(false);
     }
@@ -165,6 +271,7 @@ export default function PayrollPeriodsPage() {
         method: 'PATCH',
         body: JSON.stringify({
           reportDays: draft.reportDays,
+          calculatedOvertime: Number(draft.calculatedOvertime),
           handCashFinal: Number(draft.handCashFinal),
           notes: draft.notes || null
         })
@@ -175,18 +282,57 @@ export default function PayrollPeriodsPage() {
     }
   }
 
-  const canCalculate = selectedPeriod && !['LOCKED', 'POSTED'].includes(selectedPeriod.status);
-  const canLock = selectedPeriod?.status === 'CALCULATED';
-  const canPost = selectedPeriod && ['CALCULATED', 'LOCKED'].includes(selectedPeriod.status);
-  const canEditLines = selectedPeriod && ['DRAFT', 'CALCULATED'].includes(selectedPeriod.status);
+  const canCalculate = selectedPeriod?.status === 'DRAFT';
+  const canReset = selectedPeriod?.status === 'CALCULATED';
+  const canPost = selectedPeriod?.status === 'CALCULATED';
+  const canDelete = selectedPeriod?.status === 'DRAFT';
+  const canEditLines = selectedPeriod?.status === 'CALCULATED';
+  const monthDays = selectedPeriod ? inclusiveDays(selectedPeriod.startDate, selectedPeriod.endDate) : 30;
+
+  const previewMap = useMemo(
+    () =>
+      Object.fromEntries(
+        lines.map((row) => [
+          row.id,
+          buildLinePreview(
+            row,
+            drafts[row.id] ?? {
+              reportDays: row.reportDays,
+              calculatedOvertime: String(asNumber(row.calculatedOvertime)),
+              handCashFinal: String(asNumber(row.handCashFinal)),
+              notes: row.notes ?? ''
+            },
+            monthDays
+          )
+        ])
+      ),
+    [drafts, lines, monthDays]
+  );
+
+  const summary = useMemo(
+    () =>
+      lines.reduce(
+        (totals, row) => {
+          const preview = previewMap[row.id];
+          totals.accrual += preview.accrualPay;
+          totals.official += preview.officialPay;
+          totals.bonus += preview.calculatedBonus + preview.bonusAdjustment;
+          totals.overtime += preview.calculatedOvertime;
+          totals.handCash += preview.handCashFinal;
+          return totals;
+        },
+        { accrual: 0, official: 0, bonus: 0, overtime: 0, handCash: 0 }
+      ),
+    [lines, previewMap]
+  );
 
   return (
     <section className="space-y-6">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Payroll Periods</h1>
         <p className="max-w-3xl text-sm leading-6 text-slate-600">
-          Dönem seçin, aktif ve ay içinde çıkmış çalışanları hesaplamaya dahil edin, ardından bordro
-          snapshot satırlarını kontrollü şekilde kilitleyip muhasebeleştirin.
+          Dönemleri oluşturun, çalışan snapshot satırlarını hesaplayın, kalan tutarı prime dağıtın ve bordroyu
+          finans kayıtlarına güvenli şekilde yansıtın.
         </p>
       </header>
 
@@ -220,11 +366,22 @@ export default function PayrollPeriodsPage() {
               Hesapla
             </button>
             <button
-              disabled={!canLock || submitting}
-              onClick={() => runPeriodAction(selectedPeriod.id, 'lock').catch(handleApiError)}
+              disabled={!canReset || submitting}
+              onClick={() => {
+                if (window.confirm('Bu işlem hesaplanan satırları silip dönemi taslağa döndürecek. Devam edilsin mi?')) {
+                  runPeriodAction(selectedPeriod.id, 'reset').catch(handleApiError);
+                }
+              }}
               className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:opacity-50"
             >
-              Kilitle
+              Dönemi Sıfırla
+            </button>
+            <button
+              disabled={!canReset || submitting || lines.length === 0}
+              onClick={() => runPeriodAction(selectedPeriod.id, 'distribute-remaining-to-prim').catch(handleApiError)}
+              className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:opacity-50"
+            >
+              Kalanı Prime Dağıt
             </button>
             <button
               disabled={!canPost || submitting}
@@ -233,9 +390,37 @@ export default function PayrollPeriodsPage() {
             >
               Muhasebeleştir
             </button>
+            <button
+              disabled={!canDelete || submitting}
+              onClick={() => {
+                if (window.confirm('Bu taslak dönem silinecek. Devam edilsin mi?')) {
+                  deleteSelectedPeriod(selectedPeriod.id).catch(handleApiError);
+                }
+              }}
+              className="h-11 rounded-2xl border border-rose-200 bg-rose-50 px-4 text-sm font-medium text-rose-700 disabled:opacity-50"
+            >
+              Dönemi Sil
+            </button>
           </div>
         ) : null}
       </div>
+
+      {selectedPeriod ? (
+        <div className="grid gap-3 md:grid-cols-5">
+          {[
+            ['Total Hakediş', summary.accrual],
+            ['Total Resmi Maaş', summary.official],
+            ['Total Prim', summary.bonus],
+            ['Total Fazla Mesai', summary.overtime],
+            ['Total Elden', summary.handCash]
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-3xl border border-slate-200 bg-white px-4 py-4">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">{label}</div>
+              <div className="mt-2 text-lg font-semibold text-slate-950">{formatCurrency(value as number)}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
@@ -256,7 +441,9 @@ export default function PayrollPeriodsPage() {
                     onClick={() => setSelectedPeriodId(row.id)}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900">{formatDate(row.startDate)} - {formatDate(row.endDate)}</div>
+                      <div className="font-medium text-slate-900">
+                        {formatDate(row.startDate)} - {formatDate(row.endDate)}
+                      </div>
                       <div className="text-xs text-slate-500">
                         Hakediş {formatCurrency(row.totalGross)} • Ödeme {formatCurrency(row.totalNet)}
                       </div>
@@ -265,6 +452,13 @@ export default function PayrollPeriodsPage() {
                   </tr>
                 );
               })}
+              {periods.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="px-4 py-10 text-center text-sm text-slate-500">
+                    Henüz payroll dönemi yok.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
@@ -272,23 +466,19 @@ export default function PayrollPeriodsPage() {
         <div className="space-y-4">
           {selectedPeriod ? (
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-medium text-slate-900">
-                    {formatDate(selectedPeriod.startDate)} - {formatDate(selectedPeriod.endDate)}
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    Durum: {selectedPeriod.status} • Hakediş toplamı {formatCurrency(selectedPeriod.totalGross)} • Ödeme toplamı{' '}
-                    {formatCurrency(selectedPeriod.totalNet)}
-                  </p>
-                </div>
-              </div>
+              <h2 className="text-lg font-medium text-slate-900">
+                {formatDate(selectedPeriod.startDate)} - {formatDate(selectedPeriod.endDate)}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Durum: {selectedPeriod.status} • Hakediş toplamı {formatCurrency(selectedPeriod.totalGross)} • Ödeme toplamı{' '}
+                {formatCurrency(selectedPeriod.totalNet)}
+              </p>
             </div>
           ) : null}
 
           <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white">
-            <table className="min-w-[1400px] text-sm">
-              <thead className="bg-slate-50 text-slate-500">
+            <table className="min-w-[1600px] text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 shadow-[0_1px_0_rgba(226,232,240,1)]">
                 <tr>
                   {[
                     'Departman',
@@ -309,7 +499,7 @@ export default function PayrollPeriodsPage() {
                     'Kontrol',
                     'Not'
                   ].map((label) => (
-                    <th key={label} className="px-4 py-3 text-left font-medium">
+                    <th key={label} className="px-4 py-3 text-left font-medium whitespace-nowrap">
                       {label}
                     </th>
                   ))}
@@ -319,11 +509,14 @@ export default function PayrollPeriodsPage() {
                 {lines.map((row) => {
                   const draft = drafts[row.id] ?? {
                     reportDays: row.reportDays,
-                    handCashFinal: row.handCashFinal,
+                    calculatedOvertime: String(asNumber(row.calculatedOvertime)),
+                    handCashFinal: String(asNumber(row.handCashFinal)),
                     notes: row.notes ?? ''
                   };
+                  const preview = previewMap[row.id];
+
                   return (
-                    <tr key={row.id} className={`border-t border-slate-100 ${row.controlOk ? '' : 'bg-amber-50/50'}`}>
+                    <tr key={row.id} className={`border-t border-slate-100 ${preview.controlOk ? '' : 'bg-amber-50/50'}`}>
                       <td className="px-4 py-3 text-slate-600">{row.departmentName ?? '—'}</td>
                       <td className="px-4 py-3 font-medium text-slate-900">
                         {row.employee.firstName} {row.employee.lastName}
@@ -347,10 +540,25 @@ export default function PayrollPeriodsPage() {
                           }
                         />
                       </td>
-                      <td className="px-4 py-3">{formatCurrency(row.accrualPay)}</td>
-                      <td className="px-4 py-3">{formatCurrency(row.officialPay)}</td>
-                      <td className="px-4 py-3">{formatCurrency(row.calculatedBonus)}</td>
-                      <td className="px-4 py-3">{formatCurrency(row.calculatedOvertime)}</td>
+                      <td className="px-4 py-3">{formatCurrency(preview.accrualPay)}</td>
+                      <td className="px-4 py-3">{formatCurrency(preview.officialPay)}</td>
+                      <td className="px-4 py-3">{formatCurrency(preview.calculatedBonus)}</td>
+                      <td className="px-4 py-3">
+                        <input
+                          disabled={!canEditLines}
+                          className="h-10 w-28 rounded-xl border border-slate-200 px-2 text-sm disabled:bg-slate-50"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft.calculatedOvertime}
+                          onChange={(event) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [row.id]: { ...draft, calculatedOvertime: event.target.value }
+                            }))
+                          }
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <input
                           disabled={!canEditLines}
@@ -367,16 +575,16 @@ export default function PayrollPeriodsPage() {
                           }
                         />
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-900">{formatCurrency(row.totalPayable)}</td>
-                      <td className="px-4 py-3">{formatCurrency(row.difference)}</td>
-                      <td className="px-4 py-3">{formatCurrency(row.bonusAdjustment)}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900">{formatCurrency(preview.totalPayable)}</td>
+                      <td className="px-4 py-3">{formatCurrency(preview.difference)}</td>
+                      <td className="px-4 py-3">{formatCurrency(preview.bonusAdjustment)}</td>
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                            row.controlOk ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                            preview.controlOk ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                           }`}
                         >
-                          {row.controlOk ? 'Tamam' : 'Kontrol Et'}
+                          {preview.controlOk ? 'Tamam' : 'Kontrol Et'}
                         </span>
                       </td>
                       <td className="px-4 py-3">

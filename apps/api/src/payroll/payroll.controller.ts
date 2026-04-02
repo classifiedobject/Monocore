@@ -248,6 +248,18 @@ export class PayrollController {
     return this.payroll.calculatePeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 
+  @Post('periods/:id/reset')
+  @RequirePermissions('module:payroll-core.period.manage')
+  resetPeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.resetPeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('periods/:id/distribute-remaining-to-prim')
+  @RequirePermissions('module:payroll-core.period.manage')
+  distributeRemainingToPrim(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.distributeRemainingToBonus(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
   @Post('periods/:id/lock')
   @RequirePermissions('module:payroll-core.period.manage')
   lockPeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
@@ -275,5 +287,11 @@ export class PayrollController {
   @RequirePermissions('module:payroll-core.period.post', 'module:finance-core.entry.create')
   postPeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.payroll.postPeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('periods/:id')
+  @RequirePermissions('module:payroll-core.period.manage')
+  deletePeriod(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.payroll.deletePeriod(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
   }
 }
