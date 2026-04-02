@@ -723,6 +723,22 @@ export const payrollEmployeeSchema = z.object({
   isActive: z.boolean().optional()
 });
 
+export const payrollEmployeeImportRowSchema = z.object({
+  firstName: z.string().trim().max(100).optional().default(''),
+  lastName: z.string().trim().max(100).optional().default(''),
+  identityNumber: z.string().trim().max(30).optional().default(''),
+  birthDate: z.string().trim().optional().default(''),
+  iban: z.string().trim().max(140).optional().default('')
+});
+
+export const payrollEmployeeImportPreviewSchema = z.object({
+  rows: z.array(payrollEmployeeImportRowSchema).min(1).max(1000)
+});
+
+export const payrollEmployeeImportConfirmSchema = z.object({
+  rows: z.array(payrollEmployeeImportRowSchema).min(1).max(1000)
+});
+
 export const payrollEmployeeQuerySchema = z.object({
   search: z.string().max(120).optional(),
   status: z.enum(['active', 'inactive', 'all']).optional()
@@ -749,9 +765,13 @@ export const payrollEmploymentRecordSchema = z.object({
   departmentName: z.string().max(120).nullable().optional(),
   titleName: z.string().max(120).nullable().optional(),
   arrivalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  accrualStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   sgkStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   exitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  sgkEntryDocumentName: z.string().max(255).nullable().optional(),
+  sgkEntryDocumentPath: z.string().max(2000).nullable().optional(),
+  sgkExitDocumentName: z.string().max(255).nullable().optional(),
+  sgkExitDocumentPath: z.string().max(2000).nullable().optional(),
+  identityNumberConfirmed: z.boolean().optional(),
   status: z.enum(['draft', 'active', 'exited']).optional(),
   insuranceStatus: z.enum(['pending', 'insured', 'exited']).optional()
 });
@@ -769,8 +789,7 @@ export const payrollEmploymentExitSchema = z.object({
 
 export const payrollCompensationProfileSchema = z.object({
   employmentRecordId: z.string().uuid(),
-  targetAccrualSalary: z.coerce.number().nonnegative(),
-  officialNetSalary: z.coerce.number().nonnegative(),
+  matrixRowId: z.string().uuid(),
   overtimeEligible: z.boolean().optional(),
   bonusEligible: z.boolean().optional(),
   handCashAllowed: z.boolean().optional(),

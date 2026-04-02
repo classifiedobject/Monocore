@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UploadedFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import { Request } from 'express';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from '../common/guards/module-installed.guard.js';
@@ -23,6 +24,25 @@ export class PayrollController {
   @RequirePermissions('module:payroll-core.employee.manage')
   createEmployee(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.payroll.createEmployee(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('employees/import/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  @RequirePermissions('module:payroll-core.employee.manage')
+  previewEmployeeImport(
+    @UploadedFile() file: { originalname?: string; buffer: Buffer } | undefined,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.previewEmployeeImport(req.user.id, req.companyId, file, req.ip, req.get('user-agent'));
+  }
+
+  @Post('employees/import/confirm')
+  @RequirePermissions('module:payroll-core.employee.manage')
+  confirmEmployeeImport(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.confirmEmployeeImport(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Patch('employees/:id')
@@ -60,19 +80,44 @@ export class PayrollController {
   }
 
   @Post('employment-records')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'sgkEntryDocument', maxCount: 1 },
+      { name: 'sgkExitDocument', maxCount: 1 }
+    ])
+  )
   @RequirePermissions('module:payroll-core.employment.manage')
-  createEmploymentRecord(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
-    return this.payroll.createEmploymentRecord(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  createEmploymentRecord(
+    @Body() body: Record<string, string | undefined>,
+    @UploadedFiles()
+    files: {
+      sgkEntryDocument?: Array<{ originalname?: string; buffer: Buffer }>;
+      sgkExitDocument?: Array<{ originalname?: string; buffer: Buffer }>;
+    },
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.payroll.createEmploymentRecord(req.user.id, req.companyId, body, files, req.ip, req.get('user-agent'));
   }
 
   @Patch('employment-records/:id')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'sgkEntryDocument', maxCount: 1 },
+      { name: 'sgkExitDocument', maxCount: 1 }
+    ])
+  )
   @RequirePermissions('module:payroll-core.employment.manage')
   updateEmploymentRecord(
     @Param('id') id: string,
-    @Body() body: unknown,
+    @Body() body: Record<string, string | undefined>,
+    @UploadedFiles()
+    files: {
+      sgkEntryDocument?: Array<{ originalname?: string; buffer: Buffer }>;
+      sgkExitDocument?: Array<{ originalname?: string; buffer: Buffer }>;
+    },
     @Req() req: Request & { user: { id: string }; companyId: string }
   ) {
-    return this.payroll.updateEmploymentRecord(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+    return this.payroll.updateEmploymentRecord(req.user.id, req.companyId, id, body, files, req.ip, req.get('user-agent'));
   }
 
   @Post('employment-records/:id/exit')

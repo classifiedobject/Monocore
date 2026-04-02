@@ -1564,7 +1564,11 @@ model PayrollEmploymentRecord {
   arrivalDate        DateTime
   accrualStartDate   DateTime
   sgkStartDate       DateTime?
+  sgkEntryDocumentPath String?
+  sgkEntryDocumentName String?
   exitDate           DateTime?
+  sgkExitDocumentPath String?
+  sgkExitDocumentName String?
   status             PayrollEmploymentStatus @default(DRAFT)
   insuranceStatus    PayrollInsuranceStatus  @default(PENDING)
   createdAt          DateTime                @default(now())
@@ -1583,6 +1587,7 @@ model PayrollCompensationProfile {
   id                  String   @id @default(uuid())
   companyId           String
   employmentRecordId  String
+  matrixRowId         String?
   targetAccrualSalary Decimal  @db.Decimal(14, 2)
   officialNetSalary   Decimal  @db.Decimal(14, 2)
   overtimeEligible    Boolean  @default(true)
@@ -1595,6 +1600,7 @@ model PayrollCompensationProfile {
   updatedAt           DateTime @updatedAt
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employmentRecord    PayrollEmploymentRecord @relation(fields: [employmentRecordId], references: [id], onDelete: Cascade)
+  matrixRow           PayrollCompensationMatrixRow? @relation(fields: [matrixRowId], references: [id], onDelete: SetNull)
   payrollLines        PayrollLine[]
 
   @@index([companyId, employmentRecordId])
@@ -1614,6 +1620,7 @@ model PayrollCompensationMatrixRow {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  compensationProfiles PayrollCompensationProfile[]
 
   @@index([companyId, targetAccrualSalary])
   @@index([companyId, isActive])

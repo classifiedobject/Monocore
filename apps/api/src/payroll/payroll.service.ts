@@ -6,6 +6,8 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import {
   EmployeeDepartment,
   PayrollEmploymentStatus,
@@ -20,6 +22,8 @@ import {
   payrollCompensationProfileQuerySchema,
   payrollCompensationProfileSchema,
   payrollEmployeeQuerySchema,
+  payrollEmployeeImportConfirmSchema,
+  payrollEmployeeImportPreviewSchema,
   payrollEmployeeSchema,
   payrollEmploymentExitSchema,
   payrollEmploymentRecordQuerySchema,
@@ -61,6 +65,8 @@ type SnapshotOverrides = {
   reportDays?: number;
   handCashFinal?: number;
 };
+
+type UploadFile = { originalname?: string; buffer: Buffer };
 
 type PayrollSnapshot = {
   accrualDays: number;
@@ -161,6 +167,85 @@ export class PayrollService {
     return this.setEmployeeActiveState(actorUserId, companyId, id, false, ip, userAgent);
   }
 
+  async previewEmployeeImport(
+    actorUserId: string,
+    companyId: string,
+    file: UploadFile | undefined,
+    ip?: string,
+    userAgent?: string
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('CSV dosyası gerekli');
+    }
+
+    const rows = this.parseEmployeeCsv(file.buffer);
+    const payload = payrollEmployeeImportPreviewSchema.parse({ rows });
+    const preview = await this.buildEmployeeImportPreview(companyId, payload.rows);
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.employee.import.preview',
+      'payroll_employee_import',
+      `preview:${companyId}`,
+      {
+        fileName: file.originalname ?? null,
+        totalRows: preview.rows.length,
+        validRowCount: preview.validRows.length,
+        invalidRowCount: preview.invalidRows.length
+      },
+      ip,
+      userAgent
+    );
+
+    return preview;
+  }
+
+  async confirmEmployeeImport(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = payrollEmployeeImportConfirmSchema.parse(payload);
+    const preview = await this.buildEmployeeImportPreview(companyId, body.rows);
+    if (preview.validRows.length === 0) {
+      throw new BadRequestException('İçe aktarılacak geçerli çalışan bulunamadı');
+    }
+
+    const created = await this.prisma.$transaction(
+      preview.validRows.map((row) =>
+        this.prisma.payrollEmployee.create({
+          data: {
+            companyId,
+            firstName: row.firstName,
+            lastName: row.lastName,
+            identityNumber: row.identityNumber,
+            birthDate: this.parseNullableDate(row.birthDate || null),
+            ibanOrBankAccount: row.iban || null,
+            isActive: true
+          }
+        })
+      )
+    );
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.payroll.employee.import.confirm',
+      'payroll_employee_import',
+      `confirm:${companyId}`,
+      {
+        createdCount: created.length,
+        invalidRowCount: preview.invalidRows.length,
+        employeeIds: created.map((row) => row.id)
+      },
+      ip,
+      userAgent
+    );
+
+    return {
+      createdCount: created.length,
+      invalidRowCount: preview.invalidRows.length,
+      created
+    };
+  }
+
   async listEmploymentRecords(companyId: string, query: unknown = {}) {
     const parsed = payrollEmploymentRecordQuerySchema.parse(query);
     const search = parsed.search?.trim();
@@ -189,19 +274,28 @@ export class PayrollService {
     });
   }
 
-  async createEmploymentRecord(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
-    const body = payrollEmploymentRecordSchema.parse(payload);
-    await this.requirePayrollEmployee(companyId, body.employeeId);
-
+  async createEmploymentRecord(
+    actorUserId: string,
+    companyId: string,
+    payload: unknown,
+    files?: { sgkEntryDocument?: UploadFile[]; sgkExitDocument?: UploadFile[] },
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = payrollEmploymentRecordSchema.parse(this.normalizeEmploymentPayload(payload));
+    const employee = await this.requirePayrollEmployee(companyId, body.employeeId);
     const arrivalDate = this.parseDate(body.arrivalDate, false);
-    const accrualStartDate = this.parseDate(body.accrualStartDate, false);
     const sgkStartDate = this.parseNullableDate(body.sgkStartDate ?? null);
     const exitDate = this.parseNullableDate(body.exitDate ?? null);
+    const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
     const status = this.mapEmploymentStatus(body.status ?? 'active');
     const insuranceStatus = this.mapInsuranceStatus(body.insuranceStatus ?? (status === 'EXITED' ? 'exited' : 'pending'));
 
-    this.validateEmploymentDates(arrivalDate, accrualStartDate, sgkStartDate, exitDate);
+    this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
     await this.ensureSingleActiveEmployment(companyId, body.employeeId, status, null);
+    await this.ensureSgkDocumentConfirmation(employee, body.identityNumberConfirmed ?? false, files);
+    const entryDocument = await this.persistPayrollDocument(companyId, body.employeeId, 'sgk-entry', files?.sgkEntryDocument?.[0]);
+    const exitDocument = await this.persistPayrollDocument(companyId, body.employeeId, 'sgk-exit', files?.sgkExitDocument?.[0]);
 
     const row = await this.prisma.payrollEmploymentRecord.create({
       data: {
@@ -212,7 +306,11 @@ export class PayrollService {
         arrivalDate,
         accrualStartDate,
         sgkStartDate,
+        sgkEntryDocumentPath: entryDocument?.path ?? null,
+        sgkEntryDocumentName: entryDocument?.name ?? null,
         exitDate,
+        sgkExitDocumentPath: exitDocument?.path ?? null,
+        sgkExitDocumentName: exitDocument?.name ?? null,
         status,
         insuranceStatus
       },
@@ -223,21 +321,32 @@ export class PayrollService {
     return row;
   }
 
-  async updateEmploymentRecord(actorUserId: string, companyId: string, id: string, payload: unknown, ip?: string, userAgent?: string) {
-    const body = payrollEmploymentRecordSchema.partial().parse(payload);
+  async updateEmploymentRecord(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    payload: unknown,
+    files?: { sgkEntryDocument?: UploadFile[]; sgkExitDocument?: UploadFile[] },
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = payrollEmploymentRecordSchema.partial().parse(this.normalizeEmploymentPayload(payload));
     const existing = await this.requireEmploymentRecord(companyId, id);
     const employeeId = body.employeeId ?? existing.employeeId;
-    if (body.employeeId) await this.requirePayrollEmployee(companyId, body.employeeId);
+    const employee = body.employeeId ? await this.requirePayrollEmployee(companyId, body.employeeId) : await this.requirePayrollEmployee(companyId, existing.employeeId);
 
     const arrivalDate = body.arrivalDate ? this.parseDate(body.arrivalDate, false) : existing.arrivalDate;
-    const accrualStartDate = body.accrualStartDate ? this.parseDate(body.accrualStartDate, false) : existing.accrualStartDate;
     const sgkStartDate = body.sgkStartDate !== undefined ? this.parseNullableDate(body.sgkStartDate) : existing.sgkStartDate;
     const exitDate = body.exitDate !== undefined ? this.parseNullableDate(body.exitDate) : existing.exitDate;
+    const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
     const status = body.status ? this.mapEmploymentStatus(body.status) : existing.status;
     const insuranceStatus = body.insuranceStatus ? this.mapInsuranceStatus(body.insuranceStatus) : existing.insuranceStatus;
 
-    this.validateEmploymentDates(arrivalDate, accrualStartDate, sgkStartDate, exitDate);
+    this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
     await this.ensureSingleActiveEmployment(companyId, employeeId, status, existing.id);
+    await this.ensureSgkDocumentConfirmation(employee, body.identityNumberConfirmed ?? false, files);
+    const entryDocument = await this.persistPayrollDocument(companyId, employeeId, 'sgk-entry', files?.sgkEntryDocument?.[0]);
+    const exitDocument = await this.persistPayrollDocument(companyId, employeeId, 'sgk-exit', files?.sgkExitDocument?.[0]);
 
     const row = await this.prisma.payrollEmploymentRecord.update({
       where: { id: existing.id },
@@ -246,9 +355,11 @@ export class PayrollService {
         ...(body.departmentName !== undefined ? { departmentName: body.departmentName } : {}),
         ...(body.titleName !== undefined ? { titleName: body.titleName } : {}),
         ...(body.arrivalDate !== undefined ? { arrivalDate } : {}),
-        ...(body.accrualStartDate !== undefined ? { accrualStartDate } : {}),
+        accrualStartDate,
         ...(body.sgkStartDate !== undefined ? { sgkStartDate } : {}),
+        ...(entryDocument ? { sgkEntryDocumentPath: entryDocument.path, sgkEntryDocumentName: entryDocument.name } : {}),
         ...(body.exitDate !== undefined ? { exitDate } : {}),
+        ...(exitDocument ? { sgkExitDocumentPath: exitDocument.path, sgkExitDocumentName: exitDocument.name } : {}),
         ...(body.status !== undefined ? { status } : {}),
         ...(body.insuranceStatus !== undefined ? { insuranceStatus } : {})
       },
@@ -318,7 +429,8 @@ export class PayrollService {
       include: {
         employmentRecord: {
           include: { employee: true }
-        }
+        },
+        matrixRow: true
       },
       orderBy: [{ isActive: 'desc' }, { effectiveFrom: 'desc' }, { createdAt: 'desc' }]
     });
@@ -327,6 +439,7 @@ export class PayrollService {
   async createCompensationProfile(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
     const body = payrollCompensationProfileSchema.parse(payload);
     await this.requireEmploymentRecord(companyId, body.employmentRecordId);
+    const matrixRow = await this.requireCompensationMatrixRow(companyId, body.matrixRowId);
 
     const effectiveFrom = this.parseDate(body.effectiveFrom, false);
     const effectiveTo = this.parseNullableDate(body.effectiveTo ?? null);
@@ -337,8 +450,9 @@ export class PayrollService {
       data: {
         companyId,
         employmentRecordId: body.employmentRecordId,
-        targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary),
-        officialNetSalary: new Prisma.Decimal(body.officialNetSalary),
+        matrixRowId: matrixRow.id,
+        targetAccrualSalary: matrixRow.targetAccrualSalary,
+        officialNetSalary: matrixRow.officialNetSalary,
         overtimeEligible: body.overtimeEligible ?? true,
         bonusEligible: body.bonusEligible ?? true,
         handCashAllowed: body.handCashAllowed ?? true,
@@ -347,7 +461,8 @@ export class PayrollService {
         isActive: body.isActive ?? true
       },
       include: {
-        employmentRecord: { include: { employee: true } }
+        employmentRecord: { include: { employee: true } },
+        matrixRow: true
       }
     });
 
@@ -360,6 +475,11 @@ export class PayrollService {
     const existing = await this.requireCompensationProfile(companyId, id);
     const employmentRecordId = body.employmentRecordId ?? existing.employmentRecordId;
     if (body.employmentRecordId) await this.requireEmploymentRecord(companyId, body.employmentRecordId);
+    const matrixRow = body.matrixRowId
+      ? await this.requireCompensationMatrixRow(companyId, body.matrixRowId)
+      : existing.matrixRowId
+        ? await this.requireCompensationMatrixRow(companyId, existing.matrixRowId)
+        : null;
 
     const effectiveFrom = body.effectiveFrom ? this.parseDate(body.effectiveFrom, false) : existing.effectiveFrom;
     const effectiveTo = body.effectiveTo !== undefined ? this.parseNullableDate(body.effectiveTo) : existing.effectiveTo;
@@ -371,8 +491,7 @@ export class PayrollService {
       where: { id: existing.id },
       data: {
         ...(body.employmentRecordId !== undefined ? { employmentRecordId: body.employmentRecordId } : {}),
-        ...(body.targetAccrualSalary !== undefined ? { targetAccrualSalary: new Prisma.Decimal(body.targetAccrualSalary) } : {}),
-        ...(body.officialNetSalary !== undefined ? { officialNetSalary: new Prisma.Decimal(body.officialNetSalary) } : {}),
+        ...(matrixRow ? { matrixRowId: matrixRow.id, targetAccrualSalary: matrixRow.targetAccrualSalary, officialNetSalary: matrixRow.officialNetSalary } : {}),
         ...(body.overtimeEligible !== undefined ? { overtimeEligible: body.overtimeEligible } : {}),
         ...(body.bonusEligible !== undefined ? { bonusEligible: body.bonusEligible } : {}),
         ...(body.handCashAllowed !== undefined ? { handCashAllowed: body.handCashAllowed } : {}),
@@ -381,7 +500,8 @@ export class PayrollService {
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
       },
       include: {
-        employmentRecord: { include: { employee: true } }
+        employmentRecord: { include: { employee: true } },
+        matrixRow: true
       }
     });
 
@@ -393,7 +513,7 @@ export class PayrollService {
     await this.requireEmploymentRecord(companyId, employmentRecordId);
     return this.prisma.payrollCompensationProfile.findMany({
       where: { companyId, employmentRecordId },
-      include: { employmentRecord: { include: { employee: true } } },
+      include: { employmentRecord: { include: { employee: true } }, matrixRow: true },
       orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }]
     });
   }
@@ -1246,15 +1366,12 @@ export class PayrollService {
 
     return row;
   }
-  private validateEmploymentDates(
-    arrivalDate: Date,
-    accrualStartDate: Date,
-    sgkStartDate: Date | null,
-    exitDate: Date | null
-  ) {
-    if (accrualStartDate < arrivalDate) {
-      throw new BadRequestException('Hakediş başlangıç tarihi geliş tarihinden önce olamaz');
-    }
+  private deriveAccrualStartDate(arrivalDate: Date, sgkStartDate: Date | null) {
+    if (!sgkStartDate) return arrivalDate;
+    return sgkStartDate < arrivalDate ? sgkStartDate : arrivalDate;
+  }
+
+  private validateEmploymentDates(arrivalDate: Date, sgkStartDate: Date | null, exitDate: Date | null) {
     if (sgkStartDate && sgkStartDate < arrivalDate) {
       throw new BadRequestException('SGK tarihi geliş tarihinden önce olamaz');
     }
@@ -1354,6 +1471,177 @@ export class PayrollService {
     if (conflict) {
       throw new ConflictException('Aynı hakediş maaşı için çakışan aktif eşleştirme oluşturulamaz');
     }
+  }
+
+  private normalizeEmploymentPayload(payload: unknown) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return payload;
+    }
+
+    const source = payload as Record<string, unknown>;
+    return {
+      employeeId: this.normalizeString(source.employeeId),
+      departmentName: this.normalizeNullableString(source.departmentName),
+      titleName: this.normalizeNullableString(source.titleName),
+      arrivalDate: this.normalizeString(source.arrivalDate),
+      sgkStartDate: this.normalizeNullableString(source.sgkStartDate),
+      exitDate: this.normalizeNullableString(source.exitDate),
+      sgkEntryDocumentName: this.normalizeNullableString(source.sgkEntryDocumentName),
+      sgkEntryDocumentPath: this.normalizeNullableString(source.sgkEntryDocumentPath),
+      sgkExitDocumentName: this.normalizeNullableString(source.sgkExitDocumentName),
+      sgkExitDocumentPath: this.normalizeNullableString(source.sgkExitDocumentPath),
+      identityNumberConfirmed: this.normalizeBoolean(source.identityNumberConfirmed),
+      insuranceStatus: this.normalizeNullableString(source.insuranceStatus) ?? undefined,
+      status: this.normalizeNullableString(source.status) ?? undefined
+    };
+  }
+
+  private normalizeString(value: unknown) {
+    if (typeof value === 'string') return value.trim();
+    return value;
+  }
+
+  private normalizeNullableString(value: unknown) {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null') return null;
+    return trimmed;
+  }
+
+  private normalizeBoolean(value: unknown) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value !== 'string') return undefined;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return undefined;
+  }
+
+  private async ensureSgkDocumentConfirmation(
+    employee: { identityNumber: string | null },
+    identityNumberConfirmed: boolean,
+    files?: { sgkEntryDocument?: UploadFile[]; sgkExitDocument?: UploadFile[] }
+  ) {
+    const hasUpload = Boolean(files?.sgkEntryDocument?.[0] || files?.sgkExitDocument?.[0]);
+    if (!hasUpload) return;
+    if (!employee.identityNumber?.trim()) {
+      throw new BadRequestException('SGK belgesi yüklemek için çalışanın kimlik numarası kayıtlı olmalıdır');
+    }
+    if (!identityNumberConfirmed) {
+      throw new BadRequestException('SGK belgesi için kimlik numarası eşleşmesini onaylayın');
+    }
+  }
+
+  private async persistPayrollDocument(companyId: string, employeeId: string, kind: 'sgk-entry' | 'sgk-exit', file?: UploadFile) {
+    if (!file?.buffer?.length) return null;
+    const safeOriginalName = (file.originalname ?? `${kind}.bin`).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fileName = `${Date.now()}-${safeOriginalName}`;
+    const relativeDir = path.join('var', 'uploads', 'payroll', companyId, employeeId, kind);
+    const absoluteDir = path.join(process.cwd(), relativeDir);
+    await mkdir(absoluteDir, { recursive: true });
+    await writeFile(path.join(absoluteDir, fileName), file.buffer);
+    return {
+      path: path.join(relativeDir, fileName),
+      name: file.originalname ?? fileName
+    };
+  }
+
+  private parseEmployeeCsv(buffer: Buffer) {
+    const lines = buffer
+      .toString('utf8')
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length < 2) {
+      throw new BadRequestException('CSV dosyasında en az bir veri satırı olmalıdır');
+    }
+    const headers = this.parseCsvLine(lines[0]).map((value) => value.trim());
+    const requiredHeaders = ['firstName', 'lastName', 'identityNumber', 'birthDate', 'iban'];
+    for (const header of requiredHeaders) {
+      if (!headers.includes(header)) {
+        throw new BadRequestException(`CSV kolonları eksik. Beklenen kolon: ${header}`);
+      }
+    }
+
+    return lines.slice(1).map((line) => {
+      const values = this.parseCsvLine(line);
+      const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+      return {
+        firstName: String(row.firstName ?? '').trim(),
+        lastName: String(row.lastName ?? '').trim(),
+        identityNumber: String(row.identityNumber ?? '').trim(),
+        birthDate: String(row.birthDate ?? '').trim(),
+        iban: String(row.iban ?? '').trim()
+      };
+    });
+  }
+
+  private parseCsvLine(line: string) {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      if (char === '"') {
+        if (inQuotes && line[index + 1] === '"') {
+          current += '"';
+          index += 1;
+          continue;
+        }
+        inQuotes = !inQuotes;
+        continue;
+      }
+      if (char === ',' && !inQuotes) {
+        values.push(current);
+        current = '';
+        continue;
+      }
+      current += char;
+    }
+    values.push(current);
+    return values;
+  }
+
+  private async buildEmployeeImportPreview(companyId: string, rows: Array<{ firstName: string; lastName: string; identityNumber: string; birthDate: string; iban: string }>) {
+    const existing = await this.prisma.payrollEmployee.findMany({
+      where: { companyId, identityNumber: { not: null } },
+      select: { identityNumber: true }
+    });
+    const existingSet = new Set(existing.map((row) => row.identityNumber?.trim()).filter(Boolean) as string[]);
+    const seen = new Set<string>();
+
+    const previewRows = rows.map((row, index) => {
+      const errors: string[] = [];
+      if (!row.firstName) errors.push('Ad gerekli');
+      if (!row.lastName) errors.push('Soyad gerekli');
+      if (!row.identityNumber) errors.push('Kimlik numarası gerekli');
+      if (row.identityNumber) {
+        if (seen.has(row.identityNumber)) {
+          errors.push('Dosya içinde mükerrer kimlik numarası');
+        }
+        seen.add(row.identityNumber);
+        if (existingSet.has(row.identityNumber)) {
+          errors.push('Bu kimlik numarasıyla çalışan zaten kayıtlı');
+        }
+      }
+      if (row.birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(row.birthDate)) {
+        errors.push('Doğum tarihi YYYY-MM-DD formatında olmalı');
+      }
+      return {
+        rowNumber: index + 2,
+        ...row,
+        errors,
+        valid: errors.length === 0
+      };
+    });
+
+    return {
+      rows: previewRows,
+      validRows: previewRows.filter((row) => row.valid),
+      invalidRows: previewRows.filter((row) => !row.valid)
+    };
   }
 
   private async ensureExpenseCategory(companyId: string, name: string) {
@@ -1461,7 +1749,7 @@ export class PayrollService {
   private async requireCompensationProfile(companyId: string, id: string) {
     const row = await this.prisma.payrollCompensationProfile.findUnique({
       where: { id },
-      include: { employmentRecord: { include: { employee: true } } }
+      include: { employmentRecord: { include: { employee: true } }, matrixRow: true }
     });
     if (!row || row.companyId !== companyId) throw new NotFoundException('Ücret profili bulunamadı');
     return row;

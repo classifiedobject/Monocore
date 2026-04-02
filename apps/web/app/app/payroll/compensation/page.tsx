@@ -3,12 +3,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../../lib/api';
 import { PayrollDrawer, PayrollEmptyState, PayrollPageIntro, formatDate, formatMoney } from '../_components';
-import type { PayrollCompensationProfile, PayrollEmploymentRecord } from '../_types';
+import type { PayrollCompensationMatrixRow, PayrollCompensationProfile, PayrollEmploymentRecord } from '../_types';
 
 type CompensationFormState = {
   employmentRecordId: string;
-  targetAccrualSalary: string;
-  officialNetSalary: string;
+  matrixRowId: string;
   overtimeEligible: boolean;
   bonusEligible: boolean;
   handCashAllowed: boolean;
@@ -19,8 +18,7 @@ type CompensationFormState = {
 
 const defaultForm: CompensationFormState = {
   employmentRecordId: '',
-  targetAccrualSalary: '',
-  officialNetSalary: '',
+  matrixRowId: '',
   overtimeEligible: true,
   bonusEligible: true,
   handCashAllowed: true,
@@ -32,8 +30,7 @@ const defaultForm: CompensationFormState = {
 function mapProfileToForm(profile: PayrollCompensationProfile): CompensationFormState {
   return {
     employmentRecordId: profile.employmentRecordId,
-    targetAccrualSalary: profile.targetAccrualSalary,
-    officialNetSalary: profile.officialNetSalary,
+    matrixRowId: profile.matrixRowId ?? '',
     overtimeEligible: profile.overtimeEligible,
     bonusEligible: profile.bonusEligible,
     handCashAllowed: profile.handCashAllowed,
@@ -50,6 +47,7 @@ function recordLabel(record: PayrollEmploymentRecord) {
 export default function PayrollCompensationPage() {
   const [profiles, setProfiles] = useState<PayrollCompensationProfile[]>([]);
   const [employmentRecords, setEmploymentRecords] = useState<PayrollEmploymentRecord[]>([]);
+  const [matrixRows, setMatrixRows] = useState<PayrollCompensationMatrixRow[]>([]);
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | 'active' | 'history'>('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -62,6 +60,11 @@ export default function PayrollCompensationPage() {
     setEmploymentRecords(Array.isArray(rows) ? rows : []);
   }
 
+  async function loadMatrixRows() {
+    const rows = (await apiFetch('/app-api/payroll/compensation-matrix?state=active')) as PayrollCompensationMatrixRow[];
+    setMatrixRows(Array.isArray(rows) ? rows : []);
+  }
+
   async function loadProfiles(nextSearch = search, nextState = stateFilter) {
     const params = new URLSearchParams();
     if (nextSearch.trim()) params.set('search', nextSearch.trim());
@@ -72,14 +75,31 @@ export default function PayrollCompensationPage() {
   }
 
   useEffect(() => {
-    Promise.all([loadEmploymentRecords(), loadProfiles()]).catch(handleApiError);
+    Promise.all([loadEmploymentRecords(), loadProfiles(), loadMatrixRows()]).catch(handleApiError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const employmentOptions = useMemo(
-    () => employmentRecords.map((record) => ({ id: record.id, label: recordLabel(record) })),
+    () =>
+      [...employmentRecords]
+        .sort((a, b) => `${a.employee.lastName} ${a.employee.firstName}`.localeCompare(`${b.employee.lastName} ${b.employee.firstName}`, 'tr'))
+        .map((record) => ({ id: record.id, label: recordLabel(record) })),
     [employmentRecords]
   );
+
+  const matrixOptions = useMemo(
+    () =>
+      [...matrixRows]
+        .sort((a, b) => Number(b.targetAccrualSalary) - Number(a.targetAccrualSalary))
+        .map((row) => ({
+          id: row.id,
+          label: `${formatMoney(row.targetAccrualSalary)} → ${formatMoney(row.officialNetSalary)}`,
+          officialNetSalary: row.officialNetSalary
+        })),
+    [matrixRows]
+  );
+
+  const selectedMatrixRow = useMemo(() => matrixRows.find((row) => row.id === form.matrixRowId) ?? null, [matrixRows, form.matrixRowId]);
 
   function resetAndClose() {
     setDrawerOpen(false);
@@ -89,7 +109,11 @@ export default function PayrollCompensationPage() {
 
   function openCreateDrawer() {
     setEditing(null);
-    setForm({ ...defaultForm, employmentRecordId: employmentOptions[0]?.id ?? '' });
+    setForm({
+      ...defaultForm,
+      employmentRecordId: employmentOptions[0]?.id ?? '',
+      matrixRowId: matrixOptions[0]?.id ?? ''
+    });
     setDrawerOpen(true);
   }
 
@@ -105,8 +129,7 @@ export default function PayrollCompensationPage() {
     try {
       const payload = {
         employmentRecordId: form.employmentRecordId,
-        targetAccrualSalary: Number(form.targetAccrualSalary),
-        officialNetSalary: Number(form.officialNetSalary),
+        matrixRowId: form.matrixRowId,
         overtimeEligible: form.overtimeEligible,
         bonusEligible: form.bonusEligible,
         handCashAllowed: form.handCashAllowed,
@@ -140,7 +163,7 @@ export default function PayrollCompensationPage() {
     <section className="space-y-6">
       <PayrollPageIntro
         title="Compensation Profiles"
-        description="Hakediş baz maaşı ve resmi net maaş geçmişini istihdam kaydı üzerinden yönetin. Eski ücret dönemleri kayıt altında kalır."
+        description="Ücret profilleri artık ücret matrisi üzerinden seçilir. Hakediş maaşı ile resmi net maaş manuel değil, policy eşleştirmesi üzerinden gelir."
         action={
           <button
             type="button"
@@ -189,7 +212,7 @@ export default function PayrollCompensationPage() {
       {profiles.length === 0 ? (
         <PayrollEmptyState
           title="Henüz ücret profili yok"
-          description="İstihdam kaydı oluşturduktan sonra hakediş baz ve resmi net maaş bilgilerini tarih bazlı olarak burada saklayabilirsiniz."
+          description="Önce istihdam kaydı, sonra ücret matrisi seçimi ile yeni ücret profili oluşturabilirsiniz."
           action={
             <button
               type="button"
@@ -287,100 +310,113 @@ export default function PayrollCompensationPage() {
           </>
         }
       >
-        <form id="payroll-compensation-form" className="space-y-6" onSubmit={submitForm}>
+        <form id="payroll-compensation-form" className="space-y-5" onSubmit={submitForm}>
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 text-sm text-slate-700 md:col-span-2">
-              <span className="font-medium">İstihdam kaydı seç</span>
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">İstihdam Kaydı</span>
               <select
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
+                required
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
                 value={form.employmentRecordId}
                 onChange={(event) => setForm((current) => ({ ...current, employmentRecordId: event.target.value }))}
-                required
               >
-                <option value="">Seçiniz</option>
-                {employmentOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
+                <option value="">İstihdam kaydı seç</option>
+                {employmentOptions.map((record) => (
+                  <option key={record.id} value={record.id}>
+                    {record.label}
                   </option>
                 ))}
               </select>
             </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Hakediş Baz Maaşı</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300"
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.targetAccrualSalary}
-                onChange={(event) => setForm((current) => ({ ...current, targetAccrualSalary: event.target.value }))}
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Hakediş Maaşı</span>
+              <select
                 required
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
+                value={form.matrixRowId}
+                onChange={(event) => setForm((current) => ({ ...current, matrixRowId: event.target.value }))}
+              >
+                <option value="">Matriks satırı seç</option>
+                {matrixOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Resmi Maaş</span>
+              <input
+                disabled
+                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700 outline-none"
+                value={selectedMatrixRow ? formatMoney(selectedMatrixRow.officialNetSalary) : 'Matriks satırı seçin'}
+                readOnly
               />
             </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Resmi Net Maaş</span>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Effective From</span>
               <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-300"
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.officialNetSalary}
-                onChange={(event) => setForm((current) => ({ ...current, officialNetSalary: event.target.value }))}
                 required
-              />
-            </label>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.bonusEligible}
-                onChange={(event) => setForm((current) => ({ ...current, bonusEligible: event.target.checked }))}
-              />
-              <span>Prim uygun mu</span>
-            </label>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.overtimeEligible}
-                onChange={(event) => setForm((current) => ({ ...current, overtimeEligible: event.target.checked }))}
-              />
-              <span>Fazla mesai uygun mu</span>
-            </label>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.handCashAllowed}
-                onChange={(event) => setForm((current) => ({ ...current, handCashAllowed: event.target.checked }))}
-              />
-              <span>Elden ödeme uygun mu</span>
-            </label>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.isActive}
-                onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
-              />
-              <span>Aktif profil</span>
-            </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Effective From</span>
-              <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
                 type="date"
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
                 value={form.effectiveFrom}
                 onChange={(event) => setForm((current) => ({ ...current, effectiveFrom: event.target.value }))}
-                required
               />
             </label>
-            <label className="space-y-2 text-sm text-slate-700">
-              <span className="font-medium">Effective To</span>
+
+            <label className="space-y-2 text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Effective To</span>
               <input
-                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-slate-900 outline-none focus:border-slate-300"
                 type="date"
+                className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm text-slate-900 outline-none focus:border-slate-300"
                 value={form.effectiveTo}
                 onChange={(event) => setForm((current) => ({ ...current, effectiveTo: event.target.value }))}
               />
             </label>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-0"
+                checked={form.bonusEligible}
+                onChange={(event) => setForm((current) => ({ ...current, bonusEligible: event.target.checked }))}
+              />
+              <span>Prim uygun</span>
+            </label>
+            <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-0"
+                checked={form.overtimeEligible}
+                onChange={(event) => setForm((current) => ({ ...current, overtimeEligible: event.target.checked }))}
+              />
+              <span>Fazla mesai uygun</span>
+            </label>
+            <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-0"
+                checked={form.handCashAllowed}
+                onChange={(event) => setForm((current) => ({ ...current, handCashAllowed: event.target.checked }))}
+              />
+              <span>Elden ödeme uygun</span>
+            </label>
+          </div>
+
+          <label className="inline-flex items-center gap-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-0"
+              checked={form.isActive}
+              onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
+            />
+            <span>Aktif profil</span>
+          </label>
         </form>
       </PayrollDrawer>
     </section>
