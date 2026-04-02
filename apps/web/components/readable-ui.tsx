@@ -5,9 +5,9 @@ type PageHeaderProps = {
 
 export function PageHeader({ title, description }: PageHeaderProps) {
   return (
-    <header className="space-y-2">
-      <h1 className="text-3xl font-bold text-slate-900">{title}</h1>
-      {description ? <p className="max-w-3xl text-sm text-slate-600">{description}</p> : null}
+    <header className="space-y-2.5">
+      <h1 className="app-header-title">{title}</h1>
+      {description ? <p className="app-header-description">{description}</p> : null}
     </header>
   );
 }
@@ -21,11 +21,11 @@ type SectionCardProps = {
 
 export function SectionCard({ title, description, actions, children }: SectionCardProps) {
   return (
-    <section className="space-y-3 rounded border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="app-surface space-y-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {description ? <p className="text-sm text-slate-600">{description}</p> : null}
+        <div className="space-y-1.5">
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-900">{title}</h2>
+          {description ? <p className="text-sm leading-6 text-slate-500">{description}</p> : null}
         </div>
         {actions}
       </div>
@@ -41,9 +41,9 @@ type EmptyStateProps = {
 
 export function EmptyState({ title, description }: EmptyStateProps) {
   return (
-    <div className="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+    <div className="app-empty-state">
       <p className="font-medium text-slate-800">{title}</p>
-      <p className="mt-1">{description}</p>
+      <p className="mt-1.5 leading-6">{description}</p>
     </div>
   );
 }
@@ -56,10 +56,10 @@ type StatCardProps = {
 
 export function StatCard({ label, value, helper }: StatCardProps) {
   return (
-    <article className="rounded border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
-      {helper ? <p className="mt-1 text-xs text-slate-500">{helper}</p> : null}
+    <article className="app-surface">
+      <p className="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{label}</p>
+      <p className="mt-3 text-[28px] font-semibold tracking-[-0.03em] text-slate-950">{value}</p>
+      {helper ? <p className="mt-2 text-xs leading-5 text-slate-500">{helper}</p> : null}
     </article>
   );
 }

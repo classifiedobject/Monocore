@@ -265,32 +265,43 @@ export class InventoryService {
     return this.prisma.inventoryItemSavedView.findMany({
       where: { companyId },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }]
+    }).catch((error) => {
+      if (this.isMissingInventoryItemSavedViewsTable(error)) {
+        return [];
+      }
+      throw error;
     });
   }
 
   async createItemSavedView(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
     const body = inventoryItemSavedViewSchema.parse(payload);
-    const row = await this.prisma.$transaction(async (tx) => {
-      if (body.isDefault) {
-        await tx.inventoryItemSavedView.updateMany({
-          where: { companyId, isDefault: true },
-          data: { isDefault: false }
-        });
-      }
-      return tx.inventoryItemSavedView.create({
-        data: {
-          companyId,
-          name: body.name,
-          isDefault: body.isDefault ?? false,
-          filtersJson: (body.filtersJson ?? {}) as Prisma.InputJsonValue,
-          searchQuery: body.searchQuery ?? null,
-          sortBy: body.sortBy ?? null,
-          sortDirection: body.sortDirection ?? null,
-          pageSize: body.pageSize ?? null,
-          createdByUserId: actorUserId
+    let row;
+    try {
+      row = await this.prisma.$transaction(async (tx) => {
+        if (body.isDefault) {
+          await tx.inventoryItemSavedView.updateMany({
+            where: { companyId, isDefault: true },
+            data: { isDefault: false }
+          });
         }
+        return tx.inventoryItemSavedView.create({
+          data: {
+            companyId,
+            name: body.name,
+            isDefault: body.isDefault ?? false,
+            filtersJson: (body.filtersJson ?? {}) as Prisma.InputJsonValue,
+            searchQuery: body.searchQuery ?? null,
+            sortBy: body.sortBy ?? null,
+            sortDirection: body.sortDirection ?? null,
+            pageSize: body.pageSize ?? null,
+            createdByUserId: actorUserId
+          }
+        });
       });
-    });
+    } catch (error) {
+      this.throwIfMissingInventoryItemSavedViewsTable(error);
+      throw error;
+    }
 
     await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.create', 'inventory_item_saved_view', row.id, body, ip, userAgent);
     return row;
@@ -327,23 +338,34 @@ export class InventoryService {
 
   async deleteItemSavedView(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const existing = await this.requireItemSavedView(companyId, id);
-    await this.prisma.inventoryItemSavedView.delete({ where: { id: existing.id } });
+    try {
+      await this.prisma.inventoryItemSavedView.delete({ where: { id: existing.id } });
+    } catch (error) {
+      this.throwIfMissingInventoryItemSavedViewsTable(error);
+      throw error;
+    }
     await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.delete', 'inventory_item_saved_view', existing.id, { name: existing.name }, ip, userAgent);
     return { ok: true };
   }
 
   async setDefaultItemSavedView(actorUserId: string, companyId: string, id: string, ip?: string, userAgent?: string) {
     const existing = await this.requireItemSavedView(companyId, id);
-    const row = await this.prisma.$transaction(async (tx) => {
-      await tx.inventoryItemSavedView.updateMany({
-        where: { companyId, isDefault: true },
-        data: { isDefault: false }
+    let row;
+    try {
+      row = await this.prisma.$transaction(async (tx) => {
+        await tx.inventoryItemSavedView.updateMany({
+          where: { companyId, isDefault: true },
+          data: { isDefault: false }
+        });
+        return tx.inventoryItemSavedView.update({
+          where: { id: existing.id },
+          data: { isDefault: true }
+        });
       });
-      return tx.inventoryItemSavedView.update({
-        where: { id: existing.id },
-        data: { isDefault: true }
-      });
-    });
+    } catch (error) {
+      this.throwIfMissingInventoryItemSavedViewsTable(error);
+      throw error;
+    }
 
     await this.logCompany(actorUserId, companyId, 'company.inventory.item_saved_view.set_default', 'inventory_item_saved_view', row.id, { name: row.name }, ip, userAgent);
     return row;
@@ -2204,11 +2226,32 @@ export class InventoryService {
   }
 
   private async requireItemSavedView(companyId: string, id: string) {
-    const row = await this.prisma.inventoryItemSavedView.findUnique({ where: { id } });
+    let row;
+    try {
+      row = await this.prisma.inventoryItemSavedView.findUnique({ where: { id } });
+    } catch (error) {
+      this.throwIfMissingInventoryItemSavedViewsTable(error);
+      throw error;
+    }
     if (!row || row.companyId !== companyId) {
       throw new NotFoundException('Saved view not found');
     }
     return row;
+  }
+
+  private isMissingInventoryItemSavedViewsTable(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2021' &&
+      typeof error.meta?.table === 'string' &&
+      error.meta.table.includes('InventoryItemSavedView')
+    );
+  }
+
+  private throwIfMissingInventoryItemSavedViewsTable(error: unknown): asserts error is never {
+    if (this.isMissingInventoryItemSavedViewsTable(error)) {
+      throw new BadRequestException('Kayıtlı görünümler için veritabanı migrationı eksik. Lütfen `pnpm db:migrate` çalıştırın.');
+    }
   }
 
   private itemOrderBy(sortBy: string | null, sortDirection: string | null): Prisma.InventoryItemOrderByWithRelationInput[] {

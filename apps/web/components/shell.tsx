@@ -95,14 +95,14 @@ function NavIcon({ kind }: { kind: 'home' | 'company' | 'modules' | 'settings' |
 
 function topLevelRowClass(active: boolean) {
   return active
-    ? 'flex w-full items-center gap-3 rounded-2xl bg-slate-100 px-4 py-3 text-left text-[18px] font-semibold tracking-[-0.01em] text-slate-900 outline-none transition focus:outline-none focus-visible:outline-none'
-    : 'flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-[18px] font-semibold tracking-[-0.01em] text-slate-700 outline-none transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:outline-none';
+    ? 'flex w-full items-center gap-3 rounded-2xl bg-slate-100/90 px-4 py-3.5 text-left text-[17px] font-semibold tracking-[-0.015em] text-slate-900 outline-none transition focus:outline-none focus-visible:outline-none'
+    : 'flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-left text-[17px] font-semibold tracking-[-0.015em] text-slate-600 outline-none transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:outline-none';
 }
 
 function childLinkClass(active: boolean) {
   return active
-    ? 'rounded-xl bg-slate-100 px-4 py-2.5 text-[17px] font-medium text-slate-900 outline-none transition focus:outline-none focus-visible:outline-none'
-    : 'rounded-xl px-4 py-2.5 text-[17px] font-medium text-slate-600 outline-none transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:outline-none';
+    ? 'rounded-xl bg-slate-100 px-4 py-2.5 text-[15px] font-medium text-slate-900 outline-none transition focus:outline-none focus-visible:outline-none'
+    : 'rounded-xl px-4 py-2.5 text-[15px] font-medium text-slate-500 outline-none transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:outline-none';
 }
 
 function iconKindForLink(link: ShellLink): 'home' | 'company' | 'modules' | 'settings' | 'audit' | 'module' {
@@ -188,17 +188,17 @@ export function Shell({
   return (
     <div
       style={{ fontFamily: CUSTOMER_APP_FONT_STACK }}
-      className="min-h-screen bg-[#f7f8fb] text-slate-900 antialiased"
+      className="min-h-screen bg-[#f6f7fb] text-slate-900 antialiased"
     >
       <div className="grid min-h-screen grid-cols-1 md:grid-cols-[308px_1fr]">
-        <aside className="border-r border-slate-200 bg-white px-5 py-7 md:px-6 md:py-8">
-          <div className="space-y-8">
+        <aside className="border-r border-slate-200/80 bg-white/95 px-5 py-7 md:px-6 md:py-8">
+          <div className="space-y-9">
             <header className="px-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Customer App</p>
-              <h1 className="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-slate-950">{title}</h1>
+              <h1 className="mt-2 text-[21px] font-semibold tracking-[-0.03em] text-slate-950">{title}</h1>
             </header>
 
-            <div className="space-y-7">
+            <div className="space-y-8">
               <section className="space-y-2">
                 <nav className="flex flex-col gap-1">
                   {coreLinks.map((link) => {
@@ -246,7 +246,7 @@ export function Shell({
                           }`}
                         >
                           <div className="overflow-hidden">
-                            <div className="ml-4 flex flex-col gap-1 border-l border-slate-200 pl-5">
+                            <div className="ml-4 flex flex-col gap-1.5 border-l border-slate-200 pl-5">
                               {group.items.map((item) => {
                                 const itemActive = isLinkActive(pathname, item);
                                 return (
@@ -305,7 +305,7 @@ export function Shell({
                             }`}
                           >
                             <div className="overflow-hidden">
-                              <div className="ml-4 flex flex-col gap-1 border-l border-slate-200 pl-5">
+                              <div className="ml-4 flex flex-col gap-1.5 border-l border-slate-200 pl-5">
                                 {group.items.map((item) => {
                                   const itemActive = isLinkActive(pathname, item);
                                   return (
@@ -327,8 +327,8 @@ export function Shell({
           </div>
         </aside>
 
-        <main className="min-w-0 px-6 py-8 md:px-10 md:py-10">
-          <div className="mx-auto max-w-7xl space-y-6">{children}</div>
+        <main data-customer-shell="true" className="min-w-0 px-6 py-8 md:px-10 md:py-10 lg:px-12 lg:py-12">
+          <div className="mx-auto max-w-[1320px] space-y-7">{children}</div>
         </main>
       </div>
     </div>
