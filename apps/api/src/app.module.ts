@@ -31,6 +31,7 @@ import { ExecutiveController } from './executive/executive.controller.js';
 import { ExecutiveService } from './executive/executive.service.js';
 import { PayrollController } from './payroll/payroll.controller.js';
 import { PayrollService } from './payroll/payroll.service.js';
+import { SgkParserService } from './payroll/sgk-parser.service.js';
 import { TipController } from './tips/tip.controller.js';
 import { TipService } from './tips/tip.service.js';
 import { HealthController } from './health.controller.js';
@@ -74,6 +75,7 @@ import { HealthController } from './health.controller.js';
     ReservationsService,
     ExecutiveService,
     PayrollService,
+    SgkParserService,
     TipService,
     AuditService,
     RedisService,

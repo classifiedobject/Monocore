@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Request, Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
 import { ModuleInstalledGuard } from '../common/guards/module-installed.guard.js';
@@ -43,8 +44,105 @@ export class InventoryController {
 
   @Get('items')
   @RequirePermissions('module:inventory-core.items.read')
-  listItems(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listItems(req.companyId);
+  listItems(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listItems(req.companyId, query);
+  }
+
+  @Get('items/saved-views')
+  @RequirePermissions('module:inventory-core.items.read')
+  listItemSavedViews(@Req() req: Request & { companyId: string }) {
+    return this.inventory.listItemSavedViews(req.companyId);
+  }
+
+  @Post('items/saved-views')
+  @RequirePermissions('module:inventory-core.items.manage')
+  createItemSavedView(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.createItemSavedView(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('items/saved-views/:id')
+  @RequirePermissions('module:inventory-core.items.manage')
+  updateItemSavedView(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.updateItemSavedView(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Delete('items/saved-views/:id')
+  @RequirePermissions('module:inventory-core.items.manage')
+  deleteItemSavedView(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.deleteItemSavedView(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/saved-views/:id/set-default')
+  @RequirePermissions('module:inventory-core.items.manage')
+  setDefaultItemSavedView(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.inventory.setDefaultItemSavedView(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Get('items/export.csv')
+  @RequirePermissions('module:inventory-core.items.read')
+  async exportItemsCsv(
+    @Req() req: Request & { user: { id: string }; companyId: string },
+    @Query() query: unknown,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const csv = await this.inventory.exportItemsCsv(req.user.id, req.companyId, query, req.ip, req.get('user-agent'));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items.csv"');
+    return csv;
+  }
+
+  @Get('items/export.xlsx')
+  @RequirePermissions('module:inventory-core.items.read')
+  async exportItemsXlsx(
+    @Req() req: Request & { user: { id: string }; companyId: string },
+    @Query() query: unknown,
+    @Res() res: Response
+  ) {
+    const buffer = await this.inventory.exportItemsXlsx(req.user.id, req.companyId, query, req.ip, req.get('user-agent'));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items.xlsx"');
+    res.send(buffer);
+  }
+
+  @Get('items/import/template.csv')
+  @RequirePermissions('module:inventory-core.items.manage')
+  downloadItemsImportTemplateCsv(@Res({ passthrough: true }) res: Response) {
+    const csv = this.inventory.getItemsImportTemplateCsv();
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items-template.csv"');
+    return csv;
+  }
+
+  @Get('items/import/template.xlsx')
+  @RequirePermissions('module:inventory-core.items.manage')
+  downloadItemsImportTemplateXlsx(@Res() res: Response) {
+    const buffer = this.inventory.getItemsImportTemplateXlsx();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-items-template.xlsx"');
+    res.send(buffer);
+  }
+
+  @Post('items/import/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  @RequirePermissions('module:inventory-core.items.manage')
+  previewItemsImport(
+    @UploadedFile() file: { originalname?: string; buffer: Buffer } | undefined,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.previewItemImport(req.user.id, req.companyId, file, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/import/confirm')
+  @RequirePermissions('module:inventory-core.items.manage')
+  confirmItemsImport(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.confirmItemImport(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Post('items')
@@ -83,6 +181,28 @@ export class InventoryController {
   @RequirePermissions('module:inventory-core.items.manage')
   deactivateItem(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.inventory.deactivateItem(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/bulk-status')
+  @RequirePermissions('module:inventory-core.items.manage')
+  bulkSetItemStatus(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string }
+  ) {
+    return this.inventory.bulkSetItemStatus(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('items/bulk-export')
+  @RequirePermissions('module:inventory-core.items.read')
+  async bulkExportItems(
+    @Body() body: unknown,
+    @Req() req: Request & { user: { id: string }; companyId: string },
+    @Res() res: Response
+  ) {
+    const file = await this.inventory.bulkExportItems(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
   }
 
   @Get('movements')
@@ -155,8 +275,8 @@ export class InventoryController {
 
   @Get('suppliers')
   @RequirePermissions('module:inventory-core.suppliers.read')
-  listSuppliers(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listSuppliers(req.companyId);
+  listSuppliers(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listSuppliers(req.companyId, query);
   }
 
   @Post('suppliers')
@@ -195,8 +315,8 @@ export class InventoryController {
 
   @Get('brands')
   @RequirePermissions('module:inventory-core.brands.read')
-  listBrands(@Req() req: Request & { companyId: string }) {
-    return this.inventory.listBrands(req.companyId);
+  listBrands(@Req() req: Request & { companyId: string }, @Query() query: unknown) {
+    return this.inventory.listBrands(req.companyId, query);
   }
 
   @Post('brands')

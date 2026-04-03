@@ -2,38 +2,123 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Shell } from '../../components/shell';
+import { Shell, type ShellLink, type ShellModuleGroup } from '../../components/shell';
 import { apiFetch, handleApiError } from '../../lib/api';
 import type { Route } from 'next';
 
-const baseLinks: Array<{ href: Route; label: string }> = [
+type InstalledModule = {
+  moduleKey?: string;
+  module?: {
+    key?: string;
+    name?: string | null;
+  };
+};
+
+const coreLinks: ShellLink[] = [
   { href: '/app/home', label: 'Home' },
-  { href: '/app/company', label: 'Company' },
-  { href: '/app/company/org', label: 'Company Org' },
+  { href: '/app/modules', label: 'Modules' },
   { href: '/app/settings', label: 'Settings' },
-  { href: '/app/team', label: 'Team' },
-  { href: '/app/roles', label: 'Roles & Permissions' },
   { href: '/app/audit-logs', label: 'Audit Logs' }
 ];
+
+const coreGroups: ShellModuleGroup[] = [
+  {
+    key: 'company-core',
+    label: 'Company',
+    items: [
+      { href: '/app/company', label: 'Create & Selection', exact: true },
+      { href: '/app/company/org', label: 'Departments & Titles', exact: true },
+      { href: '/app/team', label: 'Team', exact: true },
+      { href: '/app/roles', label: 'Roles & Permissions', exact: true }
+    ]
+  }
+];
+
+const moduleNavigationRegistry: Record<
+  string,
+  { label: string; items: Array<{ href: Route; label: string }> }
+> = {
+  'finance-core': {
+    label: 'Finance Core',
+    items: [{ href: '/app/finance', label: 'Overview' }]
+  },
+  'inventory-core': {
+    label: 'Inventory Core',
+    items: [
+      { href: '/app/inventory', label: 'Overview' },
+      { href: '/app/inventory/items', label: 'Items' },
+      { href: '/app/inventory/suppliers', label: 'Suppliers' },
+      { href: '/app/inventory/stock-counts', label: 'Stock Counts' }
+    ]
+  },
+  'recipe-core': {
+    label: 'Recipe Core',
+    items: [{ href: '/app/recipes', label: 'Products & Recipes' }]
+  },
+  'sales-core': {
+    label: 'Sales Core',
+    items: [{ href: '/app/sales', label: 'Orders' }]
+  },
+  'task-core': {
+    label: 'Task Core',
+    items: [{ href: '/app/tasks', label: 'Workspace' }]
+  },
+  'reservation-core': {
+    label: 'Reservation Core',
+    items: [{ href: '/app/reservations', label: 'Reservations' }]
+  },
+  'executive-core': {
+    label: 'Executive Core',
+    items: [{ href: '/app/executive', label: 'Dashboard' }]
+  },
+  'payroll-core': {
+    label: 'Payroll Core',
+    items: [
+      { href: '/app/payroll', label: 'Management' },
+      { href: '/app/payroll/employees', label: 'Employees' },
+      { href: '/app/payroll/employment', label: 'Employment Records' },
+      { href: '/app/payroll/compensation', label: 'Compensation Profiles' },
+      { href: '/app/payroll/matrix', label: 'Compensation Matrix' },
+      { href: '/app/payroll/periods', label: 'Payroll Periods' }
+    ]
+  },
+  'tip-core': {
+    label: 'Tip Core',
+    items: [{ href: '/app/tips', label: 'Overview' }]
+  }
+};
+
+function buildModuleGroups(installedModules: InstalledModule[]): ShellModuleGroup[] {
+  const groups: ShellModuleGroup[] = [];
+
+  for (const row of installedModules) {
+    const key = row.moduleKey ?? row.module?.key;
+    if (!key) continue;
+
+    const config = moduleNavigationRegistry[key];
+    if (!config) continue;
+
+    groups.push({
+      key,
+      label: row.module?.name?.trim() || config.label,
+      items: config.items.map((item): ShellLink => ({ ...item, exact: true }))
+    });
+  }
+
+  return groups;
+}
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [installedModuleKeys, setInstalledModuleKeys] = useState<string[]>([]);
+  const [installedModules, setInstalledModules] = useState<InstalledModule[]>([]);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
 
   useEffect(() => {
     apiFetch('/app-api/modules')
       .then((rows: unknown) => {
-        const items = Array.isArray(rows) ? rows : [];
-        const keys = items
-          .map((item) => {
-            if (!item || typeof item !== 'object') return null;
-            const row = item as { moduleKey?: string; module?: { key?: string } };
-            return row.moduleKey ?? row.module?.key ?? null;
-          })
-          .filter((key): key is string => typeof key === 'string');
-        setInstalledModuleKeys(keys);
+        const items = Array.isArray(rows) ? (rows as InstalledModule[]) : [];
+        setInstalledModules(items);
       })
       .catch(handleApiError);
   }, []);
@@ -72,46 +157,24 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     }
   }, [onboardingCompleted, pathname, router]);
 
-  const links = useMemo(() => {
-    const list = [...baseLinks];
-    if (onboardingCompleted !== true) {
-      list.push({ href: '/app/onboarding', label: 'Onboarding' });
-    }
-    if (installedModuleKeys.length > 0) {
-      list.push({ href: '/app/modules', label: 'Modules' });
-    }
-    if (installedModuleKeys.includes('finance-core')) {
-      list.push({ href: '/app/finance', label: 'Finance' });
-    }
-    if (installedModuleKeys.includes('inventory-core')) {
-      list.push({ href: '/app/inventory', label: 'Inventory' });
-      list.push({ href: '/app/inventory/items', label: 'Inventory Items' });
-      list.push({ href: '/app/inventory/stock-counts', label: 'Stock Counts' });
-      list.push({ href: '/app/inventory/suppliers', label: 'Suppliers' });
-    }
-    if (installedModuleKeys.includes('recipe-core')) {
-      list.push({ href: '/app/recipes', label: 'Recipes' });
-    }
-    if (installedModuleKeys.includes('sales-core')) {
-      list.push({ href: '/app/sales', label: 'Sales' });
-    }
-    if (installedModuleKeys.includes('task-core')) {
-      list.push({ href: '/app/tasks', label: 'Tasks' });
-    }
-    if (installedModuleKeys.includes('reservation-core')) {
-      list.push({ href: '/app/reservations', label: 'Reservations' });
-    }
-    if (installedModuleKeys.includes('executive-core')) {
-      list.push({ href: '/app/executive', label: 'Executive' });
-    }
-    if (installedModuleKeys.includes('payroll-core')) {
-      list.push({ href: '/app/payroll', label: 'Payroll' });
-    }
-    if (installedModuleKeys.includes('tip-core')) {
-      list.push({ href: '/app/tips', label: 'Tips' });
-    }
-    return list;
-  }, [installedModuleKeys, onboardingCompleted]);
+  const appCoreLinks = useMemo(() => {
+    if (onboardingCompleted === true) return coreLinks;
+    return [
+      ...coreLinks,
+      { href: '/app/onboarding' as Route, label: 'Onboarding', exact: true } satisfies ShellLink
+    ];
+  }, [onboardingCompleted]);
 
-  return <Shell title="Customer App" links={links}>{children}</Shell>;
+  const moduleGroups = useMemo(() => buildModuleGroups(installedModules), [installedModules]);
+
+  return (
+    <Shell
+      title="Customer Workspace"
+      coreLinks={appCoreLinks}
+      coreGroups={coreGroups}
+      moduleGroups={moduleGroups}
+    >
+      {children}
+    </Shell>
+  );
 }

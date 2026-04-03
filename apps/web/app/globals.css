@@ -3,13 +3,18 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f8fafc;
+  --bg: #f6f7fb;
   --fg: #0f172a;
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-border: rgba(148, 163, 184, 0.18);
+  --surface-muted: #64748b;
 }
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top left, #eef2ff, #f8fafc 40%);
+  background:
+    radial-gradient(circle at top left, rgba(226, 232, 240, 0.5), transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, #f3f5f8 100%);
   color: var(--fg);
   font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
 }
@@ -17,4 +22,105 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+@layer components {
+  [data-customer-shell='true'] input:not([type='checkbox']):not([type='radio']):not([type='file']),
+  [data-customer-shell='true'] select,
+  [data-customer-shell='true'] textarea {
+    @apply h-11 rounded-xl border border-slate-200 bg-white px-3.5 text-[14px] text-slate-800 shadow-sm shadow-slate-200/40 outline-none transition;
+  }
+
+  [data-customer-shell='true'] textarea {
+    @apply h-auto min-h-[110px] py-3;
+  }
+
+  [data-customer-shell='true'] input::placeholder,
+  [data-customer-shell='true'] textarea::placeholder {
+    @apply text-slate-400;
+  }
+
+  [data-customer-shell='true'] input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
+  [data-customer-shell='true'] select:focus,
+  [data-customer-shell='true'] textarea:focus {
+    @apply border-slate-300 shadow-md shadow-slate-200/50 ring-0;
+  }
+
+  [data-customer-shell='true'] label {
+    @apply text-sm text-slate-700;
+  }
+
+  [data-customer-shell='true'] label > span:first-child {
+    @apply mb-1.5 inline-block font-medium tracking-[-0.01em] text-slate-600;
+  }
+
+  [data-customer-shell='true'] table {
+    @apply w-full border-separate border-spacing-0 text-[14px] text-slate-700;
+  }
+
+  [data-customer-shell='true'] thead th {
+    @apply border-b border-slate-200 bg-slate-50/80 px-3 py-3 text-left text-xs font-semibold uppercase tracking-[0.08em] text-slate-500;
+  }
+
+  [data-customer-shell='true'] tbody td {
+    @apply border-b border-slate-100 px-3 py-3.5 align-middle;
+  }
+
+  [data-customer-shell='true'] tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  [data-customer-shell='true'] tbody tr:hover td {
+    @apply bg-slate-50/60;
+  }
+
+  [data-customer-shell='true'] .app-surface {
+    @apply rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-sm shadow-slate-200/50;
+  }
+
+  [data-customer-shell='true'] .app-header-title {
+    @apply text-[30px] font-semibold tracking-[-0.03em] text-slate-950 md:text-[32px];
+  }
+
+  [data-customer-shell='true'] .app-header-description {
+    @apply max-w-3xl text-sm leading-6 text-slate-500;
+  }
+
+  [data-customer-shell='true'] .app-empty-state {
+    @apply rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-5 py-6 text-sm text-slate-500;
+  }
+
+  [data-customer-shell='true'] section.space-y-5,
+  [data-customer-shell='true'] section.space-y-4 {
+    @apply space-y-6;
+  }
+
+  [data-customer-shell='true'] h1.text-3xl.font-bold {
+    @apply text-[30px] font-semibold tracking-[-0.03em] text-slate-950 md:text-[32px];
+  }
+
+  [data-customer-shell='true'] p.text-sm.text-slate-600 {
+    @apply leading-6 text-slate-500;
+  }
+
+  [data-customer-shell='true'] .rounded.bg-white.p-4.shadow-sm,
+  [data-customer-shell='true'] .rounded.border.border-slate-200.bg-white.p-4.shadow-sm,
+  [data-customer-shell='true'] .rounded.border.border-slate-200.bg-white.p-4 {
+    border-radius: 1rem;
+    background: rgb(255 255 255 / 0.9);
+    padding: 1.25rem;
+    border: 1px solid rgb(226 232 240 / 0.8);
+    box-shadow:
+      0 1px 2px 0 rgb(15 23 42 / 0.04),
+      0 1px 3px 0 rgb(148 163 184 / 0.18);
+  }
+
+  [data-customer-shell='true'] .rounded.border.border-rose-300.bg-rose-50,
+  [data-customer-shell='true'] .rounded.border.border-amber-300.bg-amber-50 {
+    @apply rounded-2xl px-4 py-3;
+  }
+
+  [data-customer-shell='true'] .rounded.border.border-dashed {
+    @apply rounded-2xl;
+  }
 }
