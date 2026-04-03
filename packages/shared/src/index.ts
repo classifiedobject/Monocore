@@ -48,10 +48,19 @@ export const companyTitleSchema = z.object({
   departmentId: z.string().uuid(),
   name: z.string().min(2).max(120),
   sortOrder: z.coerce.number().int().min(0).optional(),
-  tipWeight: z.coerce.number().nonnegative().max(1000),
-  isTipEligible: z.boolean().default(true),
-  departmentAggregate: z.boolean().default(false),
+  tipWeight: z.coerce.number().nonnegative().max(1000).optional(),
+  isTipEligible: z.boolean().optional(),
+  departmentAggregate: z.boolean().optional(),
   isActive: z.boolean().optional()
+});
+
+export const companyDepartmentReorderSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1)
+});
+
+export const companyTitleReorderSchema = z.object({
+  departmentId: z.string().uuid(),
+  ids: z.array(z.string().uuid()).min(1)
 });
 
 export const companyEmployeeDirectorySchema = z.object({

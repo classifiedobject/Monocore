@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../lib/api';
 
 type Department = { id: string; name: string; parentId: string | null };
@@ -30,7 +30,7 @@ export default function OrgChartPage() {
   const [profileTitleId, setProfileTitleId] = useState('');
   const [profileManagerUserId, setProfileManagerUserId] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [deps, ts, teamRows, profileRows] = await Promise.all([
       apiFetch('/platform-api/org/departments'),
       apiFetch('/platform-api/org/titles'),
@@ -44,11 +44,11 @@ export default function OrgChartPage() {
     if (!profileUserId && teamRows[0]?.user?.id) {
       setProfileUserId(teamRows[0].user.id);
     }
-  };
+  }, [profileUserId]);
 
   useEffect(() => {
     load().catch(handleApiError);
-  }, []);
+  }, [load]);
 
   async function addDepartment(e: FormEvent) {
     e.preventDefault();
