@@ -64,11 +64,19 @@ export async function apiFetch(path: string, init?: RequestInit) {
     headers.set('x-csrf-token', csrfToken());
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers,
-    credentials: 'include'
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers,
+      credentials: 'include'
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new ApiError(0, 'API servisine ulaşılamadı. Backend servisinin çalıştığını kontrol edin.');
+    }
+    throw error;
+  }
 
   if (!res.ok) {
     const message = (await res.text()) || `HTTP ${res.status}`;
@@ -79,6 +87,11 @@ export async function apiFetch(path: string, init?: RequestInit) {
 }
 
 export function handleApiError(error: unknown) {
+  if (error instanceof ApiError && error.status === 0) {
+    console.warn(error.message);
+    return;
+  }
+
   if (error instanceof ApiError && error.status === 401) {
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth/')) {
       window.location.href = '/auth/login';
@@ -90,6 +103,11 @@ export function handleApiError(error: unknown) {
     if (typeof window !== 'undefined') {
       window.location.href = '/app/company';
     }
+    return;
+  }
+
+  if (error instanceof ApiError) {
+    console.warn(error.message);
     return;
   }
 

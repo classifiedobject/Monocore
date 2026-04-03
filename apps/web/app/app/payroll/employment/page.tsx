@@ -173,8 +173,12 @@ export default function PayrollEmploymentPage() {
       formData.append('departmentName', form.departmentName);
       formData.append('titleName', form.titleName);
       formData.append('arrivalDate', form.arrivalDate);
-      formData.append('sgkStartDate', form.sgkStartDate || '');
-      formData.append('exitDate', form.exitDate || '');
+      if (!editing?.sgkEntryDocumentVerified || entryFile) {
+        formData.append('sgkStartDate', form.sgkStartDate || '');
+      }
+      if (!editing?.sgkExitDocumentVerified || exitFile) {
+        formData.append('exitDate', form.exitDate || '');
+      }
       formData.append('insuranceStatus', form.insuranceStatus);
       formData.append('status', form.status);
       formData.append('identityNumberConfirmed', String(form.identityNumberConfirmed));
