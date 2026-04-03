@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch, handleApiError } from '../../../../lib/api';
 
@@ -85,6 +85,21 @@ export default function InventoryStockCountsPage() {
   const isPackageItem = Boolean(selectedItem?.packageUom && packageSize > 0);
   const computedTotal = isPackageItem ? asNum(closedPackageQty) * packageSize + asNum(openQtyBase) : asNum(countedQtyBase);
 
+  const loadInitial = useCallback(async () => {
+    const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
+      apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
+      apiFetch('/app-api/inventory/warehouses') as Promise<Warehouse[]>,
+      apiFetch('/app-api/inventory/items') as Promise<Item[] | ItemListResponse>,
+      apiFetch('/app-api/inventory/stock-counts') as Promise<Session[]>
+    ]);
+    const itemRows = Array.isArray(itemRes) ? itemRes : itemRes.rows;
+    setCaps(capsRes);
+    setWarehouses(warehouseRes);
+    setItems(itemRows);
+    setSessions(sessionRes);
+    if (!warehouseId && warehouseRes[0]?.id) setWarehouseId(warehouseRes[0].id);
+    if (!lineItemId && itemRows[0]?.id) setLineItemId(itemRows[0].id);
+  }, [lineItemId, warehouseId]);
   async function loadSessions() {
     const rows = (await apiFetch('/app-api/inventory/stock-counts')) as Session[];
     setSessions(rows);
@@ -96,23 +111,8 @@ export default function InventoryStockCountsPage() {
   }
 
   useEffect(() => {
-    const init = async () => {
-      const [capsRes, warehouseRes, itemRes, sessionRes] = await Promise.all([
-        apiFetch('/app-api/inventory/capabilities') as Promise<Capabilities>,
-        apiFetch('/app-api/inventory/warehouses') as Promise<Warehouse[]>,
-        apiFetch('/app-api/inventory/items') as Promise<Item[] | ItemListResponse>,
-        apiFetch('/app-api/inventory/stock-counts') as Promise<Session[]>
-      ]);
-      const itemRows = Array.isArray(itemRes) ? itemRes : itemRes.rows;
-      setCaps(capsRes);
-      setWarehouses(warehouseRes);
-      setItems(itemRows);
-      setSessions(sessionRes);
-      setWarehouseId((current) => current || warehouseRes[0]?.id || '');
-      setLineItemId((current) => current || itemRows[0]?.id || '');
-    };
-    init().catch(handleApiError);
-  }, []);
+    loadInitial().catch(handleApiError);
+  }, [loadInitial]);
 
   useEffect(() => {
     if (!selectedSessionId) {

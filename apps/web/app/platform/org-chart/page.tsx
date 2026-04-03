@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../lib/api';
 import { EmptyState, PageHeader } from '../../../components/readable-ui';
 
@@ -31,7 +31,7 @@ export default function OrgChartPage() {
   const [profileTitleId, setProfileTitleId] = useState('');
   const [profileManagerUserId, setProfileManagerUserId] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [deps, ts, teamRows, profileRows] = await Promise.all([
       apiFetch('/platform-api/org/departments'),
       apiFetch('/platform-api/org/titles'),
@@ -45,24 +45,11 @@ export default function OrgChartPage() {
     if (!profileUserId && teamRows[0]?.user?.id) {
       setProfileUserId(teamRows[0].user.id);
     }
-  };
+  }, [profileUserId]);
 
   useEffect(() => {
-    const init = async () => {
-      const [deps, ts, teamRows, profileRows] = await Promise.all([
-        apiFetch('/platform-api/org/departments'),
-        apiFetch('/platform-api/org/titles'),
-        apiFetch('/platform-api/team'),
-        apiFetch('/platform-api/org/profiles')
-      ]);
-      setDepartments(deps);
-      setTitles(ts);
-      setTeam(teamRows);
-      setProfiles(profileRows);
-      setProfileUserId((current) => current || teamRows[0]?.user?.id || '');
-    };
-    init().catch(handleApiError);
-  }, []);
+    load().catch(handleApiError);
+  }, [load]);
 
   async function addDepartment(e: FormEvent) {
     e.preventDefault();

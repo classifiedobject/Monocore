@@ -188,6 +188,13 @@ export class AppApiController {
     return this.appApi.listOrgDepartments(req.companyId);
   }
 
+  @Get('company/org/tree')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.read')
+  listOrgHierarchy(@Req() req: Request & { companyId: string }) {
+    return this.appApi.listOrgHierarchy(req.companyId);
+  }
+
   @Post('company/org/departments')
   @UseGuards(CompanyRbacGuard)
   @RequirePermissions('company:org.manage')
@@ -257,6 +264,13 @@ export class AppApiController {
   @RequirePermissions('company:org.manage')
   deleteCompanyDepartment(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.appApi.deleteOrgDepartment(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/org/departments/reorder')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  reorderOrgDepartments(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.reorderOrgDepartments(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Get('company/org/titles')
@@ -335,6 +349,13 @@ export class AppApiController {
   @RequirePermissions('company:org.manage')
   deleteCompanyTitle(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.appApi.deleteOrgTitle(req.user.id, req.companyId, id, req.ip, req.get('user-agent'));
+  }
+
+  @Post('company/org/titles/reorder')
+  @UseGuards(CompanyRbacGuard)
+  @RequirePermissions('company:org.manage')
+  reorderOrgTitles(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.appApi.reorderOrgTitles(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
   }
 
   @Get('company/org/employees')

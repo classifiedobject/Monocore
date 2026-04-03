@@ -5,8 +5,10 @@ import {
   acceptInviteSchema,
   applyRoleTemplateSchema,
   companyDepartmentSchema,
+  companyDepartmentReorderSchema,
   companyEmployeeDirectorySchema,
   companyTitleSchema,
+  companyTitleReorderSchema,
   createCompanySchema,
   createInviteSchema,
   demoGenerateSchema,
@@ -639,6 +641,43 @@ export class AppApiService {
     );
   }
 
+  async listOrgHierarchy(companyId: string) {
+    const departments = await this.prisma.companyDepartment.findMany({
+      where: { companyId },
+      include: {
+        titles: {
+          include: {
+            _count: { select: { employees: true } }
+          },
+          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+        },
+        _count: {
+          select: {
+            children: true,
+            titles: true
+          }
+        }
+      },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+    });
+
+    return departments.map((department) => ({
+      ...department,
+      canDelete: department._count.children === 0 && department._count.titles === 0,
+      deleteBlockReason:
+        department._count.children > 0
+          ? 'Department has child departments'
+          : department._count.titles > 0
+            ? 'Department has titles'
+            : null,
+      titles: department.titles.map((title) => ({
+        ...title,
+        canDelete: title._count.employees === 0,
+        deleteBlockReason: title._count.employees > 0 ? 'Title is assigned to employees' : null
+      }))
+    }));
+  }
+
   async createOrgDepartment(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
     try {
       const body = companyDepartmentSchema.parse(payload);
@@ -835,6 +874,62 @@ export class AppApiService {
     }
   }
 
+  async reorderOrgDepartments(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    try {
+      const body = companyDepartmentReorderSchema.parse(payload);
+      const [existing, totalCount] = await Promise.all([
+        this.prisma.companyDepartment.findMany({
+          where: { companyId, id: { in: body.ids } },
+          select: { id: true }
+        }),
+        this.prisma.companyDepartment.count({ where: { companyId } })
+      ]);
+
+      if (existing.length !== body.ids.length || totalCount !== body.ids.length) {
+        throw new BadRequestException('Department reorder payload must include all tenant departments exactly once');
+      }
+
+      const uniqueIds = new Set(body.ids);
+      if (uniqueIds.size !== body.ids.length) {
+        throw new BadRequestException('Department reorder payload contains duplicate ids');
+      }
+
+      await this.prisma.$transaction(
+        body.ids.map((id, index) =>
+          this.prisma.companyDepartment.update({
+            where: { id },
+            data: { sortOrder: (index + 1) * 100 }
+          })
+        )
+      );
+
+      await this.audit.logCompany({
+        actorUserId,
+        companyId,
+        action: 'company.org.department.reorder',
+        entityType: 'company_department',
+        entityId: undefined,
+        metadata: { ids: body.ids, success: true },
+        ip,
+        userAgent
+      });
+
+      return this.listOrgHierarchy(companyId);
+    } catch (error) {
+      await this.audit.logCompany({
+        actorUserId,
+        companyId,
+        action: 'company.org.department.reorder',
+        entityType: 'company_department',
+        entityId: undefined,
+        metadata: { payload: this.safeJson(payload), success: false, reason: this.errorReason(error) },
+        ip,
+        userAgent
+      });
+      throw error;
+    }
+  }
+
   listOrgTitles(companyId: string) {
     return this.prisma.companyTitle.findMany({
       where: { companyId },
@@ -866,9 +961,9 @@ export class AppApiService {
           departmentId: body.departmentId,
           name: body.name,
           sortOrder: body.sortOrder ?? 1000,
-          tipWeight: new Prisma.Decimal(body.tipWeight),
-          isTipEligible: body.isTipEligible,
-          departmentAggregate: body.departmentAggregate,
+          tipWeight: new Prisma.Decimal(body.tipWeight ?? 1),
+          isTipEligible: body.isTipEligible ?? true,
+          departmentAggregate: body.departmentAggregate ?? false,
           isActive: body.isActive ?? true
         },
         include: { department: true }
@@ -1025,6 +1120,68 @@ export class AppApiService {
         entityType: 'company_title',
         entityId: titleId,
         metadata: { success: false, reason: this.errorReason(error) },
+        ip,
+        userAgent
+      });
+      throw error;
+    }
+  }
+
+  async reorderOrgTitles(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    try {
+      const body = companyTitleReorderSchema.parse(payload);
+      const department = await this.prisma.companyDepartment.findUnique({
+        where: { id: body.departmentId },
+        select: { id: true, companyId: true }
+      });
+      if (!department || department.companyId !== companyId) {
+        throw new ForbiddenException('Department is not owned by tenant');
+      }
+
+      const existing = await this.prisma.companyTitle.findMany({
+        where: { companyId, departmentId: body.departmentId },
+        select: { id: true }
+      });
+
+      const uniqueIds = new Set(body.ids);
+      if (uniqueIds.size !== body.ids.length) {
+        throw new BadRequestException('Title reorder payload contains duplicate ids');
+      }
+
+      const existingIds = new Set(existing.map((row) => row.id));
+      if (existing.length !== body.ids.length || body.ids.some((id) => !existingIds.has(id))) {
+        throw new BadRequestException('Title reorder payload must include all department titles exactly once');
+      }
+
+      await this.prisma.$transaction(
+        body.ids.map((id, index) =>
+          this.prisma.companyTitle.update({
+            where: { id },
+            data: { sortOrder: (index + 1) * 100 }
+          })
+        )
+      );
+
+      await this.audit.logCompany({
+        actorUserId,
+        companyId,
+        action: 'company.org.title.reorder',
+        entityType: 'company_title',
+        entityId: undefined,
+        metadata: { departmentId: body.departmentId, ids: body.ids, success: true },
+        ip,
+        userAgent
+      });
+
+      return this.listOrgHierarchy(companyId);
+    } catch (error) {
+      await this.audit.logCompany({
+        actorUserId,
+        companyId,
+        action: 'company.org.title.reorder',
+        entityType: 'company_title',
+        entityId: undefined,
+        metadata: { payload: this.safeJson(payload), success: false, reason: this.errorReason(error) },
         ip,
         userAgent
       });
