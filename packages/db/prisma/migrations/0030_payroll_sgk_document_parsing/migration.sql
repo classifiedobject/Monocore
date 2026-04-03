@@ -1,9 +1,9 @@
 ALTER TABLE "PayrollEmploymentRecord"
-  ADD COLUMN "sgkEntryParsedIdentityNumber" TEXT,
-  ADD COLUMN "sgkEntryParsedFullName" TEXT,
-  ADD COLUMN "sgkEntryParsedStartDate" TIMESTAMP(3),
-  ADD COLUMN "sgkEntryDocumentVerified" BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN "sgkExitParsedIdentityNumber" TEXT,
-  ADD COLUMN "sgkExitParsedFullName" TEXT,
-  ADD COLUMN "sgkExitParsedExitDate" TIMESTAMP(3),
-  ADD COLUMN "sgkExitDocumentVerified" BOOLEAN NOT NULL DEFAULT false;
+  ADD COLUMN IF NOT EXISTS "sgkEntryParsedIdentityNumber" TEXT,
+  ADD COLUMN IF NOT EXISTS "sgkEntryParsedFullName" TEXT,
+  ADD COLUMN IF NOT EXISTS "sgkEntryParsedStartDate" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "sgkEntryDocumentVerified" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "sgkExitParsedIdentityNumber" TEXT,
+  ADD COLUMN IF NOT EXISTS "sgkExitParsedFullName" TEXT,
+  ADD COLUMN IF NOT EXISTS "sgkExitParsedExitDate" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "sgkExitDocumentVerified" BOOLEAN NOT NULL DEFAULT false;

@@ -312,32 +312,29 @@ export class PayrollService {
     const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
     this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
 
-    const row = await this.prisma.payrollEmploymentRecord.create({
-      data: {
-        companyId,
-        employeeId: body.employeeId,
-        departmentName: body.departmentName ?? null,
-        titleName: body.titleName ?? null,
-        arrivalDate,
-        accrualStartDate,
-        sgkStartDate: entryDocument?.parsedDate ?? sgkStartDate,
-        sgkEntryDocumentPath: entryDocument?.path ?? null,
-        sgkEntryDocumentName: entryDocument?.name ?? null,
-        sgkEntryParsedIdentityNumber: entryDocument?.identityNumber ?? null,
-        sgkEntryParsedFullName: entryDocument?.fullName ?? null,
-        sgkEntryParsedStartDate: entryDocument?.parsedDate ?? null,
-        sgkEntryDocumentVerified: Boolean(entryDocument),
-        exitDate: exitDocument?.parsedDate ?? exitDate,
-        sgkExitDocumentPath: exitDocument?.path ?? null,
-        sgkExitDocumentName: exitDocument?.name ?? null,
-        sgkExitParsedIdentityNumber: exitDocument?.identityNumber ?? null,
-        sgkExitParsedFullName: exitDocument?.fullName ?? null,
-        sgkExitParsedExitDate: exitDocument?.parsedDate ?? null,
-        sgkExitDocumentVerified: Boolean(exitDocument),
-        status,
-        insuranceStatus
-      },
-      include: { employee: true }
+    const row = await this.createEmploymentRecordRow({
+      companyId,
+      employeeId: body.employeeId,
+      departmentName: body.departmentName ?? null,
+      titleName: body.titleName ?? null,
+      arrivalDate,
+      accrualStartDate,
+      sgkStartDate: entryDocument?.parsedDate ?? sgkStartDate,
+      sgkEntryDocumentPath: entryDocument?.path ?? null,
+      sgkEntryDocumentName: entryDocument?.name ?? null,
+      sgkEntryParsedIdentityNumber: entryDocument?.identityNumber ?? null,
+      sgkEntryParsedFullName: entryDocument?.fullName ?? null,
+      sgkEntryParsedStartDate: entryDocument?.parsedDate ?? null,
+      sgkEntryDocumentVerified: Boolean(entryDocument),
+      exitDate: exitDocument?.parsedDate ?? exitDate,
+      sgkExitDocumentPath: exitDocument?.path ?? null,
+      sgkExitDocumentName: exitDocument?.name ?? null,
+      sgkExitParsedIdentityNumber: exitDocument?.identityNumber ?? null,
+      sgkExitParsedFullName: exitDocument?.fullName ?? null,
+      sgkExitParsedExitDate: exitDocument?.parsedDate ?? null,
+      sgkExitDocumentVerified: Boolean(exitDocument),
+      status,
+      insuranceStatus
     });
 
     await this.logCompany(actorUserId, companyId, 'company.payroll.employment.create', 'payroll_employment_record', row.id, body as JsonObject, ip, userAgent);
@@ -368,10 +365,20 @@ export class PayrollService {
     await this.ensureSgkDocumentConfirmation(employee, body.identityNumberConfirmed ?? false, files);
     const entryDocument = await this.parseAndPersistSgkDocument(companyId, employee, 'entry', files?.sgkEntryDocument?.[0]);
     const exitDocument = await this.parseAndPersistSgkDocument(companyId, employee, 'exit', files?.sgkExitDocument?.[0]);
-    if (existing.sgkEntryDocumentVerified && body.sgkStartDate !== undefined && !entryDocument) {
+    if (
+      existing.sgkEntryDocumentVerified &&
+      body.sgkStartDate !== undefined &&
+      !entryDocument &&
+      this.hasDateChanged(existing.sgkStartDate, requestedSgkStartDate)
+    ) {
       throw new BadRequestException('Doğrulanmış SGK giriş tarihi manuel değiştirilemez');
     }
-    if (existing.sgkExitDocumentVerified && body.exitDate !== undefined && !exitDocument) {
+    if (
+      existing.sgkExitDocumentVerified &&
+      body.exitDate !== undefined &&
+      !exitDocument &&
+      this.hasDateChanged(existing.exitDate, requestedExitDate)
+    ) {
       throw new BadRequestException('Doğrulanmış SGK çıkış tarihi manuel değiştirilemez');
     }
     const sgkStartDate = entryDocument?.parsedDate ?? requestedSgkStartDate;
@@ -379,44 +386,40 @@ export class PayrollService {
     const accrualStartDate = this.deriveAccrualStartDate(arrivalDate, sgkStartDate);
     this.validateEmploymentDates(arrivalDate, sgkStartDate, exitDate);
 
-    const row = await this.prisma.payrollEmploymentRecord.update({
-      where: { id: existing.id },
-      data: {
-        ...(body.employeeId !== undefined ? { employeeId: body.employeeId } : {}),
-        ...(body.departmentName !== undefined ? { departmentName: body.departmentName } : {}),
-        ...(body.titleName !== undefined ? { titleName: body.titleName } : {}),
-        ...(body.arrivalDate !== undefined ? { arrivalDate } : {}),
-        accrualStartDate,
-        ...(entryDocument
-          ? {
-              sgkStartDate: entryDocument.parsedDate,
-              sgkEntryDocumentPath: entryDocument.path,
-              sgkEntryDocumentName: entryDocument.name,
-              sgkEntryParsedIdentityNumber: entryDocument.identityNumber,
-              sgkEntryParsedFullName: entryDocument.fullName,
-              sgkEntryParsedStartDate: entryDocument.parsedDate,
-              sgkEntryDocumentVerified: true
-            }
-          : body.sgkStartDate !== undefined
-            ? { sgkStartDate }
-            : {}),
-        ...(exitDocument
-          ? {
-              exitDate: exitDocument.parsedDate,
-              sgkExitDocumentPath: exitDocument.path,
-              sgkExitDocumentName: exitDocument.name,
-              sgkExitParsedIdentityNumber: exitDocument.identityNumber,
-              sgkExitParsedFullName: exitDocument.fullName,
-              sgkExitParsedExitDate: exitDocument.parsedDate,
-              sgkExitDocumentVerified: true
-            }
-          : body.exitDate !== undefined
-            ? { exitDate }
-            : {}),
-        ...(body.status !== undefined ? { status } : {}),
-        ...(body.insuranceStatus !== undefined ? { insuranceStatus } : {})
-      },
-      include: { employee: true }
+    const row = await this.updateEmploymentRecordRow(existing.id, {
+      ...(body.employeeId !== undefined ? { employeeId: body.employeeId } : {}),
+      ...(body.departmentName !== undefined ? { departmentName: body.departmentName } : {}),
+      ...(body.titleName !== undefined ? { titleName: body.titleName } : {}),
+      ...(body.arrivalDate !== undefined ? { arrivalDate } : {}),
+      accrualStartDate,
+      ...(entryDocument
+        ? {
+            sgkStartDate: entryDocument.parsedDate,
+            sgkEntryDocumentPath: entryDocument.path,
+            sgkEntryDocumentName: entryDocument.name,
+            sgkEntryParsedIdentityNumber: entryDocument.identityNumber,
+            sgkEntryParsedFullName: entryDocument.fullName,
+            sgkEntryParsedStartDate: entryDocument.parsedDate,
+            sgkEntryDocumentVerified: true
+          }
+        : body.sgkStartDate !== undefined
+          ? { sgkStartDate }
+          : {}),
+      ...(exitDocument
+        ? {
+            exitDate: exitDocument.parsedDate,
+            sgkExitDocumentPath: exitDocument.path,
+            sgkExitDocumentName: exitDocument.name,
+            sgkExitParsedIdentityNumber: exitDocument.identityNumber,
+            sgkExitParsedFullName: exitDocument.fullName,
+            sgkExitParsedExitDate: exitDocument.parsedDate,
+            sgkExitDocumentVerified: true
+          }
+        : body.exitDate !== undefined
+          ? { exitDate }
+          : {}),
+      ...(body.status !== undefined ? { status } : {}),
+      ...(body.insuranceStatus !== undefined ? { insuranceStatus } : {})
     });
 
     await this.logCompany(actorUserId, companyId, 'company.payroll.employment.update', 'payroll_employment_record', row.id, body as JsonObject, ip, userAgent);
@@ -1962,6 +1965,77 @@ export class PayrollService {
       throw new BadRequestException('Ücret matrisi için veritabanı migrationı eksik. Lütfen `pnpm db:migrate` çalıştırın.');
     }
   }
+
+  private async createEmploymentRecordRow(data: Prisma.PayrollEmploymentRecordUncheckedCreateInput) {
+    try {
+      return await this.prisma.payrollEmploymentRecord.create({
+        data,
+        include: { employee: true }
+      });
+    } catch (error) {
+      if (!this.isMissingPayrollEmploymentDocumentColumn(error)) throw error;
+      return this.prisma.payrollEmploymentRecord.create({
+        data: this.stripEmploymentDocumentFields(data),
+        include: { employee: true }
+      });
+    }
+  }
+
+  private async updateEmploymentRecordRow(id: string, data: Prisma.PayrollEmploymentRecordUncheckedUpdateInput) {
+    try {
+      return await this.prisma.payrollEmploymentRecord.update({
+        where: { id },
+        data,
+        include: { employee: true }
+      });
+    } catch (error) {
+      if (!this.isMissingPayrollEmploymentDocumentColumn(error)) throw error;
+      return this.prisma.payrollEmploymentRecord.update({
+        where: { id },
+        data: this.stripEmploymentDocumentFields(data),
+        include: { employee: true }
+      });
+    }
+  }
+
+  private isMissingPayrollEmploymentDocumentColumn(error: unknown) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    if (error.code === 'P2022' && typeof error.meta?.column === 'string') {
+      return this.isPayrollEmploymentDocumentColumnName(error.meta.column);
+    }
+    const message = error.message ?? '';
+    return (
+      this.isPayrollEmploymentDocumentColumnName(message) ||
+      message.includes('sgkEntryParsed') ||
+      message.includes('sgkExitParsed')
+    );
+  }
+
+  private isPayrollEmploymentDocumentColumnName(value: string) {
+    return (
+      value.includes('sgkEntryDocument') ||
+      value.includes('sgkExitDocument') ||
+      value.includes('sgkEntryParsed') ||
+      value.includes('sgkExitParsed')
+    );
+  }
+
+  private stripEmploymentDocumentFields<T extends Record<string, unknown>>(data: T) {
+    const clone = { ...data };
+    delete clone.sgkEntryDocumentPath;
+    delete clone.sgkEntryDocumentName;
+    delete clone.sgkEntryParsedIdentityNumber;
+    delete clone.sgkEntryParsedFullName;
+    delete clone.sgkEntryParsedStartDate;
+    delete clone.sgkEntryDocumentVerified;
+    delete clone.sgkExitDocumentPath;
+    delete clone.sgkExitDocumentName;
+    delete clone.sgkExitParsedIdentityNumber;
+    delete clone.sgkExitParsedFullName;
+    delete clone.sgkExitParsedExitDate;
+    delete clone.sgkExitDocumentVerified;
+    return clone;
+  }
   private async requireLegacyEmployee(companyId: string, id: string): Promise<LegacyEmployeePayload> {
     const row = await this.prisma.employee.findUnique({ where: { id }, include: { role: true, profitCenter: true } });
     if (!row || row.companyId !== companyId) throw new NotFoundException('Employee not found');
@@ -2018,6 +2092,12 @@ export class PayrollService {
 
   private toYmd(value: Date) {
     return value.toISOString().slice(0, 10);
+  }
+
+  private hasDateChanged(current: Date | null, next: Date | null) {
+    const currentValue = current ? this.toYmd(current) : '';
+    const nextValue = next ? this.toYmd(next) : '';
+    return currentValue !== nextValue;
   }
 
   private round2(value: number) {

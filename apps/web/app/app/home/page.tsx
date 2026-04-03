@@ -6,9 +6,18 @@ import { apiFetch, handleApiError } from '../../../lib/api';
 
 export default function HomePage() {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch('/app-api/dashboard').then(setData).catch(handleApiError);
+    apiFetch('/app-api/dashboard')
+      .then((result) => {
+        setData(result);
+        setErrorMessage(null);
+      })
+      .catch((error) => {
+        setErrorMessage(error instanceof Error ? error.message : 'Dashboard verisi yüklenemedi.');
+        handleApiError(error);
+      });
   }, []);
 
   const metrics = data && typeof data === 'object' && 'metrics' in data ? (data.metrics as Record<string, unknown>) : {};
@@ -49,6 +58,11 @@ export default function HomePage() {
             )}
           </SectionCard>
         </>
+      ) : errorMessage ? (
+        <EmptyState
+          title="Dashboard verisi alınamadı"
+          description={`${errorMessage} Uygulama kabuğu çalışıyor, ancak API bağlantısı hazır değil.`}
+        />
       ) : (
         <EmptyState title="Veri yükleniyor" description="Dashboard bilgisi henüz gelmedi." />
       )}
