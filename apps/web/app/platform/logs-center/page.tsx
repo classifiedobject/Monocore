@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../lib/api';
 
 type LogItem = {
@@ -22,7 +22,7 @@ export default function LogsCenterPage() {
   const [action, setAction] = useState('');
   const [actorUserId, setActorUserId] = useState('');
 
-  const load = async (targetPage = page) => {
+  const load = useCallback(async (targetPage = page) => {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) });
     if (from) params.set('from', from);
     if (to) params.set('to', to);
@@ -39,11 +39,11 @@ export default function LogsCenterPage() {
     setItems(response.items);
     setTotal(response.total);
     setPage(response.page);
-  };
+  }, [action, actorUserId, from, page, pageSize, to]);
 
   useEffect(() => {
     load().catch(handleApiError);
-  }, []);
+  }, [load]);
 
   const maxPage = Math.max(1, Math.ceil(total / pageSize));
 

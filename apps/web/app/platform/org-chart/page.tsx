@@ -1,7 +1,8 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, handleApiError } from '../../../lib/api';
+import { EmptyState, PageHeader } from '../../../components/readable-ui';
 
 type Department = { id: string; name: string; parentId: string | null };
 type Title = { id: string; name: string };
@@ -30,7 +31,7 @@ export default function OrgChartPage() {
   const [profileTitleId, setProfileTitleId] = useState('');
   const [profileManagerUserId, setProfileManagerUserId] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [deps, ts, teamRows, profileRows] = await Promise.all([
       apiFetch('/platform-api/org/departments'),
       apiFetch('/platform-api/org/titles'),
@@ -44,11 +45,11 @@ export default function OrgChartPage() {
     if (!profileUserId && teamRows[0]?.user?.id) {
       setProfileUserId(teamRows[0].user.id);
     }
-  };
+  }, [profileUserId]);
 
   useEffect(() => {
     load().catch(handleApiError);
-  }, []);
+  }, [load]);
 
   async function addDepartment(e: FormEvent) {
     e.preventDefault();
@@ -105,7 +106,10 @@ export default function OrgChartPage() {
 
   return (
     <section className="space-y-5">
-      <h1 className="text-3xl font-bold">Org Chart</h1>
+      <PageHeader
+        title="Organizasyon Şeması"
+        description="Platform ekibinin departman, unvan ve yönetici ilişkilerini bu ekrandan düzenleyebilirsin."
+      />
 
       <div className="grid gap-4 md:grid-cols-2">
         <form className="space-y-2 rounded border bg-white p-3" onSubmit={addDepartment}>
@@ -157,12 +161,28 @@ export default function OrgChartPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <article className="rounded border bg-white p-3">
-          <h2 className="mb-2 text-lg font-semibold">Department Tree</h2>
-          {tree}
+          <h2 className="mb-2 text-lg font-semibold">Departman Ağacı</h2>
+          {tree.length > 0 ? tree : <EmptyState title="Departman yok" description="Henüz platform departmanı oluşturulmadı." />}
         </article>
         <article className="rounded border bg-white p-3">
-          <h2 className="mb-2 text-lg font-semibold">Profiles</h2>
-          <pre className="text-xs">{JSON.stringify(profiles, null, 2)}</pre>
+          <h2 className="mb-2 text-lg font-semibold">Atanmış Profiller</h2>
+          {profiles.length === 0 ? (
+            <EmptyState title="Profil yok" description="Henüz kullanıcı profili atanmamış." />
+          ) : (
+            <div className="space-y-2">
+              {profiles.map((profile) => (
+                <article key={profile.userId} className="rounded border border-slate-200 p-3">
+                  <p className="font-medium text-slate-900">{profile.user.fullName}</p>
+                  <p className="text-sm text-slate-600">{profile.user.email}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Departman: {departments.find((dep) => dep.id === profile.departmentId)?.name ?? 'Yok'} · Unvan:{' '}
+                    {titles.find((title) => title.id === profile.titleId)?.name ?? 'Yok'} · Yönetici:{' '}
+                    {team.find((member) => member.user.id === profile.managerUserId)?.user.fullName ?? 'Yok'}
+                  </p>
+                </article>
+              ))}
+            </div>
+          )}
         </article>
       </div>
     </section>

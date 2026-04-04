@@ -253,6 +253,7 @@ model User {
   taskCommentsAuthored TaskComment[] @relation("task_comment_author")
   inventoryMovementsCreated InventoryStockMovement[] @relation("inventory_movement_creator")
   inventoryStockCountsCreated InventoryStockCountSession[] @relation("inventory_stock_count_creator")
+  inventoryItemSavedViewsCreated InventoryItemSavedView[]
   salesOrdersCreated SalesOrder[] @relation("sales_order_creator")
   reservationsCreated Reservation[] @relation("reservation_creator")
   tipAdvancesApproved TipAdvance[] @relation("tip_advance_approver")
@@ -372,6 +373,7 @@ model Company {
   inventoryStockMovements InventoryStockMovement[]
   inventoryStockCountSessions InventoryStockCountSession[]
   inventoryStockCountLines InventoryStockCountLine[]
+  inventoryItemSavedViews InventoryItemSavedView[]
   salesProducts   SalesProduct[]
   recipes         Recipe[]
   recipeLines     RecipeLine[]
@@ -1233,6 +1235,7 @@ model InventoryItem {
   companyId           String
   name                String
   sku                 String?
+  code                String?
   unit                String
   brandId             String?
   supplierId          String?
@@ -1245,6 +1248,7 @@ model InventoryItem {
   purchaseVatRate     Decimal  @default(0.2) @db.Decimal(6, 4)
   listPriceExVat      Decimal? @db.Decimal(14, 4)
   discountRate        Decimal  @default(0) @db.Decimal(6, 4)
+  priceDate           DateTime @default(now())
   computedPriceIncVat Decimal? @db.Decimal(14, 4)
   lastPurchaseUnitCost Decimal? @db.Decimal(14, 4)
   isActive            Boolean  @default(true)
@@ -1265,12 +1269,35 @@ model InventoryItem {
   @@index([companyId, supplierId])
 }
 
+model InventoryItemSavedView {
+  id            String   @id @default(uuid())
+  companyId     String
+  name          String
+  isDefault     Boolean  @default(false)
+  filtersJson   Json
+  searchQuery   String?
+  sortBy        String?
+  sortDirection String?
+  pageSize      Int?
+  createdByUserId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdByUser User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, isDefault])
+  @@index([companyId, name])
+}
+
 model InventorySupplier {
   id           String   @id @default(uuid())
   companyId    String
   shortName    String
   legalName    String
   address      String?
+  addressLine  String?
+  city         String?
+  district     String?
   taxOffice    String?
   taxNumber    String?
   contactName  String?

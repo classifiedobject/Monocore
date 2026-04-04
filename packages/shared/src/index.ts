@@ -48,10 +48,19 @@ export const companyTitleSchema = z.object({
   departmentId: z.string().uuid(),
   name: z.string().min(2).max(120),
   sortOrder: z.coerce.number().int().min(0).optional(),
-  tipWeight: z.coerce.number().nonnegative().max(1000),
-  isTipEligible: z.boolean().default(true),
-  departmentAggregate: z.boolean().default(false),
+  tipWeight: z.coerce.number().nonnegative().max(1000).optional(),
+  isTipEligible: z.boolean().optional(),
+  departmentAggregate: z.boolean().optional(),
   isActive: z.boolean().optional()
+});
+
+export const companyDepartmentReorderSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1)
+});
+
+export const companyTitleReorderSchema = z.object({
+  departmentId: z.string().uuid(),
+  ids: z.array(z.string().uuid()).min(1)
 });
 
 export const companyEmployeeDirectorySchema = z.object({
@@ -427,6 +436,7 @@ export const inventoryWarehouseSchema = z.object({
 const inventoryItemBaseSchema = z.object({
   name: z.string().min(2).max(160),
   sku: z.string().max(80).nullable().optional(),
+  code: z.string().max(40).nullable().optional(),
   unit: z.string().min(1).max(20).default('piece'),
   brandId: z.string().uuid().nullable().optional(),
   supplierId: z.string().uuid().nullable().optional(),
@@ -439,6 +449,7 @@ const inventoryItemBaseSchema = z.object({
   purchaseVatRate: z.coerce.number().min(0).max(1).default(0.2),
   listPriceExVat: z.coerce.number().nonnegative().nullable().optional(),
   discountRate: z.coerce.number().min(0).max(1).default(0),
+  priceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sortOrder: z.coerce.number().int().min(0).default(1000),
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable().optional(),
   isActive: z.boolean().optional()
@@ -460,6 +471,101 @@ export const inventoryItemUpdateSchema = inventoryItemBaseSchema.partial().super
 
 export const inventoryItemCostSchema = z.object({
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable()
+});
+
+export const inventoryItemBulkStatusSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  isActive: z.boolean()
+});
+
+export const inventoryItemBulkExportSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  format: z.enum(['csv', 'excel'])
+});
+
+export const inventoryItemListQuerySchema = z.object({
+  search: z.string().trim().min(1).optional(),
+  brandId: z.string().uuid().optional(),
+  status: z.enum(['all', 'active', 'inactive']).optional(),
+  mainStockArea: z.enum(['BAR', 'KITCHEN', 'OTHER']).optional(),
+  attributeCategory: z.enum(['ALCOHOL', 'SOFT', 'KITCHEN', 'OTHER']).optional(),
+  subCategory: z.string().trim().min(1).optional(),
+  sortBy: z
+    .enum([
+      'name',
+      'brand',
+      'supplier',
+      'mainStockArea',
+      'attributeCategory',
+      'baseUom',
+      'purchaseVatRate',
+      'listPriceExVat',
+      'discountRate',
+      'computedPriceIncVat',
+      'isActive',
+      'sortOrder'
+    ])
+    .optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional()
+});
+
+const inventoryItemSavedViewFiltersSchema = z.object({
+  brandId: z.string().uuid().nullable().optional(),
+  status: z.enum(['all', 'active', 'inactive']).nullable().optional(),
+  mainStockArea: z.enum(['BAR', 'KITCHEN', 'OTHER']).nullable().optional(),
+  attributeCategory: z.enum(['ALCOHOL', 'SOFT', 'KITCHEN', 'OTHER']).nullable().optional(),
+  subCategory: z.string().trim().max(120).nullable().optional()
+});
+
+export const inventoryItemSavedViewSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  isDefault: z.boolean().optional(),
+  filtersJson: inventoryItemSavedViewFiltersSchema.default({}),
+  searchQuery: z.string().trim().max(200).nullable().optional(),
+  sortBy: inventoryItemListQuerySchema.shape.sortBy.nullable().optional(),
+  sortDirection: inventoryItemListQuerySchema.shape.sortDirection.nullable().optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).nullable().optional()
+});
+
+export const inventoryItemSavedViewUpdateSchema = inventoryItemSavedViewSchema.partial();
+
+export const inventoryItemQuerySchema = z.object({
+  sortBy: z
+    .enum(['code', 'brand', 'packageSizeBase', 'subCategory', 'priceDate', 'listPriceExVat', 'discountRate', 'grossPrice', 'status', 'name'])
+    .optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  search: z.string().max(160).optional(),
+  brandId: z.string().uuid().optional(),
+  status: z.enum(['active', 'inactive', 'all']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50)
+});
+
+export const inventoryItemsExportQuerySchema = inventoryItemQuerySchema.extend({
+  scope: z.enum(['filtered', 'all']).default('filtered')
+});
+
+export const inventoryItemImportRowSchema = z.object({
+  anaFirma: z.string().min(1).optional(),
+  urunAdi: z.string().min(1),
+  miktari: z.union([z.string(), z.number()]),
+  stokTakipBirimi: z.string().min(1),
+  listeFiyatiKdvHaric: z.union([z.string(), z.number()]).optional(),
+  iskontosu: z.union([z.string(), z.number()]).optional(),
+  fiyatTarihi: z.string().optional(),
+  alisKdvOrani: z.union([z.string(), z.number()]).optional(),
+  gelirMerkeziKategorisi: z.string().optional(),
+  stokKategorisi: z.string().optional(),
+  urunGrubu: z.string().optional(),
+  distributor: z.string().optional(),
+  paketTipi: z.string().optional(),
+  aktifMi: z.union([z.string(), z.boolean()]).optional()
+});
+
+export const inventoryItemImportConfirmSchema = z.object({
+  rows: z.array(inventoryItemImportRowSchema).min(1)
 });
 
 export const inventoryMovementSchema = z.object({
@@ -510,8 +616,16 @@ export const inventorySupplierSchema = z.object({
   shortName: z.string().min(1).max(140),
   legalName: z.string().min(1).max(240),
   address: z.string().max(400).nullable().optional(),
+  addressLine: z.string().max(400).nullable().optional(),
+  city: z.string().max(120).nullable().optional(),
+  district: z.string().max(120).nullable().optional(),
   taxOffice: z.string().max(120).nullable().optional(),
-  taxNumber: z.string().max(80).nullable().optional(),
+  taxNumber: z
+    .string()
+    .max(80)
+    .regex(/^\d*$/, 'taxNumber must contain only digits')
+    .nullable()
+    .optional(),
   contactName: z.string().max(140).nullable().optional(),
   contactPhone: z.string().max(80).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
@@ -519,11 +633,39 @@ export const inventorySupplierSchema = z.object({
   sortOrder: z.coerce.number().int().min(0).optional()
 });
 
+export const inventorySupplierQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  sortBy: z.enum(['shortName', 'legalName', 'taxOffice', 'taxNumber', 'status']).optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  filterMissingBrandLink: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      return value === 'true';
+    })
+});
+
 export const inventoryBrandSchema = z.object({
   name: z.string().min(1).max(160),
   shortName: z.string().max(80).nullable().optional(),
   isActive: z.boolean().optional(),
   sortOrder: z.coerce.number().int().min(0).optional()
+});
+
+export const inventoryBrandQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  sortBy: z.enum(['name', 'status', 'supplier']).optional(),
+  sortDirection: z.enum(['asc', 'desc']).optional(),
+  filterMissingSupplier: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      return value === 'true';
+    })
 });
 
 export const inventoryBrandSupplierLinkSchema = z.object({
