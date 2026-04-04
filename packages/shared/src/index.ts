@@ -582,6 +582,38 @@ export const executiveDashboardQuerySchema = z.object({
 export const payrollEmployeeSchema = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
+  identityNumber: z.string().max(30).nullable().optional(),
+  gender: z.enum(['female', 'male', 'other', 'unspecified']).nullable().optional(),
+  birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  ibanOrBankAccount: z.string().max(140).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const payrollEmployeeImportRowSchema = z.object({
+  firstName: z.string().trim().max(100).optional().default(''),
+  lastName: z.string().trim().max(100).optional().default(''),
+  identityNumber: z.string().trim().max(30).optional().default(''),
+  birthDate: z.string().trim().optional().default(''),
+  iban: z.string().trim().max(140).optional().default('')
+});
+
+export const payrollEmployeeImportPreviewSchema = z.object({
+  rows: z.array(payrollEmployeeImportRowSchema).min(1).max(1000)
+});
+
+export const payrollEmployeeImportConfirmSchema = z.object({
+  rows: z.array(payrollEmployeeImportRowSchema).min(1).max(1000)
+});
+
+export const payrollEmployeeQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  status: z.enum(['active', 'inactive', 'all']).optional()
+});
+
+export const payrollLegacyEmployeeSchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
   email: z.string().email().max(140).nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   roleId: z.string().uuid().nullable().optional(),
@@ -593,6 +625,65 @@ export const payrollEmployeeSchema = z.object({
   tipWeight: z.coerce.number().positive().max(1000).optional(),
   department: z.enum(['service', 'bar', 'kitchen', 'support', 'other']).optional(),
   isActive: z.boolean().optional()
+});
+
+export const payrollEmploymentRecordSchema = z.object({
+  employeeId: z.string().uuid(),
+  departmentName: z.string().max(120).nullable().optional(),
+  titleName: z.string().max(120).nullable().optional(),
+  arrivalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  sgkStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  exitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  sgkEntryDocumentName: z.string().max(255).nullable().optional(),
+  sgkEntryDocumentPath: z.string().max(2000).nullable().optional(),
+  sgkExitDocumentName: z.string().max(255).nullable().optional(),
+  sgkExitDocumentPath: z.string().max(2000).nullable().optional(),
+  identityNumberConfirmed: z.boolean().optional(),
+  status: z.enum(['draft', 'active', 'exited']).optional(),
+  insuranceStatus: z.enum(['pending', 'insured', 'exited']).optional()
+});
+
+export const payrollEmploymentRecordQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  status: z.enum(['draft', 'active', 'exited', 'all']).optional(),
+  employeeId: z.string().uuid().optional()
+});
+
+export const payrollEmploymentExitSchema = z.object({
+  exitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  insuranceStatus: z.enum(['pending', 'insured', 'exited']).optional()
+});
+
+export const payrollCompensationProfileSchema = z.object({
+  employmentRecordId: z.string().uuid(),
+  matrixRowId: z.string().uuid(),
+  overtimeEligible: z.boolean().optional(),
+  bonusEligible: z.boolean().optional(),
+  handCashAllowed: z.boolean().optional(),
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const payrollCompensationProfileQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  state: z.enum(['active', 'history', 'all']).optional(),
+  employmentRecordId: z.string().uuid().optional()
+});
+
+export const payrollCompensationMatrixRowSchema = z.object({
+  targetAccrualSalary: z.coerce.number().nonnegative(),
+  officialNetSalary: z.coerce.number().nonnegative(),
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional()
+});
+
+export const payrollCompensationMatrixQuerySchema = z.object({
+  search: z.string().max(120).optional(),
+  state: z.enum(['active', 'all']).optional(),
+  targetAccrualSalary: z.coerce.number().nonnegative().optional()
 });
 
 export const payrollWorkLogSchema = z.object({
@@ -610,6 +701,13 @@ export const payrollWorkLogQuerySchema = z.object({
 export const payrollPeriodSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+});
+
+export const payrollPeriodLineUpdateSchema = z.object({
+  reportDays: z.coerce.number().int().min(0).max(31).optional(),
+  calculatedOvertime: z.coerce.number().nonnegative().optional(),
+  handCashFinal: z.coerce.number().nonnegative().optional(),
+  notes: z.string().max(2000).nullable().optional()
 });
 
 export const tipPoolSchema = z.object({
@@ -656,6 +754,19 @@ export const tipAdvanceSchema = z.object({
 export const tipDepartmentOverrideSchema = z.object({
   department: z.enum(['service', 'bar', 'kitchen', 'support', 'other']),
   overrideWeight: z.coerce.number().nonnegative()
+});
+
+export const tipDepartmentRuleSchema = z.object({
+  departmentId: z.string().uuid(),
+  defaultTipWeight: z.coerce.number().nonnegative(),
+  isActive: z.boolean().optional()
+});
+
+export const tipTitleRuleSchema = z.object({
+  titleId: z.string().uuid(),
+  departmentId: z.string().uuid(),
+  tipWeight: z.coerce.number().nonnegative(),
+  isActive: z.boolean().optional()
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),

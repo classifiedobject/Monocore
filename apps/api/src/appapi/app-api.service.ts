@@ -81,9 +81,21 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'module:finance-core.reports.cashflow.read',
       'module:finance-core.cashflow-forecast.manage',
       'module:payroll-core.employee.manage',
+      'module:payroll-core.employee.read',
+      'module:payroll-core.employment.manage',
+      'module:payroll-core.employment.read',
+      'module:payroll-core.compensation.manage',
+      'module:payroll-core.compensation.read',
+      'module:payroll-core.period.manage',
+      'module:payroll-core.period.read',
+      'module:payroll-core.period.post',
+      'module:payroll-core.matrix.manage',
+      'module:payroll-core.matrix.read',
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
       'module:tip-core.manage',
+      'module:tip-core.rules.read',
+      'module:tip-core.rules.manage',
       'module:executive-core.dashboard.read',
       'module:executive-core.alerts.read'
     ]
@@ -1592,7 +1604,13 @@ export class AppApiService {
         });
       }
 
-      const employees: Array<{ id: string; firstName: string; lastName: string }> = [];
+      const employees: Array<{
+        id: string;
+        firstName: string;
+        lastName: string;
+        payrollEmployeeId: string;
+        employmentRecordId: string;
+      }> = [];
       for (let i = 1; i <= 5; i += 1) {
         const employee = await tx.employee.create({
           data: {
@@ -1605,7 +1623,33 @@ export class AppApiService {
             isActive: true
           }
         });
-        employees.push({ id: employee.id, firstName: employee.firstName, lastName: employee.lastName });
+        const payrollEmployee = await tx.payrollEmployee.create({
+          data: {
+            companyId,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            isActive: true
+          }
+        });
+        const employmentRecord = await tx.payrollEmploymentRecord.create({
+          data: {
+            companyId,
+            employeeId: payrollEmployee.id,
+            departmentName: 'Demo',
+            titleName: 'Demo',
+            arrivalDate: new Date(),
+            accrualStartDate: new Date(),
+            status: 'ACTIVE',
+            insuranceStatus: 'PENDING'
+          }
+        });
+        employees.push({
+          id: employee.id,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          payrollEmployeeId: payrollEmployee.id,
+          employmentRecordId: employmentRecord.id
+        });
       }
 
       const payrollPeriod = await tx.payrollPeriod.create({
@@ -1627,7 +1671,8 @@ export class AppApiService {
           data: {
             companyId,
             payrollPeriodId: payrollPeriod.id,
-            employeeId: employee.id,
+            employeeId: employee.payrollEmployeeId,
+            employmentRecordId: employee.employmentRecordId,
             grossAmount: new Prisma.Decimal(gross),
             notes: `DEMO:${tag}`
           }

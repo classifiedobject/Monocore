@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthGuard } from '../common/guards/auth.guard.js';
 import { CompanyRbacGuard } from '../common/guards/company-rbac.guard.js';
@@ -29,6 +29,72 @@ export class TipController {
   @RequirePermissions('module:tip-core.manage')
   saveConfig(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
     return this.tip.upsertTipConfiguration(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Get('rules/organization-view')
+  @RequirePermissions('module:tip-core.rules.read')
+  organizationRules(@Req() req: Request & { companyId: string }) {
+    return this.tip.getOrganizationTipRulesView(req.companyId);
+  }
+
+  @Get('rules/departments')
+  @RequirePermissions('module:tip-core.rules.read')
+  listDepartmentRules(@Req() req: Request & { companyId: string }) {
+    return this.tip.listTipDepartmentRules(req.companyId);
+  }
+
+  @Post('rules/departments')
+  @RequirePermissions('module:tip-core.rules.manage')
+  createDepartmentRule(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.upsertTipDepartmentRule(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('rules/departments/:id')
+  @RequirePermissions('module:tip-core.rules.manage')
+  updateDepartmentRule(@Param('id') id: string, @Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.updateTipDepartmentRule(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('rules/departments/:id/activate')
+  @RequirePermissions('module:tip-core.rules.manage')
+  activateDepartmentRule(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.setTipDepartmentRuleActive(req.user.id, req.companyId, id, true, req.ip, req.get('user-agent'));
+  }
+
+  @Post('rules/departments/:id/deactivate')
+  @RequirePermissions('module:tip-core.rules.manage')
+  deactivateDepartmentRule(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.setTipDepartmentRuleActive(req.user.id, req.companyId, id, false, req.ip, req.get('user-agent'));
+  }
+
+  @Get('rules/titles')
+  @RequirePermissions('module:tip-core.rules.read')
+  listTitleRules(@Req() req: Request & { companyId: string }) {
+    return this.tip.listTipTitleRules(req.companyId);
+  }
+
+  @Post('rules/titles')
+  @RequirePermissions('module:tip-core.rules.manage')
+  createTitleRule(@Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.upsertTipTitleRule(req.user.id, req.companyId, body, req.ip, req.get('user-agent'));
+  }
+
+  @Patch('rules/titles/:id')
+  @RequirePermissions('module:tip-core.rules.manage')
+  updateTitleRule(@Param('id') id: string, @Body() body: unknown, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.updateTipTitleRule(req.user.id, req.companyId, id, body, req.ip, req.get('user-agent'));
+  }
+
+  @Post('rules/titles/:id/activate')
+  @RequirePermissions('module:tip-core.rules.manage')
+  activateTitleRule(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.setTipTitleRuleActive(req.user.id, req.companyId, id, true, req.ip, req.get('user-agent'));
+  }
+
+  @Post('rules/titles/:id/deactivate')
+  @RequirePermissions('module:tip-core.rules.manage')
+  deactivateTitleRule(@Param('id') id: string, @Req() req: Request & { user: { id: string }; companyId: string }) {
+    return this.tip.setTipTitleRuleActive(req.user.id, req.companyId, id, false, req.ip, req.get('user-agent'));
   }
 
   @Get('daily-inputs')

@@ -3,6 +3,20 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma.service.js';
 import { REQUIRED_PERMISSIONS } from '../decorators/permissions.decorator.js';
 
+const LEGACY_PERMISSION_ALIASES: Record<string, string[]> = {
+  'module:payroll-core.employee.read': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.employee.manage': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.employment.read': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.employment.manage': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.compensation.read': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.compensation.manage': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.matrix.read': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.matrix.manage': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.period.read': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.period.manage': ['module:payroll-core.payroll.manage'],
+  'module:payroll-core.period.post': ['module:payroll-core.payroll.post', 'module:payroll-core.payroll.manage']
+};
+
 @Injectable()
 export class CompanyRbacGuard implements CanActivate {
   constructor(
@@ -51,7 +65,11 @@ export class CompanyRbacGuard implements CanActivate {
     }
 
     const userPermissions = new Set(membership.roles.flatMap((r) => r.role.permissions.map((p) => p.permission.key)));
-    const allowed = required.every((perm) => userPermissions.has(perm));
+    const allowed = required.every((perm) => {
+      if (userPermissions.has(perm)) return true;
+      const aliases = LEGACY_PERMISSION_ALIASES[perm] ?? [];
+      return aliases.some((alias) => userPermissions.has(alias));
+    });
     if (!allowed) {
       throw new ForbiddenException('Missing company permissions');
     }

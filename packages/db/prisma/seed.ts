@@ -91,10 +91,22 @@ const companyPermissions = [
   'module:executive-core.dashboard.read',
   'module:executive-core.alerts.read',
   'module:payroll-core.employee.manage',
+  'module:payroll-core.employee.read',
+  'module:payroll-core.employment.manage',
+  'module:payroll-core.employment.read',
+  'module:payroll-core.compensation.manage',
+  'module:payroll-core.compensation.read',
+  'module:payroll-core.period.manage',
+  'module:payroll-core.period.read',
+  'module:payroll-core.period.post',
+  'module:payroll-core.matrix.manage',
+  'module:payroll-core.matrix.read',
   'module:payroll-core.payroll.manage',
   'module:payroll-core.payroll.post',
   'module:payroll-core.tip.manage',
-  'module:tip-core.manage'
+  'module:tip-core.manage',
+  'module:tip-core.rules.read',
+  'module:tip-core.rules.manage'
 ];
 
 const roleTemplates: Array<{
@@ -132,9 +144,21 @@ const roleTemplates: Array<{
       'module:finance-core.reports.cashflow.read',
       'module:finance-core.cashflow-forecast.manage',
       'module:payroll-core.employee.manage',
+      'module:payroll-core.employee.read',
+      'module:payroll-core.employment.manage',
+      'module:payroll-core.employment.read',
+      'module:payroll-core.compensation.manage',
+      'module:payroll-core.compensation.read',
+      'module:payroll-core.period.manage',
+      'module:payroll-core.period.read',
+      'module:payroll-core.period.post',
+      'module:payroll-core.matrix.manage',
+      'module:payroll-core.matrix.read',
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
       'module:tip-core.manage',
+      'module:tip-core.rules.read',
+      'module:tip-core.rules.manage',
       'module:executive-core.dashboard.read',
       'module:executive-core.alerts.read'
     ]

@@ -174,9 +174,29 @@ enum SalaryType {
   HOURLY
 }
 
+enum PayrollGender {
+  FEMALE
+  MALE
+  OTHER
+  UNSPECIFIED
+}
+
+enum PayrollEmploymentStatus {
+  DRAFT
+  ACTIVE
+  EXITED
+}
+
+enum PayrollInsuranceStatus {
+  PENDING
+  INSURED
+  EXITED
+}
+
 enum PayrollPeriodStatus {
   DRAFT
   CALCULATED
+  LOCKED
   POSTED
 }
 
@@ -357,6 +377,10 @@ model Company {
   recipeLines     RecipeLine[]
   salesOrders     SalesOrder[]
   salesOrderLines SalesOrderLine[]
+  payrollEmployees PayrollEmployee[]
+  payrollEmploymentRecords PayrollEmploymentRecord[]
+  payrollCompensationProfiles PayrollCompensationProfile[]
+  payrollCompensationMatrixRows PayrollCompensationMatrixRow[]
   employees       Employee[]
   workLogs        WorkLog[]
   payrollPeriods  PayrollPeriod[]
@@ -364,6 +388,8 @@ model Company {
   tipPools        TipPool[]
   tipDistributions TipDistribution[]
   tipConfigurations TipConfiguration[]
+  tipDepartmentRules TipDepartmentRule[]
+  tipTitleRules      TipTitleRule[]
   tipWeeks         TipWeek[]
   tipDailyInputs   TipDailyInput[]
   tipAdvances      TipAdvance[]
@@ -441,6 +467,8 @@ model CompanyDepartment {
   parent        CompanyDepartment? @relation("company_department_tree", fields: [parentId], references: [id], onDelete: SetNull)
   children      CompanyDepartment[] @relation("company_department_tree")
   titles        CompanyTitle[]
+  tipRules      TipDepartmentRule[]
+  tipTitleRules TipTitleRule[]
 
   @@index([companyId, isActive])
   @@index([companyId, parentId])
@@ -461,6 +489,7 @@ model CompanyTitle {
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   department          CompanyDepartment @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   employees           CompanyEmployeeDirectory[]
+  tipRules            TipTitleRule[]
 
   @@index([companyId, isActive])
   @@index([companyId, departmentId])
@@ -1473,7 +1502,6 @@ model Employee {
   role           CompanyRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
   profitCenter   FinanceProfitCenter? @relation(fields: [profitCenterId], references: [id], onDelete: SetNull)
   workLogs       WorkLog[]
-  payrollLines   PayrollLine[]
   tipDistributions TipDistribution[]
   tipAdvances    TipAdvance[]
   tipWeekDistributions TipWeekDistribution[]
@@ -1481,6 +1509,106 @@ model Employee {
   @@index([companyId, isActive])
   @@index([companyId, roleId])
   @@index([companyId, profitCenterId])
+}
+
+model PayrollEmployee {
+  id                String   @id @default(uuid())
+  companyId         String
+  firstName         String
+  lastName          String
+  identityNumber    String?
+  gender            PayrollGender?
+  birthDate         DateTime?
+  ibanOrBankAccount String?
+  notes             String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employmentRecords PayrollEmploymentRecord[]
+  payrollLines      PayrollLine[]
+
+  @@index([companyId, lastName, firstName])
+  @@index([companyId, identityNumber])
+}
+
+model PayrollEmploymentRecord {
+  id                           String                  @id @default(uuid())
+  companyId                    String
+  employeeId                   String
+  departmentName               String?
+  titleName                    String?
+  arrivalDate                  DateTime
+  accrualStartDate             DateTime
+  sgkStartDate                 DateTime?
+  sgkEntryDocumentPath         String?
+  sgkEntryDocumentName         String?
+  sgkEntryParsedIdentityNumber String?
+  sgkEntryParsedFullName       String?
+  sgkEntryParsedStartDate      DateTime?
+  sgkEntryDocumentVerified     Boolean                 @default(false)
+  exitDate                     DateTime?
+  sgkExitDocumentPath          String?
+  sgkExitDocumentName          String?
+  sgkExitParsedIdentityNumber  String?
+  sgkExitParsedFullName        String?
+  sgkExitParsedExitDate        DateTime?
+  sgkExitDocumentVerified      Boolean                 @default(false)
+  status                       PayrollEmploymentStatus @default(DRAFT)
+  insuranceStatus              PayrollInsuranceStatus  @default(PENDING)
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+  company                      Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee                     PayrollEmployee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  compensationProfiles         PayrollCompensationProfile[]
+  payrollLines                 PayrollLine[]
+
+  @@index([companyId, employeeId])
+  @@index([companyId, status])
+  @@index([companyId, arrivalDate])
+}
+
+model PayrollCompensationProfile {
+  id                    String   @id @default(uuid())
+  companyId             String
+  employmentRecordId    String
+  matrixRowId           String?
+  targetAccrualSalary   Decimal  @db.Decimal(14, 2)
+  officialNetSalary     Decimal  @db.Decimal(14, 2)
+  overtimeEligible      Boolean  @default(true)
+  bonusEligible         Boolean  @default(true)
+  handCashAllowed       Boolean  @default(true)
+  effectiveFrom         DateTime
+  effectiveTo           DateTime?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employmentRecord      PayrollEmploymentRecord     @relation(fields: [employmentRecordId], references: [id], onDelete: Cascade)
+  matrixRow             PayrollCompensationMatrixRow? @relation(fields: [matrixRowId], references: [id], onDelete: SetNull)
+  payrollLines          PayrollLine[]
+
+  @@index([companyId, employmentRecordId])
+  @@index([companyId, isActive])
+  @@index([companyId, effectiveFrom])
+}
+
+model PayrollCompensationMatrixRow {
+  id                    String   @id @default(uuid())
+  companyId             String
+  targetAccrualSalary   Decimal  @db.Decimal(14, 2)
+  officialNetSalary     Decimal  @db.Decimal(14, 2)
+  isActive              Boolean  @default(true)
+  effectiveFrom         DateTime?
+  effectiveTo           DateTime?
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  compensationProfiles  PayrollCompensationProfile[]
+
+  @@index([companyId, targetAccrualSalary])
+  @@index([companyId, isActive])
 }
 
 model WorkLog {
@@ -1498,15 +1626,16 @@ model WorkLog {
 }
 
 model PayrollPeriod {
-  id         String   @id @default(uuid())
+  id         String              @id @default(uuid())
   companyId  String
   startDate  DateTime
   endDate    DateTime
   status     PayrollPeriodStatus @default(DRAFT)
-  totalGross Decimal  @default(0) @db.Decimal(14, 2)
-  totalNet   Decimal  @default(0) @db.Decimal(14, 2)
-  createdAt  DateTime @default(now())
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  totalGross Decimal             @default(0) @db.Decimal(14, 2)
+  totalNet   Decimal             @default(0) @db.Decimal(14, 2)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  company    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   lines      PayrollLine[]
 
   @@index([companyId, status])
@@ -1514,19 +1643,42 @@ model PayrollPeriod {
 }
 
 model PayrollLine {
-  id              String   @id @default(uuid())
-  companyId       String
-  payrollPeriodId String
-  employeeId      String
-  grossAmount     Decimal  @db.Decimal(14, 2)
-  notes           String?
-  createdAt       DateTime @default(now())
-  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
-  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  id                          String   @id @default(uuid())
+  companyId                   String
+  payrollPeriodId             String
+  employeeId                  String
+  employmentRecordId          String
+  departmentName              String?
+  titleName                   String?
+  accrualDays                 Int      @default(0)
+  officialDays                Int      @default(0)
+  reportDays                  Int      @default(0)
+  targetAccrualSalary         Decimal  @default(0) @db.Decimal(14, 2)
+  officialNetSalary           Decimal  @default(0) @db.Decimal(14, 2)
+  accrualPay                  Decimal  @default(0) @db.Decimal(14, 2)
+  officialPay                 Decimal  @default(0) @db.Decimal(14, 2)
+  calculatedBonus             Decimal  @default(0) @db.Decimal(14, 2)
+  calculatedOvertime          Decimal  @default(0) @db.Decimal(14, 2)
+  handCashRecommended         Decimal  @default(0) @db.Decimal(14, 2)
+  handCashFinal               Decimal  @default(0) @db.Decimal(14, 2)
+  bonusAdjustment             Decimal  @default(0) @db.Decimal(14, 2)
+  totalPayable                Decimal  @default(0) @db.Decimal(14, 2)
+  difference                  Decimal  @default(0) @db.Decimal(14, 2)
+  controlOk                   Boolean  @default(false)
+  sourceCompensationProfileId String?
+  grossAmount                 Decimal  @default(0) @db.Decimal(14, 2)
+  notes                       String?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  company                     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollPeriod               PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  employee                    PayrollEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employmentRecord            PayrollEmploymentRecord @relation(fields: [employmentRecordId], references: [id], onDelete: Restrict)
+  sourceCompensationProfile   PayrollCompensationProfile? @relation(fields: [sourceCompensationProfileId], references: [id], onDelete: SetNull)
 
-  @@unique([payrollPeriodId, employeeId])
+  @@unique([payrollPeriodId, employmentRecordId])
   @@index([companyId, payrollPeriodId])
+  @@index([companyId, employeeId])
 }
 
 model TipPool {
@@ -1571,6 +1723,41 @@ model TipConfiguration {
   company                  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId])
+}
+
+model TipDepartmentRule {
+  id               String   @id @default(uuid())
+  companyId        String
+  departmentId     String
+  defaultTipWeight Decimal  @db.Decimal(10, 2)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department       CompanyDepartment @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, departmentId])
+  @@index([companyId, departmentId])
+  @@index([companyId, isActive])
+}
+
+model TipTitleRule {
+  id          String   @id @default(uuid())
+  companyId   String
+  titleId     String
+  departmentId String
+  tipWeight   Decimal  @db.Decimal(10, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title       CompanyTitle @relation(fields: [titleId], references: [id], onDelete: Restrict)
+  department  CompanyDepartment @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, titleId])
+  @@index([companyId, departmentId])
+  @@index([companyId, titleId])
+  @@index([companyId, isActive])
 }
 
 model TipWeek {
