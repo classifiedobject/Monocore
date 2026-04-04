@@ -26,6 +26,7 @@
     "reservations:smoke": "node infra/scripts/reservations-smoke.mjs",
     "executive:smoke": "node infra/scripts/executive-smoke.mjs",
     "payroll:smoke": "node infra/scripts/payroll-smoke.mjs",
+    "tips:rules:smoke": "node infra/scripts/tip-rules-smoke.mjs",
     "company-org:smoke": "node infra/scripts/company-org-smoke.mjs"
   },
   "devDependencies": {

@@ -104,7 +104,9 @@ const companyPermissions = [
   'module:payroll-core.payroll.manage',
   'module:payroll-core.payroll.post',
   'module:payroll-core.tip.manage',
-  'module:tip-core.manage'
+  'module:tip-core.manage',
+  'module:tip-core.rules.read',
+  'module:tip-core.rules.manage'
 ];
 
 const roleTemplates: Array<{
@@ -155,6 +157,8 @@ const roleTemplates: Array<{
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
       'module:tip-core.manage',
+      'module:tip-core.rules.read',
+      'module:tip-core.rules.manage',
       'module:executive-core.dashboard.read',
       'module:executive-core.alerts.read'
     ]

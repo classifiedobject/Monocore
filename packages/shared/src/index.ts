@@ -436,7 +436,7 @@ export const inventoryWarehouseSchema = z.object({
 const inventoryItemBaseSchema = z.object({
   name: z.string().min(2).max(160),
   sku: z.string().max(80).nullable().optional(),
-  code: z.string().max(80).optional(),
+  code: z.string().max(40).nullable().optional(),
   unit: z.string().min(1).max(20).default('piece'),
   brandId: z.string().uuid().nullable().optional(),
   supplierId: z.string().uuid().nullable().optional(),
@@ -449,7 +449,7 @@ const inventoryItemBaseSchema = z.object({
   purchaseVatRate: z.coerce.number().min(0).max(1).default(0.2),
   listPriceExVat: z.coerce.number().nonnegative().nullable().optional(),
   discountRate: z.coerce.number().min(0).max(1).default(0),
-  priceDate: z.string().datetime().or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
+  priceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   sortOrder: z.coerce.number().int().min(0).default(1000),
   lastPurchaseUnitCost: z.coerce.number().nonnegative().nullable().optional(),
   isActive: z.boolean().optional()
@@ -827,6 +827,7 @@ export const payrollCompensationMatrixQuerySchema = z.object({
   state: z.enum(['active', 'all']).optional(),
   targetAccrualSalary: z.coerce.number().nonnegative().optional()
 });
+
 export const payrollWorkLogSchema = z.object({
   employeeId: z.string().uuid(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -895,6 +896,19 @@ export const tipAdvanceSchema = z.object({
 export const tipDepartmentOverrideSchema = z.object({
   department: z.enum(['service', 'bar', 'kitchen', 'support', 'other']),
   overrideWeight: z.coerce.number().nonnegative()
+});
+
+export const tipDepartmentRuleSchema = z.object({
+  departmentId: z.string().uuid(),
+  defaultTipWeight: z.coerce.number().nonnegative(),
+  isActive: z.boolean().optional()
+});
+
+export const tipTitleRuleSchema = z.object({
+  titleId: z.string().uuid(),
+  departmentId: z.string().uuid(),
+  tipWeight: z.coerce.number().nonnegative(),
+  isActive: z.boolean().optional()
 });
 export const languagePackSchema = z.object({
   locale: z.enum(['en', 'tr']),

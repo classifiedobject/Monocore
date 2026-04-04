@@ -34,6 +34,7 @@ import { PayrollService } from './payroll/payroll.service.js';
 import { SgkParserService } from './payroll/sgk-parser.service.js';
 import { TipController } from './tips/tip.controller.js';
 import { TipService } from './tips/tip.service.js';
+import { TipRuleResolverService } from './tips/tip-rule-resolver.service.js';
 import { HealthController } from './health.controller.js';
 
 @Module({
@@ -77,6 +78,7 @@ import { HealthController } from './health.controller.js';
     PayrollService,
     SgkParserService,
     TipService,
+    TipRuleResolverService,
     AuditService,
     RedisService,
     AuthGuard,

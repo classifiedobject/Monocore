@@ -4,11 +4,14 @@ import {
   tipAdvanceSchema,
   tipConfigurationSchema,
   tipDailyInputSchema,
+  tipDepartmentRuleSchema,
   tipDepartmentOverrideSchema,
+  tipTitleRuleSchema,
   tipWeekSchema
 } from '@monocore/shared';
 import { PrismaService } from '../common/prisma.service.js';
 import { AuditService } from '../common/audit.service.js';
+import { TipRuleResolverService } from './tip-rule-resolver.service.js';
 
 type JsonObject = Record<string, Prisma.InputJsonValue | null>;
 type TipReportRow = {
@@ -25,19 +28,26 @@ type TipReportRow = {
 export class TipService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuditService) private readonly audit: AuditService
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(TipRuleResolverService) private readonly tipRuleResolver: TipRuleResolverService
   ) {}
 
   async listEmployees(companyId: string) {
-    const rows = await this.prisma.companyEmployeeDirectory.findMany({
-      where: { companyId },
-      include: {
-        user: true,
-        title: { include: { department: true } }
-      },
-      orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }, { lastName: 'asc' }]
-    });
-    return this.sortDirectoryEmployees(rows);
+    const [rows, maps] = await Promise.all([
+      this.prisma.companyEmployeeDirectory.findMany({
+        where: { companyId },
+        include: {
+          user: true,
+          title: { include: { department: true } }
+        },
+        orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }, { lastName: 'asc' }]
+      }),
+      this.tipRuleResolver.loadCompanyRuleMaps(companyId)
+    ]);
+    return this.sortDirectoryEmployees(rows).map((row) => ({
+      ...row,
+      effectiveTipRule: this.tipRuleResolver.resolveWeight(row.title.departmentId, row.titleId, maps)
+    }));
   }
 
   async getTipConfiguration(companyId: string) {
@@ -76,6 +86,311 @@ export class TipService {
       }
     });
     await this.logCompany(actorUserId, companyId, 'company.tip.config.update', 'tip_configuration', row.id, body, ip, userAgent);
+    return row;
+  }
+
+  async listTipDepartmentRules(companyId: string) {
+    try {
+      return await this.prisma.tipDepartmentRule.findMany({
+        where: { companyId },
+        include: { department: true },
+        orderBy: [{ department: { sortOrder: 'asc' } }, { department: { name: 'asc' } }]
+      });
+    } catch (error) {
+      if (!this.isMissingTipRuleTable(error)) throw error;
+      return [];
+    }
+  }
+
+  async listTipTitleRules(companyId: string) {
+    try {
+      return await this.prisma.tipTitleRule.findMany({
+        where: { companyId },
+        include: {
+          department: true,
+          title: { include: { department: true } }
+        },
+        orderBy: [{ department: { sortOrder: 'asc' } }, { title: { sortOrder: 'asc' } }, { title: { name: 'asc' } }]
+      });
+    } catch (error) {
+      if (!this.isMissingTipRuleTable(error)) throw error;
+      return [];
+    }
+  }
+
+  async getOrganizationTipRulesView(companyId: string) {
+    const [departments, maps, allDepartmentRules, allTitleRules] = await Promise.all([
+      this.prisma.companyDepartment.findMany({
+        where: { companyId },
+        include: {
+          titles: {
+            where: {},
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+          }
+        },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+      }),
+      this.tipRuleResolver.loadCompanyRuleMaps(companyId),
+      this.safeListAllDepartmentRules(companyId),
+      this.safeListAllTitleRules(companyId)
+    ]);
+
+    const allDepartmentRuleByDepartmentId = new Map(allDepartmentRules.map((row) => [row.departmentId, row]));
+    const allTitleRuleByTitleId = new Map(allTitleRules.map((row) => [row.titleId, row]));
+
+    return departments.map((department) => {
+      const departmentRule = allDepartmentRuleByDepartmentId.get(department.id) ?? null;
+      return {
+        id: department.id,
+        name: department.name,
+        isActive: department.isActive,
+        sortOrder: department.sortOrder,
+        departmentRule: departmentRule
+          ? {
+              id: departmentRule.id,
+              defaultTipWeight: departmentRule.defaultTipWeight,
+              isActive: departmentRule.isActive
+            }
+          : null,
+        titles: department.titles.map((title) => {
+          const titleRule = allTitleRuleByTitleId.get(title.id) ?? null;
+          const resolved = this.tipRuleResolver.resolveWeight(department.id, title.id, maps);
+          return {
+            id: title.id,
+            name: title.name,
+            isActive: title.isActive,
+            sortOrder: title.sortOrder,
+            titleRule: titleRule
+              ? {
+                  id: titleRule.id,
+                  tipWeight: titleRule.tipWeight,
+                  isActive: titleRule.isActive
+                }
+              : null,
+            effectiveTipWeight: resolved.effectiveTipWeight,
+            effectiveSource: resolved.source
+          };
+        })
+      };
+    });
+  }
+
+  async upsertTipDepartmentRule(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = tipDepartmentRuleSchema.parse(payload);
+    const department = await this.requireDepartment(companyId, body.departmentId);
+
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipDepartmentRule.upsert({
+        where: { companyId_departmentId: { companyId, departmentId: department.id } },
+        create: {
+          companyId,
+          departmentId: department.id,
+          defaultTipWeight: new Prisma.Decimal(body.defaultTipWeight),
+          isActive: body.isActive ?? true
+        },
+        update: {
+          defaultTipWeight: new Prisma.Decimal(body.defaultTipWeight),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+        },
+        include: { department: true }
+      })
+    );
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.tip.department_rule.upsert',
+      'tip_department_rule',
+      row.id,
+      { departmentId: body.departmentId, defaultTipWeight: body.defaultTipWeight, isActive: row.isActive },
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async updateTipDepartmentRule(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = tipDepartmentRuleSchema.partial().parse(payload);
+    const existing = await this.requireDepartmentRule(companyId, id);
+    if (body.departmentId && body.departmentId !== existing.departmentId) {
+      await this.requireDepartment(companyId, body.departmentId);
+    }
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipDepartmentRule.update({
+        where: { id },
+        data: {
+          ...(body.departmentId !== undefined ? { departmentId: body.departmentId } : {}),
+          ...(body.defaultTipWeight !== undefined ? { defaultTipWeight: new Prisma.Decimal(body.defaultTipWeight) } : {}),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+        },
+        include: { department: true }
+      })
+    );
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.tip.department_rule.update',
+      'tip_department_rule',
+      row.id,
+      { payload: body },
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async setTipDepartmentRuleActive(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    isActive: boolean,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const existing = await this.requireDepartmentRule(companyId, id);
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipDepartmentRule.update({
+        where: { id: existing.id },
+        data: { isActive },
+        include: { department: true }
+      })
+    );
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      isActive ? 'company.tip.department_rule.activate' : 'company.tip.department_rule.deactivate',
+      'tip_department_rule',
+      row.id,
+      { isActive },
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async upsertTipTitleRule(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    const body = tipTitleRuleSchema.parse(payload);
+    const title = await this.requireTitle(companyId, body.titleId);
+    if (title.departmentId !== body.departmentId) {
+      throw new BadRequestException('Title must belong to selected department');
+    }
+
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipTitleRule.upsert({
+        where: { companyId_titleId: { companyId, titleId: title.id } },
+        create: {
+          companyId,
+          titleId: title.id,
+          departmentId: body.departmentId,
+          tipWeight: new Prisma.Decimal(body.tipWeight),
+          isActive: body.isActive ?? true
+        },
+        update: {
+          departmentId: body.departmentId,
+          tipWeight: new Prisma.Decimal(body.tipWeight),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+        },
+        include: {
+          title: { include: { department: true } },
+          department: true
+        }
+      })
+    );
+
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.tip.title_rule.upsert',
+      'tip_title_rule',
+      row.id,
+      { titleId: body.titleId, departmentId: body.departmentId, tipWeight: body.tipWeight, isActive: row.isActive },
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async updateTipTitleRule(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    payload: unknown,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const body = tipTitleRuleSchema.partial().parse(payload);
+    const existing = await this.requireTitleRule(companyId, id);
+    const nextTitleId = body.titleId ?? existing.titleId;
+    const nextDepartmentId = body.departmentId ?? existing.departmentId;
+    const title = await this.requireTitle(companyId, nextTitleId);
+    if (title.departmentId !== nextDepartmentId) {
+      throw new BadRequestException('Title must belong to selected department');
+    }
+
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipTitleRule.update({
+        where: { id },
+        data: {
+          ...(body.titleId !== undefined ? { titleId: body.titleId } : {}),
+          ...(body.departmentId !== undefined ? { departmentId: body.departmentId } : {}),
+          ...(body.tipWeight !== undefined ? { tipWeight: new Prisma.Decimal(body.tipWeight) } : {}),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {})
+        },
+        include: {
+          title: { include: { department: true } },
+          department: true
+        }
+      })
+    );
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      'company.tip.title_rule.update',
+      'tip_title_rule',
+      row.id,
+      { payload: body },
+      ip,
+      userAgent
+    );
+    return row;
+  }
+
+  async setTipTitleRuleActive(
+    actorUserId: string,
+    companyId: string,
+    id: string,
+    isActive: boolean,
+    ip?: string,
+    userAgent?: string
+  ) {
+    const existing = await this.requireTitleRule(companyId, id);
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipTitleRule.update({
+        where: { id: existing.id },
+        data: { isActive },
+        include: {
+          title: { include: { department: true } },
+          department: true
+        }
+      })
+    );
+    await this.logCompany(
+      actorUserId,
+      companyId,
+      isActive ? 'company.tip.title_rule.activate' : 'company.tip.title_rule.deactivate',
+      'tip_title_rule',
+      row.id,
+      { isActive },
+      ip,
+      userAgent
+    );
     return row;
   }
 
@@ -286,13 +601,16 @@ export class TipService {
     const totalPoolGross = this.round2(sums.netService + sums.cashTips + sums.visaTipsNet);
     const totalPoolNet = this.round2(totalPoolGross - sums.expenseAdjustments);
 
-    const overrideMap = new Map(overrides.map((row) => [row.department, Number(row.overrideWeight)]));
+    const [ruleMaps, overrideMap] = await Promise.all([
+      this.tipRuleResolver.loadCompanyRuleMaps(companyId),
+      Promise.resolve(new Map(overrides.map((row) => [row.department, Number(row.overrideWeight)])))
+    ]);
     const weights = employees.map((employee) => {
-      const base = Number(employee.title.tipWeight);
+      const resolved = this.tipRuleResolver.resolveWeight(employee.title.departmentId, employee.titleId, ruleMaps);
       const override = overrideMap.get(employee.title.department.tipDepartment);
       return {
         directoryEmployeeId: employee.id,
-        weight: override !== undefined ? override : base
+        weight: override !== undefined ? override : resolved.effectiveTipWeight
       };
     });
 
@@ -623,6 +941,81 @@ export class TipService {
     });
     if (!row || row.companyId !== companyId) throw new NotFoundException('Directory employee not found');
     return row;
+  }
+
+  private async requireDepartment(companyId: string, id: string) {
+    const row = await this.prisma.companyDepartment.findUnique({ where: { id } });
+    if (!row || row.companyId !== companyId) throw new NotFoundException('Department not found');
+    return row;
+  }
+
+  private async requireTitle(companyId: string, id: string) {
+    const row = await this.prisma.companyTitle.findUnique({
+      where: { id },
+      include: { department: true }
+    });
+    if (!row || row.companyId !== companyId) throw new NotFoundException('Title not found');
+    return row;
+  }
+
+  private async requireDepartmentRule(companyId: string, id: string) {
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipDepartmentRule.findUnique({
+        where: { id },
+        include: { department: true }
+      })
+    );
+    if (!row || row.companyId !== companyId) throw new NotFoundException('Department tip rule not found');
+    return row;
+  }
+
+  private async requireTitleRule(companyId: string, id: string) {
+    const row = await this.withTipRuleTableOrThrow(() =>
+      this.prisma.tipTitleRule.findUnique({
+        where: { id },
+        include: {
+          title: { include: { department: true } },
+          department: true
+        }
+      })
+    );
+    if (!row || row.companyId !== companyId) throw new NotFoundException('Title tip rule not found');
+    return row;
+  }
+
+  private async safeListAllDepartmentRules(companyId: string) {
+    try {
+      return await this.prisma.tipDepartmentRule.findMany({ where: { companyId } });
+    } catch (error) {
+      if (!this.isMissingTipRuleTable(error)) throw error;
+      return [];
+    }
+  }
+
+  private async safeListAllTitleRules(companyId: string) {
+    try {
+      return await this.prisma.tipTitleRule.findMany({ where: { companyId } });
+    } catch (error) {
+      if (!this.isMissingTipRuleTable(error)) throw error;
+      return [];
+    }
+  }
+
+  private isMissingTipRuleTable(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2021' &&
+      /TipDepartmentRule|TipTitleRule/.test(error.message)
+    );
+  }
+
+  private async withTipRuleTableOrThrow<T>(task: () => Promise<T>) {
+    try {
+      return await task();
+    } catch (error) {
+      if (!this.isMissingTipRuleTable(error)) throw error;
+      throw new BadRequestException('Tip kuralları için veritabanı migrationı eksik. Lütfen pnpm db:migrate çalıştırın.');
+    }
   }
 
   private async requireTipWeek(companyId: string, id: string) {

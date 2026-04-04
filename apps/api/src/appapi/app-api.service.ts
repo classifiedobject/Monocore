@@ -96,6 +96,8 @@ const ROLE_TEMPLATES: RoleTemplate[] = [
       'module:payroll-core.payroll.manage',
       'module:payroll-core.payroll.post',
       'module:tip-core.manage',
+      'module:tip-core.rules.read',
+      'module:tip-core.rules.manage',
       'module:executive-core.dashboard.read',
       'module:executive-core.alerts.read'
     ]
@@ -996,6 +998,68 @@ export class AppApiService {
     }
   }
 
+  async reorderOrgTitles(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
+    try {
+      const body = companyTitleReorderSchema.parse(payload);
+      const department = await this.prisma.companyDepartment.findUnique({
+        where: { id: body.departmentId },
+        select: { id: true, companyId: true }
+      });
+      if (!department || department.companyId !== companyId) {
+        throw new ForbiddenException('Department is not owned by tenant');
+      }
+
+      const existing = await this.prisma.companyTitle.findMany({
+        where: { companyId, departmentId: body.departmentId },
+        select: { id: true }
+      });
+
+      const uniqueIds = new Set(body.ids);
+      if (uniqueIds.size !== body.ids.length) {
+        throw new BadRequestException('Title reorder payload contains duplicate ids');
+      }
+
+      const existingIds = new Set(existing.map((row) => row.id));
+      if (existing.length !== body.ids.length || body.ids.some((id) => !existingIds.has(id))) {
+        throw new BadRequestException('Title reorder payload must include all department titles exactly once');
+      }
+
+      await this.prisma.$transaction(
+        body.ids.map((id, index) =>
+          this.prisma.companyTitle.update({
+            where: { id },
+            data: { sortOrder: (index + 1) * 100 }
+          })
+        )
+      );
+
+      await this.audit.logCompany({
+        actorUserId,
+        companyId,
+        action: 'company.org.title.reorder',
+        entityType: 'company_title',
+        entityId: undefined,
+        metadata: { departmentId: body.departmentId, ids: body.ids, success: true },
+        ip,
+        userAgent
+      });
+
+      return this.listOrgHierarchy(companyId);
+    } catch (error) {
+      await this.audit.logCompany({
+        actorUserId,
+        companyId,
+        action: 'company.org.title.reorder',
+        entityType: 'company_title',
+        entityId: undefined,
+        metadata: { payload: this.safeJson(payload), success: false, reason: this.errorReason(error) },
+        ip,
+        userAgent
+      });
+      throw error;
+    }
+  }
+
   async updateOrgTitle(actorUserId: string, companyId: string, titleId: string, payload: unknown, ip?: string, userAgent?: string) {
     try {
       const body = companyTitleSchema.partial().parse(payload);
@@ -1120,68 +1184,6 @@ export class AppApiService {
         entityType: 'company_title',
         entityId: titleId,
         metadata: { success: false, reason: this.errorReason(error) },
-        ip,
-        userAgent
-      });
-      throw error;
-    }
-  }
-
-  async reorderOrgTitles(actorUserId: string, companyId: string, payload: unknown, ip?: string, userAgent?: string) {
-    try {
-      const body = companyTitleReorderSchema.parse(payload);
-      const department = await this.prisma.companyDepartment.findUnique({
-        where: { id: body.departmentId },
-        select: { id: true, companyId: true }
-      });
-      if (!department || department.companyId !== companyId) {
-        throw new ForbiddenException('Department is not owned by tenant');
-      }
-
-      const existing = await this.prisma.companyTitle.findMany({
-        where: { companyId, departmentId: body.departmentId },
-        select: { id: true }
-      });
-
-      const uniqueIds = new Set(body.ids);
-      if (uniqueIds.size !== body.ids.length) {
-        throw new BadRequestException('Title reorder payload contains duplicate ids');
-      }
-
-      const existingIds = new Set(existing.map((row) => row.id));
-      if (existing.length !== body.ids.length || body.ids.some((id) => !existingIds.has(id))) {
-        throw new BadRequestException('Title reorder payload must include all department titles exactly once');
-      }
-
-      await this.prisma.$transaction(
-        body.ids.map((id, index) =>
-          this.prisma.companyTitle.update({
-            where: { id },
-            data: { sortOrder: (index + 1) * 100 }
-          })
-        )
-      );
-
-      await this.audit.logCompany({
-        actorUserId,
-        companyId,
-        action: 'company.org.title.reorder',
-        entityType: 'company_title',
-        entityId: undefined,
-        metadata: { departmentId: body.departmentId, ids: body.ids, success: true },
-        ip,
-        userAgent
-      });
-
-      return this.listOrgHierarchy(companyId);
-    } catch (error) {
-      await this.audit.logCompany({
-        actorUserId,
-        companyId,
-        action: 'company.org.title.reorder',
-        entityType: 'company_title',
-        entityId: undefined,
-        metadata: { payload: this.safeJson(payload), success: false, reason: this.errorReason(error) },
         ip,
         userAgent
       });
@@ -1759,7 +1761,13 @@ export class AppApiService {
         });
       }
 
-      const employees: Array<{ id: string; firstName: string; lastName: string; employmentRecordId: string }> = [];
+      const employees: Array<{
+        id: string;
+        firstName: string;
+        lastName: string;
+        payrollEmployeeId: string;
+        employmentRecordId: string;
+      }> = [];
       for (let i = 1; i <= 5; i += 1) {
         const employee = await tx.employee.create({
           data: {
@@ -1772,19 +1780,31 @@ export class AppApiService {
             isActive: true
           }
         });
-        const employmentRecord = await tx.payrollEmploymentRecord.findFirst({
-          where: { companyId, employeeId: employee.id },
-          orderBy: { createdAt: 'asc' }
+        const payrollEmployee = await tx.payrollEmployee.create({
+          data: {
+            companyId,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            isActive: true
+          }
         });
-
-        if (!employmentRecord) {
-          throw new Error(`Payroll employment record missing for demo employee ${employee.id}`);
-        }
-
+        const employmentRecord = await tx.payrollEmploymentRecord.create({
+          data: {
+            companyId,
+            employeeId: payrollEmployee.id,
+            departmentName: 'Demo',
+            titleName: 'Demo',
+            arrivalDate: new Date(),
+            accrualStartDate: new Date(),
+            status: 'ACTIVE',
+            insuranceStatus: 'PENDING'
+          }
+        });
         employees.push({
           id: employee.id,
           firstName: employee.firstName,
           lastName: employee.lastName,
+          payrollEmployeeId: payrollEmployee.id,
           employmentRecordId: employmentRecord.id
         });
       }
@@ -1808,7 +1828,7 @@ export class AppApiService {
           data: {
             companyId,
             payrollPeriodId: payrollPeriod.id,
-            employeeId: employee.id,
+            employeeId: employee.payrollEmployeeId,
             employmentRecordId: employee.employmentRecordId,
             grossAmount: new Prisma.Decimal(gross),
             notes: `DEMO:${tag}`
